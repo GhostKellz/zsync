@@ -1,11 +1,12 @@
 //! Zsync v0.1 - GreenThreadsIo Implementation
-//! Stack-swapping green threads for x86_64 Linux
-//! Uses io_uring for high-performance async I/O
+//! Cross-platform stack-swapping green threads
+//! Uses platform-specific async I/O (io_uring on Linux, kqueue on macOS)
 
 const std = @import("std");
 const builtin = @import("builtin");
-const arch = @import("arch/x86_64.zig");
-const platform = @import("platform/linux.zig");
+const platform_mod = @import("platform.zig");
+const arch = platform_mod.Arch;
+const platform = platform_mod.Platform;
 const compat = @import("compat/async_builtins.zig");
 const registry = @import("async_registry.zig");
 const io_interface = @import("io_v2.zig");
@@ -315,6 +316,8 @@ pub const GreenThreadsIo = struct {
         return Future{
             .ptr = future_impl,
             .vtable = &greenthread_future_vtable,
+            .state = std.atomic.Value(Future.State).init(.pending),
+            .wakers = std.ArrayList(Future.Waker).init(self.allocator),
         };
     }
 
@@ -501,8 +504,9 @@ const greenthread_future_vtable = Future.VTable{
     .deinit_fn = greenthreadDeinit,
 };
 
-fn greenthreadAwait(ptr: *anyopaque, io: Io) !void {
+fn greenthreadAwait(ptr: *anyopaque, io: Io, options: Future.AwaitOptions) !void {
     _ = io;
+    _ = options;
     const future: *GreenThreadFuture = @ptrCast(@alignCast(ptr));
     
     // Wait for thread to complete
@@ -513,8 +517,9 @@ fn greenthreadAwait(ptr: *anyopaque, io: Io) !void {
     return future.scheduler.threads.items[future.thread_id].result;
 }
 
-fn greenthreadCancel(ptr: *anyopaque, io: Io) !void {
+fn greenthreadCancel(ptr: *anyopaque, io: Io, options: Future.CancelOptions) !void {
     _ = io;
+    _ = options;
     const future: *GreenThreadFuture = @ptrCast(@alignCast(ptr));
     
     // Mark thread as completed with cancellation

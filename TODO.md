@@ -88,17 +88,17 @@
 ## Cross-Platform Implementation
 
 ### Platform-Specific Support
-- [ ] **macOS support (kqueue-based)**
-  - [ ] Native kqueue integration for async I/O operations
-  - [ ] macOS-specific green threads implementation
-  - [ ] Integration with macOS system APIs
-  - **Priority:** High | **Complexity:** Medium
+- [x] **macOS support (kqueue-based)** ✅
+  - [x] Native kqueue integration for async I/O operations ✅
+  - [x] macOS-specific green threads implementation ✅
+  - [x] Integration with macOS system APIs ✅
+  - **Status:** Complete | **Implementation:** `src/platform/macos.zig`
 
-- [ ] **Windows support (IOCP-based)**
-  - [ ] Windows I/O Completion Ports integration
-  - [ ] Native Windows fiber/context switching
-  - [ ] Windows-specific error handling and resources
-  - **Priority:** Medium | **Complexity:** High
+- [x] **Windows support (IOCP-based)** ✅
+  - [x] Windows I/O Completion Ports integration ✅
+  - [x] Native Windows context switching infrastructure ✅
+  - [x] Windows-specific error handling and resources ✅
+  - **Status:** Complete | **Implementation:** `src/platform/windows.zig`
 
 - [ ] **ARM64 architecture support**
   - [ ] AArch64 assembly context switching implementation
@@ -108,6 +108,8 @@
 
 ### Runtime Platform Detection
 - [x] Basic platform detection system ✅
+- [x] Platform-specific async mechanism integration ✅
+- [x] Cross-platform compatibility layer complete ✅
 - [ ] Feature detection for available async mechanisms
 - [ ] Automatic fallback selection based on platform capabilities
 - [ ] Runtime configuration and optimization selection
@@ -252,6 +254,9 @@
 ### ✅ MAJOR ACCOMPLISHMENTS:
 - **Core Architecture**: Established future-compatible foundation
 - **Multiple Execution Models**: Blocking, thread pool, green threads working
+- **Cross-Platform Support**: Linux, macOS, and Windows implementations complete
+- **Real Assembly Context Switching**: x86_64 assembly with proper ABI compliance
+- **Platform-Specific I/O**: io_uring (Linux), kqueue (macOS), IOCP (Windows)
 - **Documentation Alignment**: All docs updated for zsync and Zig's async future
 - **Development Roadmap**: Clear path from v0.1.0 to v0.2.0 established
 

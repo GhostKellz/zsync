@@ -61,7 +61,7 @@ fn testAllExecutionModels() !void {
         try Zsync.saveData(allocator, greenthreads_io.io(), test_data);
         std.debug.print("✅ GreenThreadsIo test completed!\n", .{});
     } else {
-        std.debug.print("⚠️  GreenThreadsIo skipped (requires x86_64 Linux)\n");
+        std.debug.print("⚠️  GreenThreadsIo skipped (requires x86_64 Linux)\n", .{});
     }
     
     // 4. StacklessIo - WASM compatible

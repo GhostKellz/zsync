@@ -484,7 +484,8 @@ pub const ThreadPoolIo = struct {
         return Future{
             .ptr = future_impl,
             .vtable = &threadpool_future_vtable,
-            .completed = std.atomic.Value(bool).init(false),
+            .state = std.atomic.Value(Future.State).init(.pending),
+            .wakers = std.ArrayList(Future.Waker).init(self.allocator),
         };
     }
 
@@ -616,8 +617,9 @@ const threadpool_future_vtable = Future.VTable{
     .deinit_fn = threadpoolDeinit,
 };
 
-fn threadpoolAwait(ptr: *anyopaque, io: Io) !void {
+fn threadpoolAwait(ptr: *anyopaque, io: Io, options: Future.AwaitOptions) !void {
     _ = io;
+    _ = options;
     const future: *ThreadPoolFuture = @ptrCast(@alignCast(ptr));
     
     if (future.completed.load(.acquire)) {
@@ -634,8 +636,9 @@ fn threadpoolAwait(ptr: *anyopaque, io: Io) !void {
     return future.result;
 }
 
-fn threadpoolCancel(ptr: *anyopaque, io: Io) !void {
+fn threadpoolCancel(ptr: *anyopaque, io: Io, options: Future.CancelOptions) !void {
     _ = io;
+    _ = options;
     const future: *ThreadPoolFuture = @ptrCast(@alignCast(ptr));
     
     // For simplicity, we can't cancel tasks already submitted to thread pool

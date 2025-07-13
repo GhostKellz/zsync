@@ -47,7 +47,7 @@ pub fn fileProcessingPipeline(io: Zsync.Io, input_files: []const []const u8) !vo
     var futures = std.ArrayList(Zsync.Future).init(std.heap.page_allocator);
     defer {
         for (futures.items) |*future| {
-            future.cancel(io) catch {};
+            future.cancel(io, .{}) catch {};
             future.deinit();
         }
         futures.deinit();
@@ -95,7 +95,7 @@ pub fn databaseExample(io: Zsync.Io) !void {
     var query_futures = std.ArrayList(Zsync.Future).init(std.heap.page_allocator);
     defer {
         for (query_futures.items) |*future| {
-            future.cancel(io) catch {};
+            future.cancel(io, .{}) catch {};
             future.deinit();
         }
         query_futures.deinit();
@@ -240,7 +240,7 @@ pub fn realWorldApp(io: Zsync.Io) !void {
     var operations = std.ArrayList(Zsync.Future).init(std.heap.page_allocator);
     defer {
         for (operations.items) |*future| {
-            future.cancel(io) catch {};
+            future.cancel(io, .{}) catch {};
             future.deinit();
         }
         operations.deinit();

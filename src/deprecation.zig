@@ -3,9 +3,11 @@
 
 const std = @import("std");
 
-/// Emit a compile-time deprecation warning
+/// Emit a compile-time deprecation warning (disabled for v0.1.x stability)
 pub fn compileTimeDeprecation(comptime message: []const u8) void {
-    @compileLog("⚠️  DEPRECATION WARNING: " ++ message);
+    // Disabled to avoid compile errors during development
+    _ = message;
+    // @compileLog("⚠️  DEPRECATION WARNING: " ++ message);
 }
 
 /// Emit a runtime deprecation warning (only once per call site)

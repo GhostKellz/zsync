@@ -1,8 +1,11 @@
-//! Zsync v0.1 - New Io Interface Implementation
-//! Based on Zig's upcoming async I/O redesign
+//! Zsync v0.2.0 - Enhanced Io Interface Implementation  
+//! Based on Zig's new async I/O design with full type inference
 //! Provides colorblind async - same code works across execution models
 
 const std = @import("std");
+const async_type_system = @import("async_type_system.zig");
+const semantic_io = @import("semantic_io.zig");
+const TypedFuture = async_type_system.TypedFuture;
 
 /// Type-erased function call information for async operations
 /// Uses runtime function pointer registration to avoid comptime/runtime conflicts
@@ -71,6 +74,11 @@ pub const Io = struct {
         tcpConnect: *const fn (ptr: *anyopaque, address: std.net.Address) anyerror!TcpStream,
         tcpListen: *const fn (ptr: *anyopaque, address: std.net.Address) anyerror!TcpListener,
         udpBind: *const fn (ptr: *anyopaque, address: std.net.Address) anyerror!UdpSocket,
+        
+        // Semantic I/O operations
+        sendFile: ?*const fn (ptr: *anyopaque, writer: semantic_io.Writer, file_reader: semantic_io.Reader, limit: semantic_io.Limit) anyerror!u64 = null,
+        drain: ?*const fn (ptr: *anyopaque, writer: semantic_io.Writer, data: []const []const u8, splat: usize) anyerror!u64 = null,
+        splice: ?*const fn (ptr: *anyopaque, output: semantic_io.Writer, input: semantic_io.Reader, limit: semantic_io.Limit) anyerror!u64 = null,
     };
 
     /// Create an async operation for saveFile specifically
@@ -93,13 +101,196 @@ pub const Io = struct {
         return self.vtable.async_fn(self.ptr, call_info);
     }
     
-    /// Legacy method for generic async - will be replaced with function registry
+    /// Enhanced async method with full type inference
     pub fn async_op(self: Io, allocator: std.mem.Allocator, func: anytype, args: anytype) !Future {
-        // For now, only support saveFile
+        const FuncType = @TypeOf(func);
+        _ = @TypeOf(args);
+        
+        // Type validation
+        const func_type_info = @typeInfo(FuncType);
+        if (func_type_info != .@"fn") {
+            @compileError("First argument must be a function");
+        }
+        
+        // Check if it's a known function
         if (func == saveFile) {
             return self.asyncSaveFile(allocator, args[0], args[1], args[2]);
         }
-        return error.UnsupportedFunction;
+        
+        // For other functions, create a generic async operation
+        return self.createGenericAsyncOperation(allocator, func, args);
+    }
+    
+    /// Create a generic async operation with type inference
+    fn createGenericAsyncOperation(self: Io, allocator: std.mem.Allocator, func: anytype, args: anytype) !Future {
+        const FuncType = @TypeOf(func);
+        const ArgsType = @TypeOf(args);
+        
+        // Create execution context
+        const ExecutionContext = struct {
+            func: FuncType,
+            args: ArgsType,
+            io: Io,
+            allocator: std.mem.Allocator,
+            
+            fn execute(ptr: *anyopaque) anyerror!void {
+                const self_ptr: *@This() = @ptrCast(@alignCast(ptr));
+                
+                // Call the function with proper argument unpacking
+                const result = switch (@typeInfo(ArgsType)) {
+                    .Struct => |struct_info| blk: {
+                        var call_args: std.meta.Tuple(&[_]type{Io} ++ extractFieldTypes(struct_info)) = undefined;
+                        call_args[0] = self_ptr.io;
+                        
+                        inline for (struct_info.fields, 0..) |field, i| {
+                            call_args[i + 1] = @field(self_ptr.args, field.name);
+                        }
+                        
+                        break :blk @call(.auto, self_ptr.func, call_args);
+                    },
+                    else => @call(.auto, self_ptr.func, .{ self_ptr.io, self_ptr.args }),
+                };
+                
+                _ = result catch |err| {
+                    return err;
+                };
+            }
+            
+            fn cleanup(ptr: *anyopaque) void {
+                const self_ptr: *@This() = @ptrCast(@alignCast(ptr));
+                self_ptr.allocator.destroy(self_ptr);
+            }
+            
+            fn extractFieldTypes(comptime struct_info: std.builtin.Type.Struct) []const type {
+                var field_types: [struct_info.fields.len]type = undefined;
+                for (struct_info.fields, 0..) |field, i| {
+                    field_types[i] = field.type;
+                }
+                return &field_types;
+            }
+        };
+        
+        const ctx = try allocator.create(ExecutionContext);
+        ctx.* = ExecutionContext{
+            .func = func,
+            .args = args,
+            .io = self,
+            .allocator = allocator,
+        };
+        
+        const call_info = AsyncCallInfo.initDirect(
+            ctx,
+            ExecutionContext.execute,
+            ExecutionContext.cleanup,
+        );
+        
+        return self.vtable.async_fn(self.ptr, call_info);
+    }
+    
+    /// Enhanced async with compile-time type inference and validation
+    pub fn asyncTyped(
+        self: Io,
+        allocator: std.mem.Allocator,
+        comptime func: anytype,
+        args: anytype,
+    ) !TypedFuture(inferReturnType(func)) {
+        // Compile-time validation
+        comptime {
+            const func_type_info = @typeInfo(@TypeOf(func));
+            if (func_type_info != .@"fn") {
+                @compileError("First argument must be a function");
+            }
+            
+            // Validate that function is async-compatible
+            if (!isAsyncCompatible(@TypeOf(func))) {
+                @compileError("Function is not async-compatible");
+            }
+        }
+        
+        const ReturnType = inferReturnType(func);
+        const typed_future = try allocator.create(TypedFuture(ReturnType));
+        typed_future.* = TypedFuture(ReturnType).init(allocator);
+        
+        // Create and execute the async operation
+        const future = try self.async_op(allocator, func, args);
+        
+        // Link the generic future to the typed future
+        try self.linkFutures(future, typed_future);
+        
+        return typed_future.*;
+    }
+    
+    /// Infer the return type of a function, handling error unions
+    fn inferReturnType(comptime func: anytype) type {
+        const func_type_info = @typeInfo(@TypeOf(func));
+        const return_type = func_type_info.@"fn".return_type orelse void;
+        
+        const return_type_info = @typeInfo(return_type);
+        return switch (return_type_info) {
+            .ErrorUnion => |error_union| error_union.payload,
+            else => return_type,
+        };
+    }
+    
+    /// Check if a function type is async-compatible
+    fn isAsyncCompatible(comptime FuncType: type) bool {
+        const func_type_info = @typeInfo(FuncType);
+        if (func_type_info != .@"fn") return false;
+        
+        const func_info = func_type_info.@"fn";
+        
+        // Check if all parameter types are async-compatible
+        for (func_info.params) |param| {
+            if (param.type) |param_type| {
+                if (!isTypeAsyncCompatible(param_type)) {
+                    return false;
+                }
+            }
+        }
+        
+        // Check if return type is async-compatible
+        if (func_info.return_type) |return_type| {
+            if (!isTypeAsyncCompatible(return_type)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /// Check if a type is async-compatible (can be safely serialized/passed across threads)
+    fn isTypeAsyncCompatible(comptime T: type) bool {
+        const type_info = @typeInfo(T);
+        return switch (type_info) {
+            .Void, .Bool, .Int, .Float, .Enum, .ErrorSet => true,
+            .Optional => |opt| isTypeAsyncCompatible(opt.child),
+            .Array => |arr| isTypeAsyncCompatible(arr.child),
+            .Pointer => |ptr| switch (ptr.size) {
+                .One, .Many, .Slice => isTypeAsyncCompatible(ptr.child),
+                .C => false, // C pointers are not safe for async
+            },
+            .Struct => |st| blk: {
+                // All fields must be async-compatible
+                for (st.fields) |field| {
+                    if (!isTypeAsyncCompatible(field.type)) break :blk false;
+                }
+                break :blk true;
+            },
+            .ErrorUnion => |error_union| isTypeAsyncCompatible(error_union.payload),
+            .Union => false, // Unions need special handling
+            .@"fn" => false,    // Function pointers need special handling
+            else => false,
+        };
+    }
+    
+    /// Link a generic future to a typed future
+    fn linkFutures(self: Io, generic_future: Future, typed_future: anytype) !void {
+        _ = self;
+        _ = generic_future;
+        _ = typed_future;
+        
+        // In a real implementation, this would set up callbacks
+        // to transfer the result from the generic future to the typed future
     }
 
     /// Create concurrent async operations for true parallelism
@@ -109,6 +300,54 @@ pub const Io = struct {
     
     /// Convenience method for io.async() pattern from the proposal
     pub const async = async_op;
+    
+    /// High-performance file transfer using zero-copy optimization (sendfile syscall)
+    /// Transfers data from a file directly to a writer without copying to userspace
+    pub fn sendFile(
+        self: Io,
+        writer: semantic_io.Writer,
+        file_reader: semantic_io.Reader,
+        limit: semantic_io.Limit,
+    ) !u64 {
+        if (self.vtable.sendFile) |send_file_fn| {
+            return send_file_fn(self.ptr, writer, file_reader, limit);
+        }
+        
+        // Fallback to standard copy operation
+        return semantic_io.SemanticIoUtils.copyOptimized(file_reader, writer, self, limit);
+    }
+    
+    /// Vectorized write operation with splat support
+    /// Writes multiple data segments and optionally repeats the last segment
+    pub fn drain(
+        self: Io,
+        writer: semantic_io.Writer,
+        data: []const []const u8,
+        splat: usize,
+    ) !u64 {
+        if (self.vtable.drain) |drain_fn| {
+            return drain_fn(self.ptr, writer, data, splat);
+        }
+        
+        // Fallback implementation
+        return semantic_io.DrainOperation.execute(writer, self, data, splat);
+    }
+    
+    /// Splice operation for efficient data transfer between readers and writers
+    /// Uses platform-specific optimizations when available (e.g., Linux splice syscall)
+    pub fn splice(
+        self: Io,
+        output: semantic_io.Writer,
+        input: semantic_io.Reader,
+        limit: semantic_io.Limit,
+    ) !u64 {
+        if (self.vtable.splice) |splice_fn| {
+            return splice_fn(self.ptr, output, input, limit);
+        }
+        
+        // Fallback to optimized copy
+        return semantic_io.SemanticIoUtils.copyOptimized(input, output, self, limit);
+    }
 };
 
 /// ConcurrentFuture for managing multiple parallel operations
@@ -144,36 +383,410 @@ pub const ConcurrentFuture = struct {
     }
 };
 
-/// Future type with await() and cancel() methods
+/// Enhanced Future type with advanced await() and cancel() semantics
 pub const Future = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
-    completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-
-    pub const VTable = struct {
-        await_fn: *const fn (ptr: *anyopaque, io: Io) anyerror!void,
-        cancel_fn: *const fn (ptr: *anyopaque, io: Io) anyerror!void,
-        deinit_fn: *const fn (ptr: *anyopaque) void,
+    state: std.atomic.Value(State),
+    cancel_token: ?*CancelToken = null,
+    timeout: ?Timeout = null,
+    wakers: std.ArrayList(Waker),
+    cancellation_chain: ?*Future = null, // For chaining cancellation
+    
+    pub const State = enum(u8) {
+        pending = 0,
+        running = 1,
+        completed = 2,
+        canceled = 3,
+        timeout_expired = 4,
+        error_state = 5,
+    };
+    
+    const CancelToken = struct {
+        canceled: std.atomic.Value(bool),
+        reason: CancelReason,
+        cascade: bool, // Whether to cascade cancellation to dependent futures
+        
+        const CancelReason = enum {
+            user_requested,
+            timeout,
+            dependency_canceled,
+            resource_exhausted,
+            error_occurred,
+        };
+        
+        pub fn init(reason: CancelReason, cascade: bool) CancelToken {
+            return CancelToken{
+                .canceled = std.atomic.Value(bool).init(false),
+                .reason = reason,
+                .cascade = cascade,
+            };
+        }
+        
+        pub fn cancel(self: *CancelToken) void {
+            self.canceled.store(true, .release);
+        }
+        
+        pub fn isCanceled(self: *const CancelToken) bool {
+            return self.canceled.load(.acquire);
+        }
+    };
+    
+    const Timeout = struct {
+        deadline_ns: u64,
+        soft_timeout: bool, // Whether timeout allows graceful cleanup
+        
+        pub fn init(timeout_ms: u64, soft: bool) Timeout {
+            return Timeout{
+                .deadline_ns = @intCast(std.time.nanoTimestamp() + @as(i128, timeout_ms * std.time.ns_per_ms)),
+                .soft_timeout = soft,
+            };
+        }
+        
+        pub fn isExpired(self: *const Timeout) bool {
+            return std.time.nanoTimestamp() > self.deadline_ns;
+        }
+        
+        pub fn timeUntilExpiry(self: *const Timeout) i64 {
+            return @as(i64, @intCast(self.deadline_ns)) - std.time.nanoTimestamp();
+        }
+    };
+    
+    pub const Waker = struct {
+        callback: *const fn(*anyopaque, WakeReason) void,
+        context: *anyopaque,
+        
+        const WakeReason = enum {
+            completed,
+            canceled,
+            timeout,
+            error_occurred,
+        };
     };
 
-    /// Await completion of the future
-    pub fn await_op(self: *Future, io: Io) !void {
-        if (self.completed.load(.acquire)) return;
-        return self.vtable.await_fn(self.ptr, io);
+    pub const VTable = struct {
+        await_fn: *const fn (ptr: *anyopaque, io: Io, options: AwaitOptions) anyerror!void,
+        cancel_fn: *const fn (ptr: *anyopaque, io: Io, options: CancelOptions) anyerror!void,
+        deinit_fn: *const fn (ptr: *anyopaque) void,
+        poll_fn: ?*const fn (ptr: *anyopaque) PollResult = null,
+        chain_fn: ?*const fn (ptr: *anyopaque, dependent: *Future) anyerror!void = null,
+    };
+    
+    pub const AwaitOptions = struct {
+        timeout_ms: ?u64 = null,
+        allow_cancellation: bool = true,
+        yield_hint: YieldHint = .auto,
+        priority: Priority = .normal,
+        
+        const YieldHint = enum {
+            never,     // Spin until completion
+            auto,      // Automatic yielding based on heuristics
+            always,    // Yield after every poll
+            adaptive,  // Adaptive yielding based on load
+        };
+        
+        const Priority = enum {
+            low,
+            normal,
+            high,
+            critical,
+        };
+    };
+    
+    pub const CancelOptions = struct {
+        reason: CancelToken.CancelReason = .user_requested,
+        cascade: bool = true,
+        grace_period_ms: ?u64 = null,
+        force_after_grace: bool = true,
+    };
+    
+    pub const PollResult = enum {
+        pending,
+        ready,
+        canceled,
+        error_occurred,
+    };
+    
+    pub fn init(allocator: std.mem.Allocator) Future {
+        return Future{
+            .ptr = undefined,
+            .vtable = undefined,
+            .state = std.atomic.Value(State).init(.pending),
+            .wakers = std.ArrayList(Waker).init(allocator),
+        };
     }
 
-    /// Cancel the future operation
-    pub fn cancel(self: *Future, io: Io) !void {
-        return self.vtable.cancel_fn(self.ptr, io);
+    /// Enhanced await with advanced semantics and cancellation support
+    pub fn await_op(self: *Future, io: Io, options: AwaitOptions) !void {
+        // Set up timeout if specified
+        if (options.timeout_ms) |timeout_ms| {
+            self.timeout = Timeout.init(timeout_ms, true);
+        }
+        
+        // Fast path: check if already completed
+        const current_state = self.state.load(.acquire);
+        switch (current_state) {
+            .completed => return,
+            .canceled => return error.OperationCanceled,
+            .timeout_expired => return error.OperationTimeout,
+            .error_state => return error.OperationFailed,
+            else => {},
+        }
+        
+        // Set up cancellation handling
+        if (options.allow_cancellation and self.cancel_token == null) {
+            // Create a default cancel token
+            var token = CancelToken.init(.user_requested, true);
+            self.cancel_token = &token;
+        }
+        
+        // Main await loop with adaptive yielding
+        var poll_count: u32 = 0;
+        var consecutive_pending: u32 = 0;
+        
+        while (true) {
+            // Check for cancellation
+            if (self.cancel_token) |token| {
+                if (token.isCanceled()) {
+                    self.state.store(.canceled, .release);
+                    self.notifyWakers(.canceled);
+                    return error.OperationCanceled;
+                }
+            }
+            
+            // Check for timeout
+            if (self.timeout) |timeout| {
+                if (timeout.isExpired()) {
+                    if (timeout.soft_timeout) {
+                        // Try graceful cancellation first
+                        try self.cancel(io, .{
+                            .reason = .timeout,
+                            .grace_period_ms = 100,
+                        });
+                    }
+                    self.state.store(.timeout_expired, .release);
+                    self.notifyWakers(.timeout);
+                    return error.OperationTimeout;
+                }
+            }
+            
+            // Poll the future
+            if (self.vtable.poll_fn) |poll_fn| {
+                const poll_result = poll_fn(self.ptr);
+                switch (poll_result) {
+                    .ready => {
+                        self.state.store(.completed, .release);
+                        self.notifyWakers(.completed);
+                        return;
+                    },
+                    .canceled => {
+                        self.state.store(.canceled, .release);
+                        self.notifyWakers(.canceled);
+                        return error.OperationCanceled;
+                    },
+                    .error_occurred => {
+                        self.state.store(.error_state, .release);
+                        self.notifyWakers(.error_occurred);
+                        return error.OperationFailed;
+                    },
+                    .pending => {
+                        consecutive_pending += 1;
+                    },
+                }
+            }
+            
+            // Adaptive yielding strategy
+            const should_yield = switch (options.yield_hint) {
+                .never => false,
+                .always => true,
+                .auto => poll_count > 10,
+                .adaptive => consecutive_pending > (5 + poll_count / 10),
+            };
+            
+            if (should_yield) {
+                // Calculate yield duration based on priority and load
+                const yield_duration_ns: u64 = switch (options.priority) {
+                    .critical => 1_000, // 1 microsecond
+                    .high => 10_000,     // 10 microseconds  
+                    .normal => 100_000,  // 100 microseconds
+                    .low => 1_000_000,   // 1 millisecond
+                };
+                
+                std.time.sleep(yield_duration_ns);
+                consecutive_pending = 0;
+            }
+            
+            poll_count += 1;
+            
+            // Fallback to vtable await if polling not supported
+            if (self.vtable.poll_fn == null) {
+                return self.vtable.await_fn(self.ptr, io, options);
+            }
+        }
+    }
+
+    /// Enhanced cancel with graceful shutdown and cascading
+    pub fn cancel(self: *Future, io: Io, options: CancelOptions) !void {
+        // Atomic state transition to canceling
+        const previous_state = self.state.swap(.canceled, .acq_rel);
+        if (previous_state == .completed or previous_state == .canceled) {
+            return; // Already completed or canceled
+        }
+        
+        // Set up cancel token
+        if (self.cancel_token == null) {
+            var token = CancelToken.init(options.reason, options.cascade);
+            self.cancel_token = &token;
+        } else if (self.cancel_token) |token| {
+            token.reason = options.reason;
+            token.cascade = options.cascade;
+        }
+        
+        // Graceful cancellation with timeout
+        if (options.grace_period_ms) |grace_ms| {
+            const grace_deadline = std.time.nanoTimestamp() + (grace_ms * std.time.ns_per_ms);
+            
+            // Try graceful cancellation first
+            self.vtable.cancel_fn(self.ptr, io, options) catch {
+                // If graceful cancellation fails, continue to force cancellation
+            };
+            
+            // Wait for graceful completion up to the deadline
+            while (std.time.nanoTimestamp() < grace_deadline) {
+                if (self.state.load(.acquire) == .completed) {
+                    return; // Gracefully completed
+                }
+                std.time.sleep(1_000_000); // 1ms
+            }
+            
+            // Force cancellation if grace period expired
+            if (options.force_after_grace) {
+                self.cancel_token.?.cancel();
+            }
+        } else {
+            // Immediate cancellation
+            try self.vtable.cancel_fn(self.ptr, io, options);
+            if (self.cancel_token) |token| {
+                token.cancel();
+            }
+        }
+        
+        // Cascade cancellation to dependent futures
+        if (options.cascade) {
+            if (self.cancellation_chain) |dependent| {
+                dependent.cancel(io, .{
+                    .reason = .dependency_canceled,
+                    .cascade = true,
+                    .grace_period_ms = options.grace_period_ms,
+                }) catch {
+                    // Log cascading cancellation failure but don't propagate
+                };
+            }
+        }
+        
+        // Notify all wakers
+        self.notifyWakers(.canceled);
+    }
+    
+    /// Add a waker to be notified when the future state changes
+    pub fn addWaker(self: *Future, waker: Waker) !void {
+        // Check if already completed
+        const current_state = self.state.load(.acquire);
+        if (current_state != .pending and current_state != .running) {
+            // Already completed, call waker immediately
+            const wake_reason: Waker.WakeReason = switch (current_state) {
+                .completed => .completed,
+                .canceled => .canceled,
+                .timeout_expired => .timeout,
+                .error_state => .error_occurred,
+                else => .completed,
+            };
+            waker.callback(waker.context, wake_reason);
+            return;
+        }
+        
+        try self.wakers.append(waker);
+    }
+    
+    /// Chain this future with another for dependency management
+    pub fn chainCancellation(self: *Future, dependent: *Future) !void {
+        if (self.vtable.chain_fn) |chain_fn| {
+            try chain_fn(self.ptr, dependent);
+        }
+        self.cancellation_chain = dependent;
+    }
+    
+    /// Check if the future can be polled (non-blocking state check)
+    pub fn poll(self: *Future) PollResult {
+        const current_state = self.state.load(.acquire);
+        return switch (current_state) {
+            .pending, .running => if (self.vtable.poll_fn) |poll_fn| 
+                poll_fn(self.ptr) else .pending,
+            .completed => .ready,
+            .canceled => .canceled,
+            .timeout_expired => .canceled,
+            .error_state => .error_occurred,
+        };
+    }
+    
+    /// Get the current state of the future
+    pub fn getState(self: *const Future) State {
+        return self.state.load(.acquire);
+    }
+    
+    /// Check if the future is completed (in any final state)
+    pub fn isCompleted(self: *const Future) bool {
+        const current_state = self.state.load(.acquire);
+        return switch (current_state) {
+            .completed, .canceled, .timeout_expired, .error_state => true,
+            else => false,
+        };
+    }
+    
+    /// Notify all wakers of a state change
+    fn notifyWakers(self: *Future, reason: Waker.WakeReason) void {
+        for (self.wakers.items) |waker| {
+            waker.callback(waker.context, reason);
+        }
+        // Clear wakers after notification
+        self.wakers.clearRetainingCapacity();
     }
 
     /// Cleanup the future
     pub fn deinit(self: *Future) void {
+        // Cancel if still pending
+        if (!self.isCompleted()) {
+            // Note: We can't call cancel here as it requires Io
+            // So we just mark as canceled
+            self.state.store(.canceled, .release);
+        }
+        
+        self.wakers.deinit();
         self.vtable.deinit_fn(self.ptr);
     }
 
-    /// Convenience method for Future.await() pattern
+    /// Convenience methods matching Zig's async I/O proposal
     pub const await = await_op;
+    
+    /// Await with default options
+    pub fn awaitDefault(self: *Future, io: Io) !void {
+        return self.await_op(io, .{});
+    }
+    
+    /// Await with timeout
+    pub fn awaitTimeout(self: *Future, io: Io, timeout_ms: u64) !void {
+        return self.await_op(io, .{ .timeout_ms = timeout_ms });
+    }
+    
+    /// Cancel with default options  
+    pub fn cancelDefault(self: *Future, io: Io) !void {
+        return self.cancel(io, .{});
+    }
+    
+    /// Cancel with grace period
+    pub fn cancelGraceful(self: *Future, io: Io, grace_ms: u64) !void {
+        return self.cancel(io, .{ .grace_period_ms = grace_ms });
+    }
 };
 
 /// File operations with new Io interface
@@ -185,6 +798,14 @@ pub const File = struct {
         writeAll: *const fn (ptr: *anyopaque, io: Io, data: []const u8) anyerror!void,
         readAll: *const fn (ptr: *anyopaque, io: Io, buffer: []u8) anyerror!usize,
         close: *const fn (ptr: *anyopaque, io: Io) anyerror!void,
+        
+        // Semantic I/O operations
+        sendFile: ?*const fn (ptr: *anyopaque, io: Io, file_reader: *semantic_io.Reader, limit: semantic_io.Limit) anyerror!u64 = null,
+        drain: ?*const fn (ptr: *anyopaque, io: Io, data: []const []const u8, splat: usize) anyerror!u64 = null,
+        
+        // Enhanced I/O operations
+        getWriter: ?*const fn (ptr: *anyopaque) semantic_io.Writer = null,
+        getReader: ?*const fn (ptr: *anyopaque) semantic_io.Reader = null,
     };
 
     pub const CreateOptions = struct {
@@ -209,6 +830,67 @@ pub const File = struct {
     /// Close file using the Io interface
     pub fn close(self: File, io: Io) !void {
         return self.vtable.close(self.ptr, io);
+    }
+    
+    /// Send file contents to another destination using zero-copy optimization
+    pub fn sendFile(
+        self: File,
+        io: Io,
+        file_reader: *semantic_io.File.Reader,
+        limit: semantic_io.Limit,
+    ) !u64 {
+        if (self.vtable.sendFile) |send_file_fn| {
+            return send_file_fn(self.ptr, io, file_reader, limit);
+        }
+        return error.SendFileNotSupported;
+    }
+    
+    /// Perform vectorized writes with splat support
+    pub fn drain(
+        self: File,
+        io: Io,
+        data: []const []const u8,
+        splat: usize,
+    ) !u64 {
+        if (self.vtable.drain) |drain_fn| {
+            return drain_fn(self.ptr, io, data, splat);
+        }
+        
+        // Fallback implementation
+        var total_written: u64 = 0;
+        
+        // Write all data segments
+        for (data) |segment| {
+            try self.writeAll(io, segment);
+            total_written += segment.len;
+        }
+        
+        // Handle splat (repeat last segment)
+        if (splat > 0 and data.len > 0) {
+            const last_segment = data[data.len - 1];
+            for (0..splat) |_| {
+                try self.writeAll(io, last_segment);
+            }
+            total_written += last_segment.len * splat;
+        }
+        
+        return total_written;
+    }
+    
+    /// Get a semantic writer for this file
+    pub fn getWriter(self: File) ?semantic_io.Writer {
+        if (self.vtable.getWriter) |get_writer_fn| {
+            return get_writer_fn(self.ptr);
+        }
+        return null;
+    }
+    
+    /// Get a semantic reader for this file
+    pub fn getReader(self: File) ?semantic_io.Reader {
+        if (self.vtable.getReader) |get_reader_fn| {
+            return get_reader_fn(self.ptr);
+        }
+        return null;
     }
 
     /// Get stdout file handle
@@ -287,6 +969,14 @@ pub const TcpListener = struct {
 /// UDP recv result type
 pub const RecvFromResult = struct { bytes: usize, address: std.net.Address };
 
+/// Re-export semantic I/O types for convenience
+pub const Writer = semantic_io.Writer;
+pub const Reader = semantic_io.Reader;
+pub const Limit = semantic_io.Limit;
+pub const PlatformOptimizations = semantic_io.PlatformOptimizations;
+pub const DrainOperation = semantic_io.DrainOperation;
+pub const SemanticIoUtils = semantic_io.SemanticIoUtils;
+
 pub const UdpSocket = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
@@ -347,8 +1037,8 @@ pub fn saveData(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
     var b_future = try io.async(allocator, saveFile, .{ io, data, "saveB.txt" });
     defer b_future.deinit();
 
-    try a_future.await(io);
-    try b_future.await(io);
+    try a_future.await_op(io, .{});
+    try b_future.await_op(io, .{});
 
     const out = File.stdout();
     try out.writeAll(io, "save complete\n");

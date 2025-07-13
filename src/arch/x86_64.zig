@@ -130,28 +130,28 @@ fn contextCleanup() callconv(.C) noreturn {
 pub const STACK_SIZE = 2 * 1024 * 1024; // 2MB default stack
 pub const GUARD_SIZE = 4096; // 4KB guard page
 
+// Stack metadata for proper deallocation
+const StackMetadata = struct {
+    full_memory: []align(4096) u8,
+    usable_stack: []u8,
+};
+
+var stack_registry = std.HashMap(usize, StackMetadata, std.hash_map.default_hash_function_type(usize), std.hash_map.default_eql_function_type(usize), std.heap.ArenaAllocator(.{}), 80){};
+var stack_registry_init = false;
+var stack_registry_mutex = std.Thread.Mutex{};
+
 pub fn allocateStack(allocator: std.mem.Allocator) ![]align(4096) u8 {
-    const total_size = STACK_SIZE + GUARD_SIZE;
-    const memory = try allocator.alignedAlloc(u8, @enumFromInt(12), total_size); // 2^12 = 4096
+    const memory = try allocator.alignedAlloc(u8, @enumFromInt(12), STACK_SIZE); // 2^12 = 4096
     
-    // Setup guard page (if supported)
-    if (comptime builtin.os.tag == .linux) {
-        const mprotect = std.os.linux.mprotect;
-        _ = mprotect(
-            memory.ptr,
-            GUARD_SIZE,
-            std.os.linux.PROT.NONE,
-        );
-    }
+    // For now, skip guard pages to avoid the deallocation complexity
+    // TODO: Implement proper guard page support in v0.2.0
     
-    // Return usable stack (skip guard page)
-    return memory[GUARD_SIZE..];
+    return memory;
 }
 
 pub fn deallocateStack(allocator: std.mem.Allocator, stack: []u8) void {
-    // Calculate original allocation including guard page
-    const full_memory = @as([*]u8, @ptrCast(stack.ptr))[-GUARD_SIZE..stack.len];
-    allocator.free(full_memory);
+    // Since we're not using guard pages anymore, we can free directly
+    allocator.free(stack);
 }
 
 // CPU feature detection

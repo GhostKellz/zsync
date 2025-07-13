@@ -168,6 +168,100 @@ pub fn build(b: *std.Build) void {
     // these invocations when one fails (or you pass a flag to increase
     // verbosity) to validate assumptions and diagnose problems.
     //
+    // WASM build target
+    const wasm_exe = b.addExecutable(.{
+        .name = "zsync",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+                .abi = .musl,
+            }),
+            .optimize = .ReleaseSmall, // Optimize for size in WASM
+            .imports = &.{
+                .{ .name = "zsync", .module = mod },
+            },
+        }),
+    });
+    
+    // Configure WASM-specific settings
+    wasm_exe.entry = .disabled; // WASM modules don't have a traditional main
+    wasm_exe.rdynamic = true; // Allow dynamic linking for JS FFI
+    
+    const wasm_step = b.step("wasm", "Build for WebAssembly");
+    wasm_step.dependOn(&b.addInstallArtifact(wasm_exe, .{}).step);
+    
+    // WASM example/demo
+    const wasm_demo = b.addExecutable(.{
+        .name = "zsync-demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/examples/wasm_demo.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+                .abi = .musl,
+            }),
+            .optimize = .ReleaseSmall,
+            .imports = &.{
+                .{ .name = "zsync", .module = mod },
+            },
+        }),
+    });
+    
+    wasm_demo.entry = .disabled;
+    wasm_demo.rdynamic = true;
+    
+    const wasm_demo_step = b.step("wasm-demo", "Build WASM demo");
+    wasm_demo_step.dependOn(&b.addInstallArtifact(wasm_demo, .{}).step);
+    
+    // ARM64 build targets
+    const arm64_exe = b.addExecutable(.{
+        .name = "zsync-arm64",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .aarch64,
+                .os_tag = .linux,
+                .abi = .gnu,
+            }),
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zsync", .module = mod },
+            },
+        }),
+    });
+    
+    const arm64_step = b.step("arm64", "Build for ARM64/AArch64");
+    arm64_step.dependOn(&b.addInstallArtifact(arm64_exe, .{}).step);
+    
+    // ARM64 macOS target
+    const arm64_macos_exe = b.addExecutable(.{
+        .name = "zsync-arm64-macos",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .aarch64,
+                .os_tag = .macos,
+                .abi = .none,
+            }),
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zsync", .module = mod },
+            },
+        }),
+    });
+    
+    const arm64_macos_step = b.step("arm64-macos", "Build for ARM64 macOS");
+    arm64_macos_step.dependOn(&b.addInstallArtifact(arm64_macos_exe, .{}).step);
+    
+    // Cross-compilation test step
+    const cross_compile_step = b.step("cross-compile", "Test cross-compilation for all targets");
+    cross_compile_step.dependOn(&b.addInstallArtifact(exe, .{}).step);          // Native
+    cross_compile_step.dependOn(&b.addInstallArtifact(wasm_exe, .{}).step);     // WASM
+    cross_compile_step.dependOn(&b.addInstallArtifact(arm64_exe, .{}).step);    // ARM64 Linux
+    cross_compile_step.dependOn(&b.addInstallArtifact(arm64_macos_exe, .{}).step); // ARM64 macOS
+
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
 }

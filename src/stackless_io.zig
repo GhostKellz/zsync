@@ -603,6 +603,8 @@ pub const StacklessIo = struct {
         return Future{
             .ptr = future_impl,
             .vtable = &stackless_future_vtable,
+            .state = std.atomic.Value(Future.State).init(.pending),
+            .wakers = std.ArrayList(Future.Waker).init(self.allocator),
         };
     }
 
@@ -789,8 +791,9 @@ const stackless_future_vtable = Future.VTable{
     .deinit_fn = stacklessDeinit,
 };
 
-fn stacklessAwait(ptr: *anyopaque, io: Io) !void {
+fn stacklessAwait(ptr: *anyopaque, io: Io, options: Future.AwaitOptions) !void {
     _ = io;
+    _ = options;
     const future: *StacklessFuture = @ptrCast(@alignCast(ptr));
     
     // Wait for coroutine to complete
@@ -803,8 +806,9 @@ fn stacklessAwait(ptr: *anyopaque, io: Io) !void {
     return coro.result;
 }
 
-fn stacklessCancel(ptr: *anyopaque, io: Io) !void {
+fn stacklessCancel(ptr: *anyopaque, io: Io, options: Future.CancelOptions) !void {
     _ = io;
+    _ = options;
     const future: *StacklessFuture = @ptrCast(@alignCast(ptr));
     
     // Mark coroutine as completed with cancellation

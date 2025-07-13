@@ -64,7 +64,8 @@ pub const BlockingIo = struct {
         return Future{
             .ptr = future_impl,
             .vtable = &completed_future_vtable,
-            .completed = std.atomic.Value(bool).init(true),
+            .state = std.atomic.Value(Future.State).init(.completed),
+            .wakers = std.ArrayList(Future.Waker).init(self.allocator),
         };
     }
 
@@ -187,15 +188,17 @@ const completed_future_vtable = Future.VTable{
     .deinit_fn = completedDeinit,
 };
 
-fn completedAwait(ptr: *anyopaque, io: Io) !void {
+fn completedAwait(ptr: *anyopaque, io: Io, options: Future.AwaitOptions) !void {
     _ = ptr;
     _ = io;
+    _ = options;
     // Already completed, nothing to await
 }
 
-fn completedCancel(ptr: *anyopaque, io: Io) !void {
+fn completedCancel(ptr: *anyopaque, io: Io, options: Future.CancelOptions) !void {
     _ = ptr;
     _ = io;
+    _ = options;
     // Already completed, nothing to cancel
 }
 
