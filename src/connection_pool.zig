@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const io = @import("io.zig");
+const io_v2 = @import("io_v2.zig");
 
 /// Connection pool configuration
 pub const PoolConfig = struct {
@@ -205,6 +206,175 @@ pub const PoolStats = struct {
     max_connections: u32,
 };
 
+/// UDP multicast and broadcast support
+pub const UdpMulticast = struct {
+    socket: io_v2.UdpSocket,
+    multicast_groups: std.ArrayList(std.net.Address),
+    broadcast_enabled: bool,
+    
+    const Self = @This();
+    
+    pub fn init(allocator: std.mem.Allocator, socket: io_v2.UdpSocket) Self {
+        return Self{
+            .socket = socket,
+            .multicast_groups = std.ArrayList(std.net.Address).init(allocator),
+            .broadcast_enabled = false,
+        };
+    }
+    
+    pub fn deinit(self: *Self) void {
+        self.multicast_groups.deinit();
+    }
+    
+    /// Join a multicast group
+    pub fn joinMulticastGroup(self: *Self, group_address: std.net.Address) !void {
+        // In a real implementation, this would call setsockopt with IP_ADD_MEMBERSHIP
+        try self.multicast_groups.append(group_address);
+    }
+    
+    /// Leave a multicast group
+    pub fn leaveMulticastGroup(self: *Self, group_address: std.net.Address) !void {
+        // In a real implementation, this would call setsockopt with IP_DROP_MEMBERSHIP
+        for (self.multicast_groups.items, 0..) |addr, i| {
+            if (std.mem.eql(u8, &addr.any.data, &group_address.any.data)) {
+                _ = self.multicast_groups.swapRemove(i);
+                break;
+            }
+        }
+    }
+    
+    /// Enable broadcast
+    pub fn enableBroadcast(self: *Self) !void {
+        // In a real implementation, this would call setsockopt with SO_BROADCAST
+        self.broadcast_enabled = true;
+    }
+    
+    /// Disable broadcast
+    pub fn disableBroadcast(self: *Self) !void {
+        self.broadcast_enabled = false;
+    }
+    
+    /// Send to multicast group
+    pub fn sendToMulticastGroup(self: *Self, io_instance: io_v2.Io, data: []const u8, group_address: std.net.Address) !usize {
+        if (!self.isInMulticastGroup(group_address)) {
+            return error.NotInMulticastGroup;
+        }
+        return self.socket.sendTo(io_instance, data, group_address);
+    }
+    
+    /// Send broadcast
+    pub fn sendBroadcast(self: *Self, io_instance: io_v2.Io, data: []const u8, port: u16) !usize {
+        if (!self.broadcast_enabled) {
+            return error.BroadcastNotEnabled;
+        }
+        const broadcast_addr = std.net.Address.initIp4(.{255, 255, 255, 255}, port);
+        return self.socket.sendTo(io_instance, data, broadcast_addr);
+    }
+    
+    /// Check if address is in multicast group
+    fn isInMulticastGroup(self: *Self, address: std.net.Address) bool {
+        for (self.multicast_groups.items) |addr| {
+            if (std.mem.eql(u8, &addr.any.data, &address.any.data)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+/// Zero-copy networking utilities
+pub const ZeroCopyNet = struct {
+    /// Send file contents using zero-copy (sendfile on Linux)
+    pub fn sendFile(io_instance: io_v2.Io, socket: io_v2.TcpStream, file: io_v2.File) !u64 {
+        // In a real implementation, this would use platform-specific zero-copy mechanisms
+        // Linux: sendfile(), FreeBSD: sendfile(), Windows: TransmitFile()
+        
+        var buffer: [8192]u8 = undefined;
+        var total_sent: u64 = 0;
+        
+        while (true) {
+            const bytes_read = try file.readAll(io_instance, &buffer);
+            if (bytes_read == 0) break;
+            
+            const bytes_sent = try socket.write(io_instance, buffer[0..bytes_read]);
+            total_sent += bytes_sent;
+        }
+        
+        return total_sent;
+    }
+    
+    /// Splice between two sockets (Linux specific)
+    pub fn splice(io_instance: io_v2.Io, input: io_v2.TcpStream, output: io_v2.TcpStream, count: usize) !u64 {
+        // In a real implementation, this would use Linux splice() syscall
+        _ = io_instance;
+        _ = input;
+        _ = output;
+        _ = count;
+        return error.NotImplemented;
+    }
+    
+    /// Memory-mapped file I/O
+    pub fn mmapFile(file_path: []const u8) ![]u8 {
+        // In a real implementation, this would use mmap() on Unix or MapViewOfFile() on Windows
+        _ = file_path;
+        return error.NotImplemented;
+    }
+};
+
+/// Advanced socket options and tuning
+pub const SocketOptions = struct {
+    /// Set TCP_NODELAY option
+    pub fn setTcpNoDelay(socket: io_v2.TcpStream, enabled: bool) !void {
+        _ = socket;
+        _ = enabled;
+        // In a real implementation, this would call setsockopt(TCP_NODELAY)
+    }
+    
+    /// Set SO_KEEPALIVE option
+    pub fn setKeepAlive(socket: io_v2.TcpStream, enabled: bool) !void {
+        _ = socket;
+        _ = enabled;
+        // In a real implementation, this would call setsockopt(SO_KEEPALIVE)
+    }
+    
+    /// Set socket buffer sizes
+    pub fn setBufferSizes(socket: io_v2.TcpStream, send_buffer: u32, recv_buffer: u32) !void {
+        _ = socket;
+        _ = send_buffer;
+        _ = recv_buffer;
+        // In a real implementation, this would call setsockopt(SO_SNDBUF/SO_RCVBUF)
+    }
+    
+    /// Set socket timeout
+    pub fn setTimeout(socket: io_v2.TcpStream, timeout_ms: u32) !void {
+        _ = socket;
+        _ = timeout_ms;
+        // In a real implementation, this would call setsockopt(SO_SNDTIMEO/SO_RCVTIMEO)
+    }
+    
+    /// Set socket priority
+    pub fn setPriority(socket: io_v2.TcpStream, priority: u32) !void {
+        _ = socket;
+        _ = priority;
+        // In a real implementation, this would call setsockopt(SO_PRIORITY)
+    }
+    
+    /// Enable/disable socket reuse
+    pub fn setReuseAddress(socket: io_v2.TcpStream, enabled: bool) !void {
+        _ = socket;
+        _ = enabled;
+        // In a real implementation, this would call setsockopt(SO_REUSEADDR)
+    }
+    
+    /// Set socket linger options
+    pub fn setLinger(socket: io_v2.TcpStream, enabled: bool, timeout_s: u16) !void {
+        _ = socket;
+        _ = enabled;
+        _ = timeout_s;
+        // In a real implementation, this would call setsockopt(SO_LINGER)
+    }
+};
+
 // Tests
 test "connection pool creation" {
     const testing = std.testing;
@@ -228,4 +398,27 @@ test "connection pool stats" {
     
     const stats = pool.getStats();
     try testing.expect(stats.max_connections == 5);
+}
+
+test "udp multicast group management" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    
+    // Create a mock UDP socket
+    const socket = io_v2.UdpSocket{
+        .ptr = undefined,
+        .vtable = undefined,
+    };
+    
+    var multicast = UdpMulticast.init(allocator, socket);
+    defer multicast.deinit();
+    
+    const group_addr = std.net.Address.initIp4(.{224, 0, 0, 1}, 8080);
+    try multicast.joinMulticastGroup(group_addr);
+    
+    try testing.expect(multicast.multicast_groups.items.len == 1);
+    try testing.expect(multicast.isInMulticastGroup(group_addr));
+    
+    try multicast.leaveMulticastGroup(group_addr);
+    try testing.expect(multicast.multicast_groups.items.len == 0);
 }

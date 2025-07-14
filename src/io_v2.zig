@@ -13,6 +13,7 @@ pub const AsyncCallInfo = struct {
     call_ptr: *anyopaque,
     exec_fn: *const fn (call_ptr: *anyopaque) anyerror!void,
     cleanup_fn: ?*const fn (call_ptr: *anyopaque) void,
+    error_handler: ?*const fn (call_ptr: *anyopaque, err: anyerror) void = null,
     
     /// Create call info for known functions
     pub fn initDirect(
@@ -24,6 +25,22 @@ pub const AsyncCallInfo = struct {
             .call_ptr = call_ptr,
             .exec_fn = exec_fn,
             .cleanup_fn = cleanup_fn,
+            .error_handler = null,
+        };
+    }
+    
+    /// Create call info with error handling
+    pub fn initWithErrorHandler(
+        call_ptr: *anyopaque,
+        exec_fn: *const fn (call_ptr: *anyopaque) anyerror!void,
+        cleanup_fn: ?*const fn (call_ptr: *anyopaque) void,
+        error_handler: *const fn (call_ptr: *anyopaque, err: anyerror) void,
+    ) AsyncCallInfo {
+        return AsyncCallInfo{
+            .call_ptr = call_ptr,
+            .exec_fn = exec_fn,
+            .cleanup_fn = cleanup_fn,
+            .error_handler = error_handler,
         };
     }
     
@@ -83,10 +100,10 @@ pub const Io = struct {
 
     /// Create an async operation for saveFile specifically
     /// For a real implementation, we'd have a registry of supported functions
-    pub fn asyncSaveFile(self: Io, allocator: std.mem.Allocator, io: Io, data: []const u8, filename: []const u8) !Future {
+    pub fn asyncSaveFile(self: Io, allocator: std.mem.Allocator, data: []const u8, filename: []const u8) !Future {
         const ctx = try allocator.create(SaveFileContext);
         ctx.* = SaveFileContext{
-            .io = io,
+            .io = self,
             .data = data,
             .filename = filename,
             .allocator = allocator,
@@ -101,10 +118,10 @@ pub const Io = struct {
         return self.vtable.async_fn(self.ptr, call_info);
     }
     
-    /// Enhanced async method with full type inference
+    /// Enhanced async method with full type inference and arbitrary function signatures
     pub fn async_op(self: Io, allocator: std.mem.Allocator, func: anytype, args: anytype) !Future {
         const FuncType = @TypeOf(func);
-        _ = @TypeOf(args);
+        const ArgsType = @TypeOf(args);
         
         // Type validation
         const func_type_info = @typeInfo(FuncType);
@@ -112,16 +129,45 @@ pub const Io = struct {
             @compileError("First argument must be a function");
         }
         
-        // Check if it's a known function
+        // Validate function signature at compile time
+        comptime {
+            const func_info = func_type_info.@"fn";
+            if (func_info.params.len == 0) {
+                @compileError("Function must have at least one parameter (Io)");
+            }
+            
+            // First parameter must be Io
+            if (func_info.params[0].type != Io) {
+                @compileError("First parameter must be of type Io");
+            }
+            
+            // Validate argument count matches function parameters
+            const expected_args = func_info.params.len - 1; // -1 for Io parameter
+            const actual_args = switch (@typeInfo(ArgsType)) {
+                .@"struct" => |struct_info| struct_info.fields.len,
+                .void => 0,
+                else => 1,
+            };
+            
+            if (actual_args != expected_args) {
+                const msg = std.fmt.comptimePrint(
+                    "Function expects {} arguments but got {}", 
+                    .{ expected_args, actual_args }
+                );
+                @compileError(msg);
+            }
+        }
+        
+        // Check if it's a known function for optimized handling
         if (func == saveFile) {
-            return self.asyncSaveFile(allocator, args[0], args[1], args[2]);
+            return self.asyncSaveFile(allocator, args[0], args[1]);
         }
         
         // For other functions, create a generic async operation
         return self.createGenericAsyncOperation(allocator, func, args);
     }
     
-    /// Create a generic async operation with type inference
+    /// Create a generic async operation with type inference and arbitrary function signatures
     fn createGenericAsyncOperation(self: Io, allocator: std.mem.Allocator, func: anytype, args: anytype) !Future {
         const FuncType = @TypeOf(func);
         const ArgsType = @TypeOf(args);
@@ -136,10 +182,12 @@ pub const Io = struct {
             fn execute(ptr: *anyopaque) anyerror!void {
                 const self_ptr: *@This() = @ptrCast(@alignCast(ptr));
                 
-                // Call the function with proper argument unpacking
+                // Call the function with proper argument unpacking based on args type
                 const result = switch (@typeInfo(ArgsType)) {
                     .Struct => |struct_info| blk: {
-                        var call_args: std.meta.Tuple(&[_]type{Io} ++ extractFieldTypes(struct_info)) = undefined;
+                        // For struct args, unpack each field
+                        const field_types = extractFieldTypes(struct_info);
+                        var call_args: std.meta.Tuple(&[_]type{Io} ++ field_types) = undefined;
                         call_args[0] = self_ptr.io;
                         
                         inline for (struct_info.fields, 0..) |field, i| {
@@ -148,10 +196,32 @@ pub const Io = struct {
                         
                         break :blk @call(.auto, self_ptr.func, call_args);
                     },
-                    else => @call(.auto, self_ptr.func, .{ self_ptr.io, self_ptr.args }),
+                    .Void => blk: {
+                        // No additional arguments, just Io
+                        break :blk @call(.auto, self_ptr.func, .{self_ptr.io});
+                    },
+                    .Array => |arr_info| blk: {
+                        // For array args, unpack each element
+                        var call_args: std.meta.Tuple(&[_]type{Io} ++ @as([arr_info.len]type, [_]type{arr_info.child} ** arr_info.len)) = undefined;
+                        call_args[0] = self_ptr.io;
+                        
+                        inline for (0..arr_info.len) |i| {
+                            call_args[i + 1] = self_ptr.args[i];
+                        }
+                        
+                        break :blk @call(.auto, self_ptr.func, call_args);
+                    },
+                    else => blk: {
+                        // Single argument
+                        break :blk @call(.auto, self_ptr.func, .{ self_ptr.io, self_ptr.args });
+                    },
                 };
                 
+                // Handle return value - propagate errors, ignore successful results
                 _ = result catch |err| {
+                    // Set error information in the future if available
+                    // Note: In a real implementation, we'd need access to the future here
+                    // For now, just propagate the error
                     return err;
                 };
             }
@@ -161,12 +231,12 @@ pub const Io = struct {
                 self_ptr.allocator.destroy(self_ptr);
             }
             
-            fn extractFieldTypes(comptime struct_info: std.builtin.Type.Struct) []const type {
+            fn extractFieldTypes(comptime struct_info: std.builtin.Type.Struct) [struct_info.fields.len]type {
                 var field_types: [struct_info.fields.len]type = undefined;
                 for (struct_info.fields, 0..) |field, i| {
                     field_types[i] = field.type;
                 }
-                return &field_types;
+                return field_types;
             }
         };
         
@@ -392,6 +462,7 @@ pub const Future = struct {
     timeout: ?Timeout = null,
     wakers: std.ArrayList(Waker),
     cancellation_chain: ?*Future = null, // For chaining cancellation
+    error_info: ?ErrorInfo = null, // For error propagation
     
     pub const State = enum(u8) {
         pending = 0,
@@ -400,6 +471,41 @@ pub const Future = struct {
         canceled = 3,
         timeout_expired = 4,
         error_state = 5,
+    };
+    
+    /// Error information for async operations
+    pub const ErrorInfo = struct {
+        error_value: anyerror,
+        error_trace: ?*std.builtin.StackTrace = null,
+        error_context: ?[]const u8 = null,
+        propagated_from: ?*Future = null, // Track error propagation chain
+        
+        pub fn init(err: anyerror) ErrorInfo {
+            return ErrorInfo{
+                .error_value = err,
+                .error_trace = @errorReturnTrace(),
+                .error_context = @errorName(err),
+                .propagated_from = null,
+            };
+        }
+        
+        pub fn initWithPropagation(err: anyerror, source_future: *Future) ErrorInfo {
+            return ErrorInfo{
+                .error_value = err,
+                .error_trace = @errorReturnTrace(),
+                .error_context = @errorName(err),
+                .propagated_from = source_future,
+            };
+        }
+        
+        pub fn initWithContext(err: anyerror, context: []const u8) ErrorInfo {
+            return ErrorInfo{
+                .error_value = err,
+                .error_trace = @errorReturnTrace(),
+                .error_context = context,
+                .propagated_from = null,
+            };
+        }
     };
     
     const CancelToken = struct {
@@ -529,7 +635,13 @@ pub const Future = struct {
             .completed => return,
             .canceled => return error.OperationCanceled,
             .timeout_expired => return error.OperationTimeout,
-            .error_state => return error.OperationFailed,
+            .error_state => {
+                // Propagate the original error if available
+                if (self.error_info) |error_info| {
+                    return error_info.error_value;
+                }
+                return error.OperationFailed;
+            },
             else => {},
         }
         
@@ -587,6 +699,10 @@ pub const Future = struct {
                     .error_occurred => {
                         self.state.store(.error_state, .release);
                         self.notifyWakers(.error_occurred);
+                        // Return the actual error if available
+                        if (self.error_info) |error_info| {
+                            return error_info.error_value;
+                        }
                         return error.OperationFailed;
                     },
                     .pending => {
@@ -743,6 +859,45 @@ pub const Future = struct {
         };
     }
     
+    /// Set error information and propagate to dependent futures
+    pub fn setError(self: *Future, err: anyerror) void {
+        self.error_info = ErrorInfo.init(err);
+        self.state.store(.error_state, .release);
+        
+        // Propagate error to chained futures
+        if (self.cancellation_chain) |dependent| {
+            dependent.propagateError(err, self);
+        }
+        
+        self.notifyWakers(.error_occurred);
+    }
+    
+    /// Propagate error from another future
+    pub fn propagateError(self: *Future, err: anyerror, source_future: *Future) void {
+        self.error_info = ErrorInfo.initWithPropagation(err, source_future);
+        self.state.store(.error_state, .release);
+        
+        // Continue propagation chain
+        if (self.cancellation_chain) |dependent| {
+            dependent.propagateError(err, self);
+        }
+        
+        self.notifyWakers(.error_occurred);
+    }
+    
+    /// Get the error information if the future is in error state
+    pub fn getError(self: *const Future) ?ErrorInfo {
+        if (self.state.load(.acquire) == .error_state) {
+            return self.error_info;
+        }
+        return null;
+    }
+    
+    /// Check if future is in error state
+    pub fn isError(self: *const Future) bool {
+        return self.state.load(.acquire) == .error_state;
+    }
+    
     /// Notify all wakers of a state change
     fn notifyWakers(self: *Future, reason: Waker.WakeReason) void {
         for (self.wakers.items) |waker| {
@@ -787,6 +942,55 @@ pub const Future = struct {
     pub fn cancelGraceful(self: *Future, io: Io, grace_ms: u64) !void {
         return self.cancel(io, .{ .grace_period_ms = grace_ms });
     }
+    
+    /// Defer cancellation pattern - creates a defer-compatible cancellation function
+    pub fn deferCancel(self: *Future, io: Io) DeferCancellation {
+        return DeferCancellation{
+            .future = self,
+            .io = io,
+            .options = .{},
+        };
+    }
+    
+    /// Defer cancellation with custom options
+    pub fn deferCancelWithOptions(self: *Future, io: Io, options: CancelOptions) DeferCancellation {
+        return DeferCancellation{
+            .future = self,
+            .io = io,
+            .options = options,
+        };
+    }
+    
+    /// Helper struct for defer cancellation patterns
+    pub const DeferCancellation = struct {
+        future: *Future,
+        io: Io,
+        options: CancelOptions,
+        
+        /// Call this function in defer blocks: `defer future.deferCancel(io).cancel();`
+        pub fn cancel(self: @This()) void {
+            self.future.cancel(self.io, self.options) catch |err| {
+                // Log the error but don't propagate in defer context
+                std.log.err("Failed to cancel future in defer: {}", .{err});
+            };
+        }
+        
+        /// Cancel only if the future is not completed
+        pub fn cancelIfPending(self: @This()) void {
+            if (!self.future.isCompleted()) {
+                self.cancel();
+            }
+        }
+        
+        /// Cancel with a specific reason
+        pub fn cancelWithReason(self: @This(), reason: CancelToken.CancelReason) void {
+            var modified_options = self.options;
+            modified_options.reason = reason;
+            self.future.cancel(self.io, modified_options) catch |err| {
+                std.log.err("Failed to cancel future with reason {} in defer: {}", .{ reason, err });
+            };
+        }
+    };
 };
 
 /// File operations with new Io interface
@@ -1028,20 +1232,252 @@ fn stdoutClose(ptr: *anyopaque, io: Io) !void {
     // Stdout doesn't need closing
 }
 
-// Example of colorblind async function
+// Example of colorblind async function with defer cancellation patterns
 pub fn saveData(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
     // This function works with ANY Io implementation!
-    var a_future = try io.async(allocator, saveFile, .{ io, data, "saveA.txt" });
+    var a_future = try io.async(allocator, saveFile, .{ data, "saveA.txt" });
     defer a_future.deinit();
+    defer a_future.deferCancel(io).cancelIfPending(); // Cancel if not completed
 
-    var b_future = try io.async(allocator, saveFile, .{ io, data, "saveB.txt" });
+    var b_future = try io.async(allocator, saveFile, .{ data, "saveB.txt" });
     defer b_future.deinit();
+    defer b_future.deferCancel(io).cancelIfPending(); // Cancel if not completed
 
     try a_future.await_op(io, .{});
     try b_future.await_op(io, .{});
 
     const out = File.stdout();
     try out.writeAll(io, "save complete\n");
+}
+
+// Example function showing more advanced defer cancellation patterns
+pub fn saveDataWithTimeout(allocator: std.mem.Allocator, io: Io, data: []const u8, timeout_ms: u64) !void {
+    var a_future = try io.async(allocator, saveFile, .{ io, data, "saveA.txt" });
+    defer a_future.deinit();
+    defer a_future.deferCancelWithOptions(io, .{
+        .reason = .timeout,
+        .grace_period_ms = 100,
+    }).cancelIfPending();
+
+    var b_future = try io.async(allocator, saveFile, .{ io, data, "saveB.txt" });
+    defer b_future.deinit();
+    defer b_future.deferCancelWithOptions(io, .{
+        .reason = .timeout,
+        .grace_period_ms = 100,
+    }).cancelIfPending();
+
+    // Chain cancellation so if one fails, the other gets cancelled
+    try a_future.chainCancellation(&b_future);
+
+    try a_future.awaitTimeout(io, timeout_ms);
+    try b_future.awaitTimeout(io, timeout_ms);
+
+    const out = File.stdout();
+    try out.writeAll(io, "save complete\n");
+}
+
+/// Execution model detection and configuration
+pub const ExecutionModel = enum {
+    blocking,
+    thread_pool,
+    green_threads,
+    stackless,
+    
+    /// Detect the best execution model for the current platform
+    pub fn detect() ExecutionModel {
+        const builtin = @import("builtin");
+        return switch (builtin.os.tag) {
+            .linux => switch (builtin.cpu.arch) {
+                .x86_64 => .green_threads, // io_uring available
+                else => .thread_pool,
+            },
+            .windows => .thread_pool, // IOCP
+            .macos => .green_threads,  // kqueue
+            .wasi => .stackless,       // WASM
+            else => .blocking,
+        };
+    }
+    
+    /// Get recommended configuration for the execution model
+    pub fn getRecommendedConfig(self: ExecutionModel) ExecutionConfig {
+        return switch (self) {
+            .blocking => .{ .blocking = .{} },
+            .thread_pool => .{ .thread_pool = .{
+                .num_threads = @max(1, std.Thread.getCpuCount() catch 4),
+                .queue_type = .lock_free,
+                .enable_dynamic_scaling = true,
+            }},
+            .green_threads => .{ .green_threads = .{
+                .stack_size = 64 * 1024,
+                .max_threads = 1024,
+                .io_uring_entries = 256,
+            }},
+            .stackless => .{ .stackless = .{
+                .max_async_frames = 1024,
+                .frame_size = 4096,
+            }},
+        };
+    }
+};
+
+/// Configuration for different execution models
+pub const ExecutionConfig = union(ExecutionModel) {
+    blocking: struct {},
+    thread_pool: struct {
+        num_threads: u32 = 4,
+        max_queue_size: u32 = 1024,
+        queue_type: enum { locked_fifo, lock_free, work_stealing } = .lock_free,
+        enable_dynamic_scaling: bool = true,
+        min_threads: u32 = 1,
+        max_threads: u32 = 16,
+    },
+    green_threads: struct {
+        stack_size: usize = 64 * 1024,
+        max_threads: u32 = 1024,
+        io_uring_entries: u32 = 256,
+    },
+    stackless: struct {
+        max_async_frames: u32 = 1024,
+        frame_size: usize = 4096,
+    },
+};
+
+/// Factory for creating Io instances with different execution models
+pub const IoFactory = struct {
+    /// Create an Io instance with the best execution model for the platform
+    pub fn createAuto(allocator: std.mem.Allocator) !IoInstance {
+        const model = ExecutionModel.detect();
+        const config = model.getRecommendedConfig();
+        return createWithConfig(allocator, config);
+    }
+    
+    /// Create an Io instance with explicit configuration
+    pub fn createWithConfig(allocator: std.mem.Allocator, config: ExecutionConfig) !IoInstance {
+        return switch (config) {
+            .blocking => .{
+                .blocking = @import("blocking_io.zig").BlockingIo.init(allocator),
+            },
+            .thread_pool => |tp_config| .{
+                .thread_pool = try @import("threadpool_io.zig").ThreadPoolIo.init(allocator, .{
+                    .num_threads = tp_config.num_threads,
+                    .max_queue_size = tp_config.max_queue_size,
+                    .queue_type = switch (tp_config.queue_type) {
+                        .locked_fifo => .locked_fifo,
+                        .lock_free => .lock_free,
+                        .work_stealing => .work_stealing,
+                    },
+                    .enable_dynamic_scaling = tp_config.enable_dynamic_scaling,
+                    .min_threads = tp_config.min_threads,
+                    .max_threads = tp_config.max_threads,
+                }),
+            },
+            .green_threads => |gt_config| .{
+                .green_threads = try @import("greenthreads_io.zig").GreenThreadsIo.init(allocator, .{
+                    .stack_size = gt_config.stack_size,
+                    .max_threads = gt_config.max_threads,
+                    .io_uring_entries = gt_config.io_uring_entries,
+                }),
+            },
+            .stackless => |sl_config| .{
+                .stackless = try @import("stackless_io.zig").StacklessIo.init(allocator, .{
+                    .max_async_frames = sl_config.max_async_frames,
+                    .frame_size = sl_config.frame_size,
+                }),
+            },
+        };
+    }
+    
+    /// Create a blocking Io instance
+    pub fn createBlocking(allocator: std.mem.Allocator) IoInstance {
+        return .{
+            .blocking = @import("blocking_io.zig").BlockingIo.init(allocator),
+        };
+    }
+    
+    /// Create a thread pool Io instance
+    pub fn createThreadPool(allocator: std.mem.Allocator) !IoInstance {
+        return .{
+            .thread_pool = try @import("threadpool_io.zig").ThreadPoolIo.init(allocator, .{}),
+        };
+    }
+    
+    /// Create a green threads Io instance
+    pub fn createGreenThreads(allocator: std.mem.Allocator) !IoInstance {
+        return .{
+            .green_threads = try @import("greenthreads_io.zig").GreenThreadsIo.init(allocator, .{}),
+        };
+    }
+    
+    /// Create a stackless Io instance
+    pub fn createStackless(allocator: std.mem.Allocator) !IoInstance {
+        return .{
+            .stackless = try @import("stackless_io.zig").StacklessIo.init(allocator, .{}),
+        };
+    }
+};
+
+/// Unified Io instance that can hold any execution model
+pub const IoInstance = union(ExecutionModel) {
+    blocking: @import("blocking_io.zig").BlockingIo,
+    thread_pool: @import("threadpool_io.zig").ThreadPoolIo,
+    green_threads: @import("greenthreads_io.zig").GreenThreadsIo,
+    stackless: @import("stackless_io.zig").StacklessIo,
+    
+    /// Get the Io interface for any execution model
+    pub fn io(self: *IoInstance) Io {
+        return switch (self.*) {
+            .blocking => |*impl| impl.io(),
+            .thread_pool => |*impl| impl.io(),
+            .green_threads => |*impl| impl.io(),
+            .stackless => |*impl| impl.io(),
+        };
+    }
+    
+    /// Deinitialize the Io instance
+    pub fn deinit(self: *IoInstance) void {
+        switch (self.*) {
+            .blocking => |*impl| impl.deinit(),
+            .thread_pool => |*impl| impl.deinit(),
+            .green_threads => |*impl| impl.deinit(),
+            .stackless => |*impl| impl.deinit(),
+        }
+    }
+    
+    /// Get the execution model type
+    pub fn getModel(self: *const IoInstance) ExecutionModel {
+        return switch (self.*) {
+            .blocking => .blocking,
+            .thread_pool => .thread_pool,
+            .green_threads => .green_threads,
+            .stackless => .stackless,
+        };
+    }
+    
+    /// Run the event loop if the execution model supports it
+    pub fn run(self: *IoInstance) !void {
+        switch (self.*) {
+            .green_threads => |*impl| try impl.run(),
+            .stackless => |*impl| try impl.run(),
+            .blocking, .thread_pool => {
+                // These models don't have explicit event loops
+                return;
+            },
+        }
+    }
+};
+
+/// Convenience function to create and run with automatic execution model detection
+pub fn runWithAuto(allocator: std.mem.Allocator, comptime main_func: anytype) !void {
+    var io_instance = try IoFactory.createAuto(allocator);
+    defer io_instance.deinit();
+    
+    const io = io_instance.io();
+    
+    // Run the main function
+    try main_func(io);
+    
+    // Run the event loop if needed
+    try io_instance.run();
 }
 
 fn saveFile(io: Io, data: []const u8, name: []const u8) !void {

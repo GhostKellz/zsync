@@ -667,7 +667,7 @@ test "semantic I/O operations" {
     try testing.expect(limit_bytes.toBytes().? == 1024);
     try testing.expect(!limit_bytes.isUnlimited());
     
-    const limit_none = Limit.none;
+    const limit_none = Limit{ .none = {} };
     try testing.expect(limit_none.toBytes() == null);
     try testing.expect(limit_none.isUnlimited());
 }
