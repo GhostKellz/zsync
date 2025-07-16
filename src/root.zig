@@ -1,11 +1,11 @@
-//! Zsync v0.3.1 - Colorblind Async Runtime for Zig
+//! Zsync v0.3.2 - Colorblind Async Runtime for Zig
 //! Now aligned with Zig's new async I/O paradigm
 //! Same code works across blocking, threaded, and green thread execution models
-//! New in v0.3.1: Zero-copy operations, hardware acceleration, real-time streams
+//! New in v0.3.2: Future combinators, timeout/cancellation, network integration, terminal async
 
 const std = @import("std");
 
-// Zsync v0.3.1 - New Io Interface (Primary APIs)
+// Zsync v0.3.2 - New Io Interface (Primary APIs)
 pub const io_v2 = @import("io_v2.zig");
 pub const BlockingIo = @import("blocking_io.zig").BlockingIo;
 pub const ThreadPoolIo = @import("threadpool_io.zig").ThreadPoolIo;
@@ -16,6 +16,13 @@ pub const StacklessIo = @import("stackless_io.zig").StacklessIo;
 pub const zero_copy = @import("zero_copy.zig");
 pub const hardware_accel = @import("hardware_accel.zig");
 pub const realtime_streams = @import("realtime_streams.zig");
+
+// v0.3.2 - Enhanced Async Features
+pub const future_combinators = @import("future_combinators.zig");
+pub const task_management = @import("task_management.zig");
+pub const network_integration = @import("network_integration.zig");
+pub const async_file_ops = @import("async_file_ops.zig");
+pub const terminal_async = @import("terminal_async.zig");
 
 // Re-export core types for convenience
 pub const Io = io_v2.Io;
@@ -32,6 +39,17 @@ pub const BufferPool = zero_copy.BufferPool;
 pub const HardwareAccel = hardware_accel.HardwareAccel;
 pub const RealtimeStream = realtime_streams.RealtimeStream;
 pub const StreamBuilder = realtime_streams.StreamBuilder;
+
+// Re-export v0.3.2 types
+pub const CancelToken = future_combinators.CancelToken;
+pub const Task = task_management.Task;
+pub const TaskBatch = task_management.TaskBatch;
+pub const NetworkPool = network_integration.NetworkPool;
+pub const NetworkRequest = network_integration.NetworkRequest;
+pub const NetworkResponse = network_integration.NetworkResponse;
+pub const FileOps = async_file_ops.FileOps;
+pub const AsyncPTY = terminal_async.AsyncPTY;
+pub const RenderingPipeline = terminal_async.RenderingPipeline;
 
 // Examples
 pub const saveData = io_v2.saveData;

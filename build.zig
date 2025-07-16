@@ -143,6 +143,22 @@ pub fn build(b: *std.Build) void {
     const concurrent_test_step = b.step("test-concurrent", "Run concurrent future tests");
     concurrent_test_step.dependOn(&run_concurrent_tests.step);
 
+    // v0.3.2 feature tests
+    const v032_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/test_v032_features.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zsync", .module = mod },
+            },
+        }),
+    });
+    const run_v032_tests = b.addRunArtifact(v032_tests);
+    
+    const v032_test_step = b.step("test-v032", "Run v0.3.2 feature tests");
+    v032_test_step.dependOn(&run_v032_tests.step);
+
     // Performance benchmarks
     const bench_exe = b.addExecutable(.{
         .name = "zsync-bench",
@@ -214,6 +230,23 @@ pub fn build(b: *std.Build) void {
     
     const wasm_demo_step = b.step("wasm-demo", "Build WASM demo");
     wasm_demo_step.dependOn(&b.addInstallArtifact(wasm_demo, .{}).step);
+    
+    // v0.3.2 feature demo
+    const v032_demo_exe = b.addExecutable(.{
+        .name = "zsync-v032-demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/v032_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zsync", .module = mod },
+            },
+        }),
+    });
+    
+    const v032_demo_cmd = b.addRunArtifact(v032_demo_exe);
+    const v032_demo_step = b.step("demo-v032", "Run v0.3.2 feature demonstration");
+    v032_demo_step.dependOn(&v032_demo_cmd.step);
     
     // ARM64 build targets
     const arm64_exe = b.addExecutable(.{
