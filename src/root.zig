@@ -1,17 +1,23 @@
-//! Zsync v0.1 - Colorblind Async Runtime for Zig
+//! Zsync v0.3.1 - Colorblind Async Runtime for Zig
 //! Now aligned with Zig's new async I/O paradigm
 //! Same code works across blocking, threaded, and green thread execution models
+//! New in v0.3.1: Zero-copy operations, hardware acceleration, real-time streams
 
 const std = @import("std");
 
-// Zsync v0.1 - New Io Interface (Primary APIs)
+// Zsync v0.3.1 - New Io Interface (Primary APIs)
 pub const io_v2 = @import("io_v2.zig");
 pub const BlockingIo = @import("blocking_io.zig").BlockingIo;
 pub const ThreadPoolIo = @import("threadpool_io.zig").ThreadPoolIo;
 pub const GreenThreadsIo = @import("greenthreads_io.zig").GreenThreadsIo;
 pub const StacklessIo = @import("stackless_io.zig").StacklessIo;
 
-// Re-export core v0.1 types for convenience
+// v0.3.1 - High-Performance Features
+pub const zero_copy = @import("zero_copy.zig");
+pub const hardware_accel = @import("hardware_accel.zig");
+pub const realtime_streams = @import("realtime_streams.zig");
+
+// Re-export core types for convenience
 pub const Io = io_v2.Io;
 pub const Future = io_v2.Future;
 pub const File = io_v2.File;
@@ -20,7 +26,14 @@ pub const TcpStream = io_v2.TcpStream;
 pub const TcpListener = io_v2.TcpListener;
 pub const UdpSocket = io_v2.UdpSocket;
 
-// v0.1 Colorblind async examples
+// Re-export v0.3.1 types
+pub const ZeroCopyIo = zero_copy.ZeroCopyIo;
+pub const BufferPool = zero_copy.BufferPool;
+pub const HardwareAccel = hardware_accel.HardwareAccel;
+pub const RealtimeStream = realtime_streams.RealtimeStream;
+pub const StreamBuilder = realtime_streams.StreamBuilder;
+
+// Examples
 pub const saveData = io_v2.saveData;
 pub const examples_v2 = @import("examples_v2.zig");
 
