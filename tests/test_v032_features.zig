@@ -6,7 +6,7 @@ const testing = std.testing;
 const zsync = @import("zsync");
 
 test "v0.3.2 - Future.all() combinator" {
-    const allocator = testing.allocator;
+    _ = testing.allocator;
     
     // Test CancelToken functionality
     var token = zsync.CancelToken.init();

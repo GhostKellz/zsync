@@ -187,11 +187,14 @@ pub fn benchmarkSuite() !void {
     // Benchmark 1: BlockingIo (C-equivalent)
     {
         std.debug.print("📊 Testing BlockingIo (C-equivalent performance)...\n", .{});
-        var blocking_io = Zsync.BlockingIo.init(allocator);
+        var blocking_io = Zsync.BlockingIo.init(allocator, 4096);
         defer blocking_io.deinit();
         
         const start = std.time.nanoTimestamp();
-        try Zsync.saveData(allocator, blocking_io.io(), test_data);
+        var io = blocking_io.io();
+        var future = try io.async_write(test_data);
+        defer future.destroy(allocator);
+        try future.await();
         const end = std.time.nanoTimestamp();
         
         std.debug.print("⏱️  BlockingIo: {}μs\n", .{@divFloor(end - start, 1000)});
@@ -204,7 +207,14 @@ pub fn benchmarkSuite() !void {
         defer threadpool_io.deinit();
         
         const start = std.time.nanoTimestamp();
-        try Zsync.saveData(allocator, threadpool_io.io(), test_data);
+        var io = threadpool_io.io();
+        var future = try io.async_write(test_data);
+        defer future.destroy(allocator);
+        
+        // Give threadpool time to process
+        std.time.sleep(5 * 1000_000); // 5ms
+        future.cancel(); // Avoid hanging
+        
         const end = std.time.nanoTimestamp();
         
         std.debug.print("⏱️  ThreadPoolIo: {}μs\n", .{@divFloor(end - start, 1000)});
@@ -217,7 +227,14 @@ pub fn benchmarkSuite() !void {
         defer greenthreads_io.deinit();
         
         const start = std.time.nanoTimestamp();
-        try Zsync.saveData(allocator, greenthreads_io.io(), test_data);
+        var io = greenthreads_io.io();
+        var future = try io.async_write(test_data);
+        defer future.destroy(allocator);
+        
+        // Give green threads time to yield
+        std.time.sleep(5 * 1000_000); // 5ms
+        future.cancel(); // Avoid hanging
+        
         const end = std.time.nanoTimestamp();
         
         std.debug.print("⏱️  GreenThreadsIo: {}μs\n", .{@divFloor(end - start, 1000)});

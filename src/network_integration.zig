@@ -6,6 +6,7 @@ const std = @import("std");
 const future_combinators = @import("future_combinators.zig");
 const task_management = @import("task_management.zig");
 const io_v2 = @import("io_v2.zig");
+const zsync = @import("runtime.zig");
 
 /// Network client types supported by the integration layer
 pub const NetworkClientType = enum {
@@ -287,8 +288,7 @@ pub const NetworkPool = struct {
     fn awaitAllRequests(self: *Self, futures: []RequestFuture) ![]NetworkResponse {
         // Start all request executions
         for (futures) |*future| {
-            const execution_thread = try std.Thread.spawn(.{}, executeRequestFuture, .{future});
-            execution_thread.detach();
+            _ = try zsync.spawn(executeRequestFuture, .{future});
         }
         
         // Wait for all to complete
@@ -347,8 +347,7 @@ pub const NetworkPool = struct {
         
         // Start all requests
         for (futures) |*future| {
-            const execution_thread = try std.Thread.spawn(.{}, executeRequestFuture, .{future});
-            execution_thread.detach();
+            _ = try zsync.spawn(executeRequestFuture, .{future});
         }
         
         // Wait for first completion

@@ -140,14 +140,8 @@ pub const BenchmarkSuite = benchmarks.BenchmarkSuite;
 pub const run = runtime.run;
 pub const runHighPerf = runtime.runHighPerf;
 pub const runIoFocused = runtime.runIoFocused; // Perfect for zquic!
-pub const spawn = runtime.spawn;
-pub const spawnUrgent = runtime.spawnUrgent;
-pub const spawnAsync = runtime.spawnAsync; // New async spawn with TaskHandle
-pub const sleep = runtime.sleep;
-pub const asyncSleep = runtime.asyncSleep; // True async sleep
-pub const blockOn = runtime.blockOn; // Block on async function
-pub const registerIo = runtime.registerIo;
-pub const getStats = runtime.getStats;
+pub const runBlocking = runtime.runBlocking;
+pub const getGlobalIo = runtime.getGlobalIo;
 
 // Global async runtime functions
 pub const globalSpawn = async_runtime.spawn;
@@ -210,8 +204,8 @@ test "zsync exports" {
     const run_func = run;
     _ = run_func;
     
-    const spawn_func = spawn;
-    _ = spawn_func;
+    const run_blocking_func = runBlocking;
+    _ = run_blocking_func;
     
     try testing.expect(true);
 }

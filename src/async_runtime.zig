@@ -100,7 +100,7 @@ pub const AsyncRuntime = struct {
     }
 
     /// Spawn a task (compatibility version using scheduler)
-    pub fn spawn(self: *Self, comptime func: anytype, args: anytype) !TaskHandle {
+    pub fn spawn(self: *Self, comptime func: anytype, args: anytype) !*TaskHandle {
         const handle_id = self.next_handle_id.fetchAdd(1, .monotonic);
         
         // Create task handle
@@ -116,7 +116,7 @@ pub const AsyncRuntime = struct {
         // Spawn task via scheduler
         _ = try self.scheduler_instance.spawn(func, args, .normal);
         
-        return handle.*;
+        return handle;
     }
 
     /// Async sleep function
@@ -188,7 +188,7 @@ pub fn getGlobalAsyncRuntime() ?*AsyncRuntime {
 }
 
 /// Spawn a task on the global runtime
-pub fn spawn(comptime func: anytype, args: anytype) !TaskHandle {
+pub fn spawn(comptime func: anytype, args: anytype) !*TaskHandle {
     if (global_async_runtime) |runtime| {
         return runtime.spawn(func, args);
     }
