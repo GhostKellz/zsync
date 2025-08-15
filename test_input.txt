@@ -1,0 +1,26 @@
+Welcome to Zsync v0.4.0!
+========================
+
+This is a test file for the CLI example.
+
+Zsync v0.4.0 features:
+• True colorblind async/await
+• Multiple execution models (blocking, thread pool, green threads)
+• Vectorized I/O operations (readv/writev)
+• Zero-copy optimizations (sendfile, copy_file_range)
+• Platform-specific optimizations
+• Future combinators (race, all, timeout)
+• Cooperative cancellation
+• Comprehensive metrics and monitoring
+
+The same async code works seamlessly across all execution models!
+This demonstrates the power of Zig's colorblind async paradigm.
+
+Performance characteristics:
+• Zero-allocation fast paths
+• Automatic platform detection
+• Kernel-space optimizations on Linux
+• C-equivalent performance in blocking mode
+• True parallelism with thread pools
+
+🚀 The future of Zig async programming!

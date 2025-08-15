@@ -6,6 +6,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 const blocking_io = @import("blocking_io.zig");
+const thread_pool = @import("thread_pool.zig");
+const platform_detect = @import("platform_detect.zig");
 
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
@@ -23,20 +25,76 @@ pub const ExecutionModel = enum {
     
     /// Detect optimal execution model for current platform
     pub fn detect() ExecutionModel {
-        // TODO: Enable other execution models when implemented
-        // return switch (builtin.os.tag) {
-        //     .linux => switch (builtin.cpu.arch) {
-        //         .x86_64 => .green_threads, // io_uring available
-        //         else => .thread_pool,
-        //     },
-        //     .windows => .thread_pool,   // IOCP available
-        //     .macos => .green_threads,   // kqueue available  
-        //     .wasi => .stackless,        // WASM environment
-        //     else => .blocking,          // Fallback
-        // };
+        // Thread pool is now implemented, so we can use it as default
+        return switch (builtin.os.tag) {
+            .linux => detectLinuxOptimal(),
+            .windows => .thread_pool,   // IOCP available
+            .macos => .thread_pool,     // kqueue + GCD available  
+            .freebsd => .thread_pool,   // kqueue available
+            .openbsd => .thread_pool,   // kqueue available
+            .netbsd => .thread_pool,    // kqueue available
+            .dragonfly => .thread_pool, // kqueue available
+            .wasi => .blocking,        // WASM - no threads yet
+            .haiku => .thread_pool,     // Native threading
+            .solaris => .thread_pool,   // Event ports available
+            .illumos => .thread_pool,   // Event ports available
+            .plan9 => .blocking,        // Simple model
+            .fuchsia => .thread_pool,   // Async I/O available
+            else => .blocking,          // Safe fallback
+        };
+    }
+    
+    /// Detect optimal model for Linux distributions
+    fn detectLinuxOptimal() ExecutionModel {
+        const caps = platform_detect.detectSystemCapabilities();
+        const settings = platform_detect.getDistroOptimalSettings(caps.distro);
         
-        // For now, only blocking is implemented
-        return .blocking;
+        // Distribution-specific optimizations
+        switch (caps.distro) {
+            .arch, .fedora, .gentoo, .nixos => {
+                // Cutting-edge distributions with latest kernels
+                if (settings.prefer_io_uring and caps.has_io_uring) {
+                    return .thread_pool; // Will be .green_threads when io_uring is ready
+                }
+                return .thread_pool;
+            },
+            .debian, .ubuntu => {
+                // Conservative, stability-focused distributions
+                if (caps.kernel_version.major >= 5 and caps.kernel_version.minor >= 15) {
+                    // Only use io_uring on very recent kernels for Debian/Ubuntu
+                    return .thread_pool;
+                }
+                return .thread_pool;
+            },
+            .alpine => {
+                // Minimal distribution, prefer lighter threading
+                return .blocking;
+            },
+            else => {
+                // Unknown distribution, use safe defaults
+                return .thread_pool;
+            }
+        }
+    }
+    
+    /// Check if io_uring is available on Linux
+    fn checkIoUringSupport() bool {
+        // Check kernel version (io_uring requires 5.1+)
+        const uname = std.posix.uname();
+        // Parse kernel version from uname.release
+        // Format: major.minor.patch-extra
+        var iter = std.mem.tokenize(u8, &uname.release, ".-");
+        const major = std.fmt.parseInt(u32, iter.next() orelse "0", 10) catch 0;
+        const minor = std.fmt.parseInt(u32, iter.next() orelse "0", 10) catch 0;
+        
+        // io_uring requires kernel 5.1+
+        if (major > 5 or (major == 5 and minor >= 1)) {
+            // Additional check: try to probe io_uring
+            // For now, return true if kernel version is sufficient
+            return true;
+        }
+        
+        return false;
     }
 };
 
@@ -138,7 +196,7 @@ pub const Runtime = struct {
     const IoImplementation = union(ExecutionModel) {
         auto: void, // Will be resolved
         blocking: blocking_io.BlockingIo,
-        thread_pool: void, // TODO: Implement in next phase
+        thread_pool: thread_pool.ThreadPoolIo,
         green_threads: void, // TODO: Implement in next phase  
         stackless: void, // TODO: Implement in next phase
     };
@@ -200,7 +258,13 @@ pub const Runtime = struct {
             .blocking => IoImplementation{
                 .blocking = blocking_io.BlockingIo.init(allocator, config.buffer_size)
             },
-            .thread_pool => IoImplementation{ .thread_pool = {} }, // TODO
+            .thread_pool => IoImplementation{
+                .thread_pool = try thread_pool.ThreadPoolIo.init(
+                    allocator,
+                    config.thread_pool_threads,
+                    config.buffer_size
+                )
+            },
             .green_threads => IoImplementation{ .green_threads = {} }, // TODO
             .stackless => IoImplementation{ .stackless = {} }, // TODO
             .auto => unreachable, // Should be resolved above
@@ -214,7 +278,7 @@ pub const Runtime = struct {
         // Cleanup I/O implementation
         switch (self.io_impl) {
             .blocking => |*blocking| blocking.deinit(),
-            .thread_pool => {}, // TODO
+            .thread_pool => |*tp| tp.deinit(),
             .green_threads => {}, // TODO  
             .stackless => {}, // TODO
             .auto => {},
@@ -245,7 +309,7 @@ pub const Runtime = struct {
     pub fn getIo(self: *Self) Io {
         return switch (self.io_impl) {
             .blocking => |*blocking| blocking.io(),
-            .thread_pool => unreachable, // TODO
+            .thread_pool => |*tp| tp.io(),
             .green_threads => unreachable, // TODO
             .stackless => unreachable, // TODO
             .auto => unreachable,
@@ -437,7 +501,7 @@ pub fn runHighPerf(comptime task_fn: anytype, args: anytype) !void {
     
     const config = Config{
         .execution_model = .thread_pool,
-        .thread_pool_threads = @max(1, std.Thread.getCpuCount() catch 4),
+        .thread_pool_threads = @intCast(@max(1, std.Thread.getCpuCount() catch 4)),
         .enable_zero_copy = true,
         .enable_vectorized_io = true,
         .enable_metrics = true,
