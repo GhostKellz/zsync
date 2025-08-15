@@ -4,8 +4,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const io_interface = @import("io_interface.zig");
-const blocking_io = @import("blocking_io.zig");
+const io_interface = @import("io_interface_v4.zig");
+const blocking_io = @import("blocking_io_v4.zig");
 
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
@@ -23,20 +23,16 @@ pub const ExecutionModel = enum {
     
     /// Detect optimal execution model for current platform
     pub fn detect() ExecutionModel {
-        // TODO: Enable other execution models when implemented
-        // return switch (builtin.os.tag) {
-        //     .linux => switch (builtin.cpu.arch) {
-        //         .x86_64 => .green_threads, // io_uring available
-        //         else => .thread_pool,
-        //     },
-        //     .windows => .thread_pool,   // IOCP available
-        //     .macos => .green_threads,   // kqueue available  
-        //     .wasi => .stackless,        // WASM environment
-        //     else => .blocking,          // Fallback
-        // };
-        
-        // For now, only blocking is implemented
-        return .blocking;
+        return switch (builtin.os.tag) {
+            .linux => switch (builtin.cpu.arch) {
+                .x86_64 => .green_threads, // io_uring available
+                else => .thread_pool,
+            },
+            .windows => .thread_pool,   // IOCP available
+            .macos => .green_threads,   // kqueue available  
+            .wasi => .stackless,        // WASM environment
+            else => .blocking,          // Fallback
+        };
     }
 };
 
@@ -480,12 +476,13 @@ test "Runtime basic operations" {
 }
 
 test "Colorblind async example" {
+    const testing = std.testing;
+    
     const TestTask = struct {
         fn task(io: Io) !void {
             const data = "Hello, Zsync v0.4.0!";
-            var io_mut = io;
-            var future = try io_mut.write(data);
-            defer future.destroy(io.getAllocator());
+            var future = try io.write(data);
+            defer future.destroy(testing.allocator);
             try future.await();
         }
     };

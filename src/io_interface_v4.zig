@@ -271,7 +271,6 @@ pub const Io = struct {
         get_mode: *const fn (context: *anyopaque) IoMode,
         supports_vectorized: *const fn (context: *anyopaque) bool,
         supports_zero_copy: *const fn (context: *anyopaque) bool,
-        get_allocator: *const fn (context: *anyopaque) std.mem.Allocator,
     };
     
     pub fn init(vtable: *const IoVTable, context: *anyopaque) Io {
@@ -360,11 +359,6 @@ pub const Io = struct {
         return self.vtable.supports_zero_copy(self.context);
     }
     
-    /// Get the allocator used by this I/O implementation
-    pub fn getAllocator(self: *const Io) std.mem.Allocator {
-        return self.vtable.get_allocator(self.context);
-    }
-    
     /// Convenience method for simple blocking read
     pub fn readSync(self: *Io, buffer: []u8) IoError!usize {
         var future = try self.read(buffer);
@@ -417,8 +411,9 @@ pub const Combinators = struct {
             
             fn destroy(context: *anyopaque, alloc: std.mem.Allocator) void {
                 const self: *@This() = @ptrCast(@alignCast(context));
-                // Note: individual futures should be cleaned up by the caller
-                // as they may have been created with different allocators
+                for (self.futures) |*future| {
+                    future.destroy(alloc);
+                }
                 alloc.destroy(self);
             }
         };
@@ -474,8 +469,9 @@ pub const Combinators = struct {
             
             fn destroy(context: *anyopaque, alloc: std.mem.Allocator) void {
                 const self: *@This() = @ptrCast(@alignCast(context));
-                // Note: individual futures should be cleaned up by the caller
-                // as they may have been created with different allocators
+                for (self.futures) |*future| {
+                    future.destroy(alloc);
+                }
                 alloc.destroy(self);
             }
         };

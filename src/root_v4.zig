@@ -5,9 +5,9 @@
 const std = @import("std");
 
 // Core v0.4.0 APIs - Colorblind Async Interface
-pub const io_interface = @import("io_interface.zig");
-pub const runtime = @import("runtime.zig");
-pub const blocking_io = @import("blocking_io.zig");
+pub const io_interface = @import("io_interface_v4.zig");
+pub const runtime = @import("runtime_v4.zig");
+pub const blocking_io = @import("blocking_io_v4.zig");
 
 // Re-export core types for convenience
 pub const Io = io_interface.Io;
@@ -48,8 +48,7 @@ pub fn createBlockingIo(allocator: std.mem.Allocator) BlockingIo {
 /// Example colorblind async function that works with ANY Io implementation
 pub fn saveData(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
     // This function is truly colorblind - works in sync or async context
-    var io_mut = io;
-    var future = try io_mut.write(data);
+    var future = try io.write(data);
     defer future.destroy(allocator);
     
     // Colorblind await - adapts to execution context
@@ -58,8 +57,7 @@ pub fn saveData(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
 
 /// Advanced example with timeout and error handling
 pub fn saveDataWithTimeout(allocator: std.mem.Allocator, io: Io, data: []const u8, timeout_ms: u64) !void {
-    var io_mut = io;
-    const write_future = try io_mut.write(data);
+    const write_future = try io.write(data);
     var timeout_future = try Combinators.timeout(allocator, write_future, timeout_ms);
     defer timeout_future.destroy(allocator);
     
@@ -68,9 +66,8 @@ pub fn saveDataWithTimeout(allocator: std.mem.Allocator, io: Io, data: []const u
 
 /// Example of concurrent operations using Future combinators
 pub fn concurrentSave(allocator: std.mem.Allocator, io: Io, data1: []const u8, data2: []const u8) !void {
-    var io_mut = io;
-    var future1 = try io_mut.write(data1);
-    var future2 = try io_mut.write(data2);
+    var future1 = try io.write(data1);
+    var future2 = try io.write(data2);
     
     var futures = [_]Future{ future1, future2 };
     var all_future = try Combinators.all(allocator, &futures);
@@ -79,15 +76,14 @@ pub fn concurrentSave(allocator: std.mem.Allocator, io: Io, data1: []const u8, d
     try all_future.await();
     
     // Clean up individual futures
-    future1.destroy(io.getAllocator());
-    future2.destroy(io.getAllocator());
+    future1.destroy(allocator);
+    future2.destroy(allocator);
 }
 
 /// Example of racing operations
 pub fn raceOperations(allocator: std.mem.Allocator, io: Io, data1: []const u8, data2: []const u8) !void {
-    var io_mut = io;
-    var future1 = try io_mut.write(data1);
-    var future2 = try io_mut.write(data2);
+    var future1 = try io.write(data1);
+    var future2 = try io.write(data2);
     
     var futures = [_]Future{ future1, future2 };
     var race_future = try Combinators.race(allocator, &futures);
@@ -96,8 +92,8 @@ pub fn raceOperations(allocator: std.mem.Allocator, io: Io, data1: []const u8, d
     try race_future.await();
     
     // Clean up
-    future1.destroy(io.getAllocator());
-    future2.destroy(io.getAllocator());
+    future1.destroy(allocator);
+    future2.destroy(allocator);
 }
 
 /// Utility function to detect optimal execution model
@@ -117,7 +113,7 @@ pub fn createOptimalRuntime(allocator: std.mem.Allocator) !*Runtime {
         },
         .thread_pool => Config{
             .execution_model = .thread_pool,
-            .thread_pool_threads = @intCast(@max(1, std.Thread.getCpuCount() catch 4)),
+            .thread_pool_threads = @max(1, std.Thread.getCpuCount() catch 4),
             .enable_zero_copy = true,
             .enable_vectorized_io = true,
         },

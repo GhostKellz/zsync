@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const io_interface = @import("io_interface.zig");
+const io_interface = @import("io_interface_v4.zig");
 
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
@@ -68,11 +68,6 @@ pub const BlockingIo = struct {
         return self.metrics;
     }
     
-    /// Get the allocator used by this implementation
-    pub fn getAllocator(self: *const Self) std.mem.Allocator {
-        return self.allocator;
-    }
-    
     /// VTable implementation for the Io interface
     const vtable = Io.IoVTable{
         .read = read,
@@ -88,7 +83,6 @@ pub const BlockingIo = struct {
         .get_mode = getMode,
         .supports_vectorized = supportsVectorized,
         .supports_zero_copy = supportsZeroCopy,
-        .get_allocator = getAllocatorVtable,
     };
     
     // Implementation functions
@@ -327,12 +321,6 @@ pub const BlockingIo = struct {
     fn supportsZeroCopy(_: *anyopaque) bool {
         return false; // Blocking I/O doesn't support zero-copy
     }
-    
-    /// Get the allocator (vtable function)
-    fn getAllocatorVtable(context: *anyopaque) std.mem.Allocator {
-        const self: *Self = @ptrCast(@alignCast(context));
-        return self.allocator;
-    }
 };
 
 /// Convenience function for simple blocking operations
@@ -343,8 +331,7 @@ pub fn createSimpleBlockingIo(allocator: std.mem.Allocator) BlockingIo {
 /// Example of colorblind async function using BlockingIo
 pub fn exampleBlockingOperation(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
     // This function works identically with ANY Io implementation!
-    var io_mut = io;
-    var write_future = try io_mut.write(data);
+    var write_future = try io.write(data);
     defer write_future.destroy(allocator);
     
     // Colorblind await - works in sync or async context
@@ -364,8 +351,7 @@ test "BlockingIo basic operations" {
     const io = blocking_io.io();
     
     // Test write operation
-    var io_mut = io;
-    var write_future = try io_mut.write("Hello, Zsync v0.4.0!");
+    var write_future = try io.write("Hello, Zsync v0.4.0!");
     defer write_future.destroy(allocator);
     
     try testing.expect(write_future.poll() == .ready);
@@ -387,8 +373,7 @@ test "BlockingIo vectorized write" {
     const io = blocking_io.io();
     
     const data = [_][]const u8{ "Hello", " ", "World", "!" };
-    var io_mut = io;
-    var writev_future = try io_mut.writev(&data);
+    var writev_future = try io.writev(&data);
     defer writev_future.destroy(allocator);
     
     try testing.expect(writev_future.poll() == .ready);

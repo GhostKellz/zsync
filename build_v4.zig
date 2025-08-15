@@ -10,15 +10,15 @@ pub fn build(b: *std.Build) void {
     // Zsync v0.4.0 - Colorblind Async Runtime Module
     // True function color elimination with multiple execution models
     const zsync_mod = b.addModule("zsync", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/root_v4.zig"),
         .target = target,
     });
 
     // Main v0.4.0 executable showcasing all features
     const exe = b.addExecutable(.{
-        .name = "zsync",
+        .name = "zsync-v4",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/main_v4.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -181,6 +181,19 @@ pub fn build(b: *std.Build) void {
     cross_compile_step.dependOn(&b.addInstallArtifact(arm64_macos_exe, .{}).step); // ARM64 macOS
     cross_compile_step.dependOn(&b.addInstallArtifact(windows_exe, .{}).step); // Windows
 
+    // Documentation generation
+    const docs = b.addTest(.{
+        .root_module = zsync_mod,
+    });
+    docs.generated_docs = .{ .include_source = true };
+    
+    const docs_step = b.step("docs", "Generate documentation for Zsync v0.4.0");
+    docs_step.dependOn(&b.addInstallDirectory(.{
+        .source_dir = docs.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    }).step);
+
     // Migration testing - ensure v0.4.0 can run v0.3.x code
     const migration_test = b.addTest(.{
         .root_module = b.createModule(.{
@@ -213,6 +226,9 @@ pub fn build(b: *std.Build) void {
     integration_test_step.dependOn(&b.addRunArtifact(integration_test).step);
 
     // Development tools
+    const fmt_step = b.step("fmt", "Format all source files");
+    fmt_step.makeFn = formatCode;
+
     const check_step = b.step("check", "Check code without building");
     const check = b.addTest(.{
         .root_module = zsync_mod,
@@ -221,13 +237,38 @@ pub fn build(b: *std.Build) void {
 
     // Release preparation
     const release_step = b.step("release", "Prepare release build with all optimizations");
-    release_step.dependOn(test_step);
-    release_step.dependOn(cross_compile_step);
+    release_step.dependOn(&test_step.step);
+    release_step.dependOn(&bench_step.step);
+    release_step.dependOn(&cross_compile_step.step);
+    release_step.dependOn(&docs_step.step);
+
+    // Help message
+    const help_step = b.step("help", "Show available build commands");
+    help_step.makeFn = showHelp;
 }
 
-fn showHelp(step: *std.Build.Step, options: std.Build.Step.MakeOptions) !void {
+fn formatCode(step: *std.Build.Step, progress: *std.Progress.Node) !void {
+    _ = progress;
+    const b = step.owner;
+    
+    const result = try std.ChildProcess.run(.{
+        .allocator = b.allocator,
+        .argv = &[_][]const u8{ "zig", "fmt", "src/", "tests/", "examples/" },
+    });
+    defer b.allocator.free(result.stdout);
+    defer b.allocator.free(result.stderr);
+    
+    if (result.term != .Exited or result.term.Exited != 0) {
+        std.debug.print("Format failed: {s}\n", .{result.stderr});
+        return error.FormatFailed;
+    }
+    
+    std.debug.print("✅ All files formatted successfully\n", .{});
+}
+
+fn showHelp(step: *std.Build.Step, progress: *std.Progress.Node) !void {
     _ = step;
-    _ = options;
+    _ = progress;
     
     std.debug.print(
         \\🚀 Zsync v0.4.0 - The Tokio of Zig

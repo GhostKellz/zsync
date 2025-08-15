@@ -15,7 +15,7 @@ pub fn main() !void {
             // This code works in ANY execution model!
             var io_mut = io;
             var future = try io_mut.write("Hello from Zsync v0.4.0!\n");
-            defer future.destroy(io.getAllocator());
+            defer future.destroy(std.heap.page_allocator);
             
             try future.await();
             
@@ -28,16 +28,18 @@ pub fn main() !void {
     // Run with blocking I/O
     try Zsync.runBlocking(DemoTask.task, {});
     
-    std.debug.print("\n🎉 Demo completed successfully!\n", .{});
-    std.debug.print("The future of Zig async programming is here! 🚀\n", .{});
+    std.debug.print("\n🎉 Demo completed successfully!\n");
+    std.debug.print("The future of Zig async programming is here! 🚀\n");
 }
 
 test "simple zsync test" {
+    const testing = std.testing;
+    
     const TestTask = struct {
         fn task(io: Zsync.Io) !void {
             var io_mut = io;
             var future = try io_mut.write("Test passed!");
-            defer future.destroy(io.getAllocator());
+            defer future.destroy(testing.allocator);
             try future.await();
         }
     };
