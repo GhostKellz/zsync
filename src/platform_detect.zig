@@ -76,9 +76,9 @@ pub fn detectLinuxDistro() LinuxDistro {
     if (std.fs.accessAbsolute("/etc/redhat-release", .{})) |_| {
         // Could be RHEL, CentOS, or Fedora
         const content = std.fs.cwd().readFileAlloc(
-            std.heap.page_allocator,
             "/etc/redhat-release",
-            1024
+            std.heap.page_allocator,
+            std.Io.Limit.limited(1024)
         ) catch return .unknown;
         defer std.heap.page_allocator.free(content);
         

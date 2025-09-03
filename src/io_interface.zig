@@ -70,14 +70,14 @@ pub const CancelToken = struct {
             .cancelled = std.atomic.Value(bool).init(false),
             .reason = reason,
             .parent = null,
-            .children = std.ArrayList(*CancelToken).init(allocator),
+            .children = std.ArrayList(*CancelToken){},
             .allocator = allocator,
         };
         return token;
     }
     
     pub fn deinit(self: *CancelToken) void {
-        self.children.deinit();
+        self.children.deinit(self.allocator);
         self.allocator.destroy(self);
     }
     
@@ -98,7 +98,7 @@ pub const CancelToken = struct {
     
     pub fn addChild(self: *CancelToken, child: *CancelToken) !void {
         child.parent = self;
-        try self.children.append(child);
+        try self.children.append(self.allocator, child);
     }
 };
 
@@ -167,7 +167,7 @@ pub const Future = struct {
                 .pending => {
                     // Yield based on execution mode
                     switch (io_mode) {
-                        .blocking => std.time.sleep(100_000), // 100μs cooperative yield
+                        .blocking => std.Thread.sleep(100_000), // 100μs cooperative yield
                         .evented => yield(), // Platform-specific yield
                         .auto => autoYield(),
                     }
@@ -547,10 +547,10 @@ pub const Combinators = struct {
 // Platform-specific yield implementations
 fn yield() void {
     switch (builtin.os.tag) {
-        .linux => std.time.sleep(1000), // Simple yield
-        .windows => std.time.sleep(1000), // Windows yield not easily accessible
-        .macos => std.time.sleep(1000), // macOS doesn't have direct yield
-        else => std.time.sleep(1000),
+        .linux => std.Thread.sleep(1000), // Simple yield
+        .windows => std.Thread.sleep(1000), // Windows yield not easily accessible
+        .macos => std.Thread.sleep(1000), // macOS doesn't have direct yield
+        else => std.Thread.sleep(1000),
     }
 }
 
@@ -559,7 +559,7 @@ fn autoYield() void {
     if (std.Thread.getCpuCount() catch 1 > 1) {
         yield(); // Multi-core: proper yield
     } else {
-        std.time.sleep(10_000); // Single-core: longer sleep
+        std.Thread.sleep(10_000); // Single-core: longer sleep
     }
 }
 

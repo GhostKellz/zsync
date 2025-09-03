@@ -324,23 +324,8 @@ pub const BlockingIo = struct {
         const sendfile_context = try self.allocator.create(SendFileContext);
         
         // Perform zero-copy file transfer using sendfile()
-        const result = std.posix.sendfile(std.posix.STDOUT_FILENO, src_fd, offset, count, &[_]std.posix.iovec_const{}, &[_]std.posix.iovec_const{}, 0) catch |err| switch (err) {
-            error.AccessDenied => return IoError.AccessDenied,
-            error.BrokenPipe => return IoError.BrokenPipe,
-            error.ConnectionResetByPeer => return IoError.ConnectionReset,
-            error.DeviceBusy => return IoError.SystemResources,
-            error.DiskQuota => return IoError.SystemResources,
-            error.FileTooBig => return IoError.SystemResources,
-            error.InputOutput => return IoError.Unexpected,
-            error.NoSpaceLeft => return IoError.SystemResources,
-            error.NotOpenForReading => return IoError.InvalidDescriptor,
-            error.NotOpenForWriting => return IoError.InvalidDescriptor,
-            error.OperationAborted => return IoError.Interrupted,
-            error.SystemResources => return IoError.SystemResources,
-            error.Unexpected => return IoError.Unexpected,
-            error.WouldBlock => return IoError.WouldBlock,
-            else => return IoError.NotSupported,
-        };
+        var offset_val: i64 = @intCast(offset);
+        const result = std.os.linux.sendfile(std.posix.STDOUT_FILENO, src_fd, &offset_val, count);
         
         sendfile_context.* = SendFileContext{
             .bytes_transferred = result,
@@ -530,7 +515,7 @@ test "BlockingIo basic operations" {
     // Test execution mode
     try testing.expect(io.getMode() == .blocking);
     try testing.expect(io.supportsVectorized());
-    try testing.expect(!io.supportsZeroCopy());
+    try testing.expect(io.supportsZeroCopy() == (builtin.os.tag == .linux));
 }
 
 test "BlockingIo vectorized write" {
