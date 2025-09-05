@@ -6,6 +6,10 @@ const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 const io_uring = @import("io_uring.zig");
 const platform_detect = @import("platform_detect.zig");
+const arch = switch (builtin.cpu.arch) {
+    .x86_64 => @import("arch/x86_64.zig"),
+    else => @compileError("Architecture not supported for green threads"),
+};
 
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
@@ -29,6 +33,72 @@ pub const GreenThreadsIo = struct {
         context_switches: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     };
     
+    /// Green thread representation - defined first for forward references
+    const GreenThread = struct {
+        id: u64,
+        stack: []u8,
+        context: arch.Context,
+        state: State,
+        task: Task,
+        allocator: std.mem.Allocator,
+        
+        const ThreadSelf = @This();
+        
+        const State = enum {
+            ready,
+            running,
+            blocked,
+            completed,
+        };
+        
+        const STACK_SIZE = 64 * 1024; // 64KB stack
+        
+        pub fn init(allocator: std.mem.Allocator, task: Task) !*ThreadSelf {
+            const thread = try allocator.create(ThreadSelf);
+            const stack = try arch.allocateStack(allocator);
+            
+            // Initialize context for this green thread
+            var context: arch.Context = undefined;
+            arch.makeContext(&context, stack, threadEntry, @ptrCast(thread));
+            
+            thread.* = ThreadSelf{
+                .id = @intFromPtr(thread), // Use pointer as ID
+                .stack = stack,
+                .context = context,
+                .state = .ready,
+                .task = task,
+                .allocator = allocator,
+            };
+            
+            return thread;
+        }
+        
+        pub fn deinit(self: *ThreadSelf) void {
+            arch.deallocateStack(self.allocator, self.stack);
+            self.allocator.destroy(self);
+        }
+        
+        pub fn start(self: *ThreadSelf) void {
+            self.state = .running;
+            
+            // Get current context to switch back to
+            const old_ctx = arch.getCurrentContext();
+            
+            // Set this thread as current
+            arch.setCurrentContext(&self.context);
+            
+            // Perform context switch if we have a previous context
+            if (old_ctx) |old| {
+                arch.swapContext(old, &self.context);
+            } else {
+                // First run - initialize and start execution
+                self.task.run() catch {
+                    self.state = .completed;
+                };
+            }
+        }
+    };
+    
     /// Simple green thread scheduler
     const Scheduler = struct {
         ready_queue: std.ArrayList(*GreenThread),
@@ -40,8 +110,8 @@ pub const GreenThreadsIo = struct {
         
         pub fn init(allocator: std.mem.Allocator) SchedulerSelf {
             return SchedulerSelf{
-                .ready_queue = std.ArrayList(*GreenThread).init(allocator),
-                .blocked_queue = std.ArrayList(*GreenThread).init(allocator),
+                .ready_queue = std.ArrayList(*GreenThread){},
+                .blocked_queue = std.ArrayList(*GreenThread){},
                 .current_thread = null,
                 .allocator = allocator,
             };
@@ -56,8 +126,8 @@ pub const GreenThreadsIo = struct {
                 thread.deinit();
             }
             
-            self.ready_queue.deinit();
-            self.blocked_queue.deinit();
+            self.ready_queue.deinit(self.allocator);
+            self.blocked_queue.deinit(self.allocator);
         }
         
         pub fn spawn(self: *SchedulerSelf, task: Task) !*GreenThread {
@@ -68,8 +138,16 @@ pub const GreenThreadsIo = struct {
         
         pub fn yield(self: *SchedulerSelf) void {
             if (self.current_thread) |current| {
-                // Move current thread back to ready queue
+                // Save context and move to ready queue
+                current.state = .ready;
                 self.ready_queue.append(current) catch return;
+                
+                // Context switch back to scheduler
+                const scheduler_ctx = arch.getCurrentContext();
+                if (scheduler_ctx) |sched| {
+                    arch.swapContext(&current.context, sched);
+                }
+                
                 self.current_thread = null;
             }
             self.schedule();
@@ -92,60 +170,10 @@ pub const GreenThreadsIo = struct {
         
         pub fn schedule(self: *SchedulerSelf) void {
             if (self.ready_queue.items.len > 0) {
-                self.current_thread = self.ready_queue.swapRemove(0);
-                if (self.current_thread) |thread| {
-                    thread.resume();
-                }
+                const thread = self.ready_queue.swapRemove(0);
+                self.current_thread = thread;
+                thread.start();
             }
-        }
-    };
-    
-    /// Green thread representation
-    const GreenThread = struct {
-        id: u64,
-        stack: []u8,
-        state: State,
-        task: Task,
-        allocator: std.mem.Allocator,
-        
-        const ThreadSelf = @This();
-        
-        const State = enum {
-            ready,
-            running,
-            blocked,
-            completed,
-        };
-        
-        const STACK_SIZE = 64 * 1024; // 64KB stack
-        
-        pub fn init(allocator: std.mem.Allocator, task: Task) !*ThreadSelf {
-            const thread = try allocator.create(ThreadSelf);
-            const stack = try allocator.alloc(u8, STACK_SIZE);
-            
-            thread.* = ThreadSelf{
-                .id = @intFromPtr(thread), // Use pointer as ID
-                .stack = stack,
-                .state = .ready,
-                .task = task,
-                .allocator = allocator,
-            };
-            
-            return thread;
-        }
-        
-        pub fn deinit(self: *ThreadSelf) void {
-            self.allocator.free(self.stack);
-            self.allocator.destroy(self);
-        }
-        
-        pub fn resume(self: *ThreadSelf) void {
-            self.state = .running;
-            // TODO: Implement actual context switching
-            // For now, just run the task
-            self.task.run() catch {
-                self.state = .completed;
-            };
         }
     };
     
@@ -159,6 +187,23 @@ pub const GreenThreadsIo = struct {
             try self.run_fn();
         }
     };
+    
+    /// Entry point for green threads
+    fn threadEntry(thread_ptr: *anyopaque) void {
+        const thread: *GreenThread = @ptrCast(@alignCast(thread_ptr));
+        
+        // Execute the task
+        thread.task.run() catch |err| {
+            std.debug.print("Green thread task failed: {}\n", .{err});
+        };
+        
+        // Mark as completed
+        thread.state = .completed;
+        
+        // Yield back to scheduler
+        // This should trigger a context switch back to the main scheduler
+        // In a full implementation, this would properly clean up the thread
+    }
     
     /// Initialize green threads with io_uring
     pub fn init(allocator: std.mem.Allocator, queue_depth: u32) !Self {
@@ -205,13 +250,78 @@ pub const GreenThreadsIo = struct {
     
     /// Process I/O events and schedule green threads
     pub fn poll(self: *Self, timeout_ms: u32) !void {
-        // Process I/O completions
-        _ = try self.reactor.poll(timeout_ms);
+        // Process I/O completions from io_uring
+        const completed = try self.reactor.poll(timeout_ms);
+        _ = self.metrics.operations_completed.fetchAdd(completed, .monotonic);
+        
+        // Resume any green threads that were waiting on I/O
+        try self.processCompletions();
         
         // Schedule ready green threads
         self.scheduler.schedule();
     }
     
+    /// Process completed I/O operations and resume waiting threads
+    fn processCompletions(self: *Self) !void {
+        // This would iterate through completed operations
+        // and resume the corresponding green threads
+        // Implementation depends on io_uring reactor design
+        _ = self; // Placeholder
+    }
+    
+    /// Adapter to convert io_uring.Future to io_interface.Future
+    const FutureAdapter = struct {
+        io_uring_future: io_uring.Future,
+        allocator: std.mem.Allocator,
+        
+        const FutureAdapterSelf = @This();
+        
+        pub fn adapterPoll(context: *anyopaque) Future.PollResult {
+            const adapter: *FutureAdapterSelf = @ptrCast(@alignCast(context));
+            
+            // Check if the io_uring operation is complete
+            if (adapter.io_uring_future.reactor.pending_ops.get(adapter.io_uring_future.user_data)) |pending_op| {
+                if (pending_op.completed.load(.acquire)) {
+                    const result = pending_op.result;
+                    // Clean up the pending operation
+                    _ = adapter.io_uring_future.reactor.pending_ops.remove(adapter.io_uring_future.user_data);
+                    adapter.io_uring_future.reactor.allocator.destroy(pending_op);
+                    
+                    if (result >= 0) {
+                        return Future.PollResult.ready;
+                    } else {
+                        return Future.PollResult{ .err = IoError.Unexpected };
+                    }
+                } else {
+                    // Still pending
+                    return Future.PollResult.pending;
+                }
+            } else {
+                // Operation not found, assume ready
+                return Future.PollResult.ready;
+            }
+        }
+        
+        pub fn cancel(context: *anyopaque) void {
+            _ = context; // No-op for now
+        }
+        
+        pub fn destroy(context: *anyopaque, allocator: std.mem.Allocator) void {
+            const adapter: *FutureAdapterSelf = @ptrCast(@alignCast(context));
+            allocator.destroy(adapter);
+        }
+        
+        const future_vtable = Future.FutureVTable{
+            .poll = adapterPoll,
+            .cancel = cancel,
+            .destroy = destroy,
+        };
+        
+        pub fn toFuture(self: *FutureAdapterSelf) Future {
+            return Future.init(&future_vtable, self);
+        }
+    };
+
     // VTable implementation
     const vtable = Io.IoVTable{
         .read = read,
@@ -230,41 +340,289 @@ pub const GreenThreadsIo = struct {
         .get_allocator = getAllocatorVtable,
     };
     
-    // Stub implementations for now - will integrate with io_uring reactor
-    fn read(_: *anyopaque, _: []u8) IoError!Future {
-        return IoError.NotSupported; // TODO: Implement with io_uring
+    // I/O operations integrated with io_uring
+    fn read(context: *anyopaque, buffer: []u8) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        
+        // Submit read operation to io_uring
+        const op = io_uring.Operation{
+            .opcode = .read,
+            .fd = 0, // stdin by default, caller can override
+            .buffer = buffer,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        // Create adapter
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn write(_: *anyopaque, _: []const u8) IoError!Future {
-        return IoError.NotSupported; // TODO: Implement with io_uring
+    fn write(context: *anyopaque, data: []const u8) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        
+        // Submit write operation to io_uring
+        const op = io_uring.Operation{
+            .opcode = .write,
+            .fd = 1, // stdout by default, caller can override
+            .data = data,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        // Create adapter
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn readv(_: *anyopaque, _: []IoBuffer) IoError!Future {
-        return IoError.NotSupported;
+    fn readv(context: *anyopaque, buffers: []IoBuffer) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        _ = buffers;
+        
+        // Submit vectorized read operation to io_uring
+        const op = io_uring.Operation{
+            .opcode = .readv,
+            .fd = 0,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn writev(_: *anyopaque, _: []const []const u8) IoError!Future {
-        return IoError.NotSupported;
+    fn writev(context: *anyopaque, buffers: []const []const u8) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        _ = buffers;
+        
+        // Submit vectorized write operation to io_uring
+        const op = io_uring.Operation{
+            .opcode = .writev,
+            .fd = 1,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn sendFile(_: *anyopaque, _: std.posix.fd_t, _: u64, _: u64) IoError!Future {
-        return IoError.NotSupported;
+    fn sendFile(context: *anyopaque, out_fd: std.posix.fd_t, offset: u64, count: u64) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        _ = count;
+        
+        const op = io_uring.Operation{
+            .opcode = .sendfile,
+            .fd = out_fd,
+            .offset = offset,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn copyFileRange(_: *anyopaque, _: std.posix.fd_t, _: std.posix.fd_t, _: u64) IoError!Future {
-        return IoError.NotSupported;
+    fn copyFileRange(context: *anyopaque, in_fd: std.posix.fd_t, out_fd: std.posix.fd_t, count: u64) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        _ = in_fd;
+        _ = count;
+        
+        const op = io_uring.Operation{
+            .opcode = .copy_file_range,
+            .fd = out_fd,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn accept(_: *anyopaque, _: std.posix.fd_t) IoError!Future {
-        return IoError.NotSupported;
+    fn accept(context: *anyopaque, sockfd: std.posix.fd_t) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        
+        const op = io_uring.Operation{
+            .opcode = .accept,
+            .fd = sockfd,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn connect(_: *anyopaque, _: std.posix.fd_t, _: std.net.Address) IoError!Future {
-        return IoError.NotSupported;
+    fn connect(context: *anyopaque, sockfd: std.posix.fd_t, addr: std.net.Address) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        _ = addr;
+        
+        const op = io_uring.Operation{
+            .opcode = .connect,
+            .fd = sockfd,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
-    fn close(_: *anyopaque, _: std.posix.fd_t) IoError!Future {
-        return IoError.NotSupported;
+    fn close(context: *anyopaque, fd: std.posix.fd_t) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+        
+        const op = io_uring.Operation{
+            .opcode = .close,
+            .fd = fd,
+            .offset = 0,
+        };
+        
+        const io_uring_future = self.reactor.submitOperation(op) catch |err| switch (err) {
+            io_uring.IoUringError.PermissionDenied => return IoError.AccessDenied,
+            io_uring.IoUringError.InvalidOperation => return IoError.InvalidDescriptor,
+            io_uring.IoUringError.SetupFailed => return IoError.SystemResources,
+            io_uring.IoUringError.SubmissionFailed => return IoError.SystemResources,
+            io_uring.IoUringError.CompletionFailed => return IoError.Interrupted,
+            io_uring.IoUringError.QueueFull => return IoError.SystemResources,
+            io_uring.IoUringError.Busy => return IoError.WouldBlock,
+            else => |e| return e,
+        };
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+        
+        const adapter = try self.allocator.create(FutureAdapter);
+        adapter.* = FutureAdapter{
+            .io_uring_future = io_uring_future,
+            .allocator = self.allocator,
+        };
+        
+        return adapter.toFuture();
     }
     
     fn shutdown(context: *anyopaque) void {

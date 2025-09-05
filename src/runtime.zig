@@ -7,6 +7,7 @@ const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 const blocking_io = @import("blocking_io.zig");
 const thread_pool = @import("thread_pool.zig");
+const green_threads = @import("green_threads.zig");
 const platform_detect = @import("platform_detect.zig");
 
 const Io = io_interface.Io;
@@ -109,6 +110,7 @@ pub const Config = struct {
     // Green threads settings  
     green_thread_stack_size: usize = 64 * 1024,
     max_green_threads: u32 = 1024,
+    queue_depth: ?u32 = null,
     
     // Buffer management
     buffer_size: usize = 4096,
@@ -197,7 +199,7 @@ pub const Runtime = struct {
         auto: void, // Will be resolved
         blocking: blocking_io.BlockingIo,
         thread_pool: thread_pool.ThreadPoolIo,
-        green_threads: void, // TODO: Implement in next phase  
+        green_threads: green_threads.GreenThreadsIo,
         stackless: void, // TODO: Implement in next phase
     };
     
@@ -265,7 +267,7 @@ pub const Runtime = struct {
                     config.buffer_size
                 )
             },
-            .green_threads => IoImplementation{ .green_threads = {} }, // TODO
+            .green_threads => IoImplementation{ .green_threads = try green_threads.createGreenThreadsIo(allocator, config.queue_depth orelse 256) },
             .stackless => IoImplementation{ .stackless = {} }, // TODO
             .auto => unreachable, // Should be resolved above
         };
@@ -279,7 +281,7 @@ pub const Runtime = struct {
         switch (self.io_impl) {
             .blocking => |*blocking| blocking.deinit(),
             .thread_pool => |*tp| tp.deinit(),
-            .green_threads => {}, // TODO  
+            .green_threads => |*impl| impl.deinit(),
             .stackless => {}, // TODO
             .auto => {},
         }
@@ -310,7 +312,7 @@ pub const Runtime = struct {
         return switch (self.io_impl) {
             .blocking => |*blocking| blocking.io(),
             .thread_pool => |*tp| tp.io(),
-            .green_threads => unreachable, // TODO
+            .green_threads => |*impl| impl.io(),
             .stackless => unreachable, // TODO
             .auto => unreachable,
         };

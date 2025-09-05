@@ -17,6 +17,7 @@ const CancelToken = io_interface.CancelToken;
 const WorkItem = struct {
     task: Task,
     next: ?*WorkItem,
+    cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     
     const Task = union(enum) {
         read: struct {
@@ -187,6 +188,11 @@ const Worker = struct {
     }
     
     fn processWorkItem(_: *Self, item: *WorkItem) void {
+        // Check if work item was cancelled before processing
+        if (item.cancelled.load(.acquire)) {
+            return;
+        }
+        
         switch (item.task) {
             .read => |*read_task| {
                 // Simulate async read with actual file I/O
@@ -350,8 +356,9 @@ pub const ThreadPoolIo = struct {
             }
             
             fn cancel(ctx: *anyopaque) void {
-                _ = ctx;
-                // TODO: Implement cancellation
+                const read_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                // Mark work item as cancelled
+                read_ctx.work_item.cancelled.store(true, .release);
             }
             
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
@@ -492,8 +499,9 @@ pub const ThreadPoolIo = struct {
             }
             
             fn cancel(ctx: *anyopaque) void {
-                _ = ctx;
-                // TODO: Implement cancellation
+                const readv_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                // Mark work item as cancelled
+                readv_ctx.work_item.cancelled.store(true, .release);
             }
             
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
@@ -566,8 +574,9 @@ pub const ThreadPoolIo = struct {
             }
             
             fn cancel(ctx: *anyopaque) void {
-                _ = ctx;
-                // TODO: Implement cancellation
+                const writev_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                // Mark work item as cancelled
+                writev_ctx.work_item.cancelled.store(true, .release);
             }
             
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {

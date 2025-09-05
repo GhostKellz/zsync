@@ -1,7 +1,7 @@
 .{
     .name = .zsync,
-    .version = "0.5.0",
-    .minimum_zig_version = "0.14.0",
+    .version = "0.5.1",
+    .minimum_zig_version = "0.15.0",
     .fingerprint = 0x782f251579a10b28,
 
     .dependencies = .{},

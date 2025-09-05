@@ -13,6 +13,9 @@ pub const IoUringError = error{
     CompletionFailed,
     QueueFull,
     InvalidOperation,
+    OutOfMemory,
+    PermissionDenied,
+    Busy,
 };
 
 /// SQE (Submission Queue Entry) wrapper
@@ -104,91 +107,299 @@ pub const CompletionEntry = struct {
 /// io_uring ring configuration
 pub const IoUringConfig = struct {
     entries: u32 = 128,
+    sq_poll: bool = false,
     flags: u32 = 0,
     sq_thread_cpu: u32 = 0,
     sq_thread_idle: u32 = 0,
     features: u32 = 0,
 };
 
-/// io_uring ring wrapper
+/// Custom io_uring implementation for maximum compatibility
+const IoUringParams = extern struct {
+    sq_entries: u32 = 0,
+    cq_entries: u32 = 0,
+    flags: u32 = 0,
+    sq_thread_cpu: u32 = 0,
+    sq_thread_idle: u32 = 0,
+    features: u32 = 0,
+    wq_fd: u32 = 0,
+    resv: [3]u32 = [_]u32{0} ** 3,
+    sq_off: SqRingOffsets = .{},
+    cq_off: CqRingOffsets = .{},
+};
+
+const SqRingOffsets = extern struct {
+    head: u32 = 0,
+    tail: u32 = 0,
+    ring_mask: u32 = 0,
+    ring_entries: u32 = 0,
+    flags: u32 = 0,
+    dropped: u32 = 0,
+    array: u32 = 0,
+    resv1: u32 = 0,
+    user_addr: u64 = 0,
+};
+
+const CqRingOffsets = extern struct {
+    head: u32 = 0,
+    tail: u32 = 0,
+    ring_mask: u32 = 0,
+    ring_entries: u32 = 0,
+    overflow: u32 = 0,
+    cqes: u32 = 0,
+    flags: u32 = 0,
+    resv1: u32 = 0,
+    user_addr: u64 = 0,
+};
+
+const IoUringSqe = extern struct {
+    opcode: u8,
+    flags: u8,
+    ioprio: u16,
+    fd: i32,
+    off_addr2: extern union {
+        off: u64,
+        addr2: u64,
+    },
+    addr_splice_off_in: extern union {
+        addr: u64,
+        splice_off_in: u64,
+    },
+    len: u32,
+    op_flags: extern union {
+        rw_flags: u32,
+        fsync_flags: u32,
+        poll_events: u16,
+        poll32_events: u32,
+        sync_range_flags: u32,
+        msg_flags: u32,
+        timeout_flags: u32,
+        accept_flags: u32,
+        cancel_flags: u32,
+        open_flags: u32,
+        statx_flags: u32,
+        fadvise_advice: u32,
+        splice_flags: u32,
+        rename_flags: u32,
+        unlink_flags: u32,
+        hardlink_flags: u32,
+    },
+    user_data: u64,
+    buf_index_personality: extern union {
+        buf_index: u16,
+        personality: u16,
+    },
+    file_index: u16,
+    addr3: u64,
+    __pad2: [1]u64,
+};
+
+const IoUringCqe = extern struct {
+    user_data: u64,
+    res: i32,
+    flags: u32,
+};
+
+/// io_uring ring wrapper  
 pub const IoUring = struct {
-    ring: linux.io_uring,
+    ring_fd: std.posix.fd_t,
+    params: IoUringParams,
+    sq: SubmissionQueue,
+    cq: CompletionQueue,
     allocator: std.mem.Allocator,
     config: IoUringConfig,
     next_user_data: std.atomic.Value(u64),
-
+    
     const Self = @This();
+    
+    const SubmissionQueue = struct {
+        head: *u32,
+        tail: *u32,
+        ring_mask: *u32,
+        ring_entries: *u32,
+        flags: *u32,
+        dropped: *u32,
+        array: [*]u32,
+        sqes: [*]IoUringSqe,
+        mmap_ptr: []align(4096) u8,
+        sqe_mmap_ptr: []align(4096) u8,
+    };
+    
+    const CompletionQueue = struct {
+        head: *u32,
+        tail: *u32,
+        ring_mask: *u32,
+        ring_entries: *u32,
+        overflow: *u32,
+        cqes: [*]IoUringCqe,
+        mmap_ptr: ?[]align(4096) u8,
+    };
+    
+    // io_uring syscall constants
+    const IORING_SETUP_IOPOLL: u32 = 1 << 0;
+    const IORING_SETUP_SQPOLL: u32 = 1 << 1;
+    const IORING_SETUP_SQ_AFF: u32 = 1 << 2;
+    const IORING_SETUP_CQSIZE: u32 = 1 << 3;
+    
+    const IORING_OFF_SQ_RING: u64 = 0;
+    const IORING_OFF_CQ_RING: u64 = 0x8000000;
+    const IORING_OFF_SQES: u64 = 0x10000000;
+    
+    // io_uring opcodes
+    const IORING_OP_NOP: u8 = 0;
+    const IORING_OP_READV: u8 = 1;
+    const IORING_OP_WRITEV: u8 = 2;
+    const IORING_OP_FSYNC: u8 = 3;
+    const IORING_OP_READ_FIXED: u8 = 4;
+    const IORING_OP_WRITE_FIXED: u8 = 5;
+    const IORING_OP_POLL_ADD: u8 = 6;
+    const IORING_OP_POLL_REMOVE: u8 = 7;
+    const IORING_OP_SYNC_FILE_RANGE: u8 = 8;
+    const IORING_OP_SENDMSG: u8 = 9;
+    const IORING_OP_RECVMSG: u8 = 10;
+    const IORING_OP_TIMEOUT: u8 = 11;
+    const IORING_OP_TIMEOUT_REMOVE: u8 = 12;
+    const IORING_OP_ACCEPT: u8 = 13;
+    const IORING_OP_ASYNC_CANCEL: u8 = 14;
+    const IORING_OP_LINK_TIMEOUT: u8 = 15;
+    const IORING_OP_CONNECT: u8 = 16;
+    const IORING_OP_FALLOCATE: u8 = 17;
+    const IORING_OP_OPENAT: u8 = 18;
+    const IORING_OP_CLOSE: u8 = 19;
+    const IORING_OP_FILES_UPDATE: u8 = 20;
+    const IORING_OP_STATX: u8 = 21;
+    const IORING_OP_READ: u8 = 22;
+    const IORING_OP_WRITE: u8 = 23;
+    const IORING_OP_FADVISE: u8 = 24;
+    const IORING_OP_MADVISE: u8 = 25;
+    const IORING_OP_SEND: u8 = 26;
+    const IORING_OP_RECV: u8 = 27;
+    const IORING_OP_OPENAT2: u8 = 28;
+    const IORING_OP_EPOLL_CTL: u8 = 29;
+    const IORING_OP_SPLICE: u8 = 30;
+    const IORING_OP_PROVIDE_BUFFERS: u8 = 31;
+    const IORING_OP_REMOVE_BUFFERS: u8 = 32;
+    
+    // Raw syscall wrappers  
+    fn io_uring_setup(entries: u32, params: *IoUringParams) i32 {
+        // Use the raw syscall with correct enum values
+        const SYS_io_uring_setup = @as(std.os.linux.syscalls.X64, @enumFromInt(425)); // Linux syscall number
+        return @intCast(std.os.linux.syscall2(SYS_io_uring_setup, entries, @intFromPtr(params)));
+    }
+    
+    fn io_uring_enter(fd: i32, to_submit: u32, min_complete: u32, flags: u32, sig: ?*anyopaque) i32 {
+        const SYS_io_uring_enter = @as(std.os.linux.syscalls.X64, @enumFromInt(426)); // Linux syscall number
+        const sig_ptr = if (sig) |s| @intFromPtr(s) else 0;
+        return @intCast(std.os.linux.syscall5(SYS_io_uring_enter, @as(usize, @bitCast(@as(isize, fd))), to_submit, min_complete, flags, sig_ptr));
+    }
 
-    /// Initialize io_uring
+    /// Initialize io_uring with full implementation
     pub fn init(allocator: std.mem.Allocator, config: IoUringConfig) !Self {
         if (builtin.os.tag != .linux) {
             return IoUringError.NotSupported;
         }
-
-        var ring: linux.io_uring = undefined;
-        const setup_result = linux.io_uring_setup(config.entries, &ring.params);
         
-        if (linux.getErrno(setup_result) != .SUCCESS) {
-            return IoUringError.SetupFailed;
+        // Initialize io_uring parameters
+        var params = IoUringParams{
+            .sq_entries = 0, // Will be set by kernel
+            .cq_entries = 0, // Will be set by kernel
+            .flags = if (config.sq_poll) IORING_SETUP_SQPOLL else 0,
+        };
+        
+        // Call io_uring_setup syscall
+        const ring_fd = io_uring_setup(config.entries, &params);
+        if (ring_fd < 0) {
+            // Error handling for syscall failures
+            const errno_val = @as(u32, @intCast(-ring_fd));
+            return switch (errno_val) {
+                38 => IoUringError.NotSupported, // ENOSYS
+                12 => IoUringError.OutOfMemory,  // ENOMEM  
+                1 => IoUringError.PermissionDenied, // EPERM
+                else => IoUringError.SetupFailed,
+            };
         }
-
-        ring.ring_fd = @intCast(setup_result);
-
-        // Map the submission and completion queues
-        const sq_size = ring.params.sq_off.array + ring.params.sq_entries * @sizeOf(u32);
-        const cq_size = ring.params.cq_off.cqes + ring.params.cq_entries * @sizeOf(linux.io_uring_cqe);
-
-        const sq_ptr = std.posix.mmap(
+        
+        // Calculate memory map sizes
+        const sq_size = params.sq_off.array + params.sq_entries * @sizeOf(u32);
+        const cq_size = params.cq_off.cqes + params.cq_entries * @sizeOf(IoUringCqe);
+        const sqe_size = params.sq_entries * @sizeOf(IoUringSqe);
+        
+        // Map submission queue
+        const sq_mmap = std.posix.mmap(
             null,
             sq_size,
             std.posix.PROT.READ | std.posix.PROT.WRITE,
             .{ .TYPE = .SHARED },
-            ring.ring_fd,
-            linux.IORING_OFF_SQ_RING,
-        ) catch return IoUringError.SetupFailed;
-
-        const cq_ptr = if (ring.params.features & linux.IORING_FEAT_SINGLE_MMAP != 0)
-            sq_ptr
+            ring_fd,
+            IORING_OFF_SQ_RING,
+        ) catch {
+            std.posix.close(ring_fd);
+            return IoUringError.SetupFailed;
+        };
+        
+        // Map completion queue (may be shared with SQ)
+        const cq_mmap = if (params.features & 0x1 != 0) // IORING_FEAT_SINGLE_MMAP
+            null
         else
             std.posix.mmap(
                 null,
                 cq_size,
                 std.posix.PROT.READ | std.posix.PROT.WRITE,
                 .{ .TYPE = .SHARED },
-                ring.ring_fd,
-                linux.IORING_OFF_CQ_RING,
-            ) catch return IoUringError.SetupFailed;
-
-        // Map the submission queue entries
-        const sqe_size = ring.params.sq_entries * @sizeOf(linux.io_uring_sqe);
-        const sqe_ptr = std.posix.mmap(
+                ring_fd,
+                IORING_OFF_CQ_RING,
+            ) catch {
+                std.posix.munmap(sq_mmap);
+                std.posix.close(ring_fd);
+                return IoUringError.SetupFailed;
+            };
+        
+        // Map submission queue entries
+        const sqe_mmap = std.posix.mmap(
             null,
             sqe_size,
             std.posix.PROT.READ | std.posix.PROT.WRITE,
             .{ .TYPE = .SHARED },
-            ring.ring_fd,
-            linux.IORING_OFF_SQES,
-        ) catch return IoUringError.SetupFailed;
-
-        // Initialize pointers
-        ring.sq.head = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.head));
-        ring.sq.tail = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.tail));
-        ring.sq.ring_mask = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.ring_mask));
-        ring.sq.ring_entries = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.ring_entries));
-        ring.sq.flags = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.flags));
-        ring.sq.dropped = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.dropped));
-        ring.sq.array = @as(*u32, @ptrFromInt(@intFromPtr(sq_ptr) + ring.params.sq_off.array));
-        ring.sq.sqes = @as(*linux.io_uring_sqe, @ptrFromInt(@intFromPtr(sqe_ptr)));
-
-        ring.cq.head = @as(*u32, @ptrFromInt(@intFromPtr(cq_ptr) + ring.params.cq_off.head));
-        ring.cq.tail = @as(*u32, @ptrFromInt(@intFromPtr(cq_ptr) + ring.params.cq_off.tail));
-        ring.cq.ring_mask = @as(*u32, @ptrFromInt(@intFromPtr(cq_ptr) + ring.params.cq_off.ring_mask));
-        ring.cq.ring_entries = @as(*u32, @ptrFromInt(@intFromPtr(cq_ptr) + ring.params.cq_off.ring_entries));
-        ring.cq.overflow = @as(*u32, @ptrFromInt(@intFromPtr(cq_ptr) + ring.params.cq_off.overflow));
-        ring.cq.cqes = @as(*linux.io_uring_cqe, @ptrFromInt(@intFromPtr(cq_ptr) + ring.params.cq_off.cqes));
-
+            ring_fd,
+            IORING_OFF_SQES,
+        ) catch {
+            if (cq_mmap) |cq| std.posix.munmap(cq);
+            std.posix.munmap(sq_mmap);
+            std.posix.close(ring_fd);
+            return IoUringError.SetupFailed;
+        };
+        
+        // Initialize submission queue pointers
+        const sq = SubmissionQueue{
+            .head = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.head),
+            .tail = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.tail),
+            .ring_mask = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.ring_mask),
+            .ring_entries = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.ring_entries),
+            .flags = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.flags),
+            .dropped = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.dropped),
+            .array = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.array),
+            .sqes = @ptrCast(sqe_mmap.ptr),
+            .mmap_ptr = sq_mmap,
+            .sqe_mmap_ptr = sqe_mmap,
+        };
+        
+        // Initialize completion queue pointers
+        const cq_ptr = cq_mmap orelse sq_mmap;
+        const cq = CompletionQueue{
+            .head = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.head),
+            .tail = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.tail),
+            .ring_mask = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.ring_mask),
+            .ring_entries = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.ring_entries),
+            .overflow = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.overflow),
+            .cqes = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.cqes),
+            .mmap_ptr = cq_mmap,
+        };
+        
         return Self{
-            .ring = ring,
+            .ring_fd = ring_fd,
+            .params = params,
+            .sq = sq,
+            .cq = cq,
             .allocator = allocator,
             .config = config,
             .next_user_data = std.atomic.Value(u64).init(1),
@@ -197,215 +408,317 @@ pub const IoUring = struct {
 
     /// Deinitialize io_uring
     pub fn deinit(self: *Self) void {
-        std.posix.close(self.ring.ring_fd);
+        // Clean up memory mappings
+        std.posix.munmap(self.sq.sqe_mmap_ptr);
+        std.posix.munmap(self.sq.mmap_ptr);
+        if (self.cq.mmap_ptr) |cq_mmap| {
+            std.posix.munmap(cq_mmap);
+        }
+        
+        // Close the ring file descriptor
+        std.posix.close(self.ring_fd);
     }
 
     /// Get a submission queue entry
-    pub fn getSqe(self: *Self) ?SubmissionEntry {
-        const tail = self.ring.sq.tail.*;
-        const head = @atomicLoad(u32, self.ring.sq.head, .acquire);
-        const mask = self.ring.sq.ring_mask.*;
-
-        if (tail - head >= self.ring.sq.ring_entries.*) {
-            return null; // Queue full
+    pub fn getSqe(self: *Self) ?*IoUringSqe {
+        const tail = self.sq.tail.*;
+        const head = @atomicLoad(u32, self.sq.head, .acquire);
+        const mask = self.sq.ring_mask.*;
+        
+        // Check if submission queue is full
+        if (tail - head >= self.sq.ring_entries.*) {
+            return null;
         }
-
-        const index = tail & mask;
-        const sqe = &self.ring.sq.sqes[index];
-        const user_data = self.next_user_data.fetchAdd(1, .monotonic);
-
-        return SubmissionEntry{
-            .sqe = sqe,
-            .user_data = user_data,
-        };
+        
+        const idx = tail & mask;
+        return &self.sq.sqes[idx];
     }
-
-    /// Submit all pending operations
+    
+    /// Submit a single SQE
+    pub fn submitSqe(self: *Self, _: *IoUringSqe) void {
+        const tail = self.sq.tail.*;
+        const mask = self.sq.ring_mask.*;
+        const idx = tail & mask;
+        
+        // Set the array entry to point to this SQE
+        self.sq.array[idx] = @intCast(idx);
+        
+        // Advance the tail
+        @atomicStore(u32, self.sq.tail, tail + 1, .release);
+    }
+    
+    /// Submit all pending SQEs and optionally wait for completions
     pub fn submit(self: *Self) !u32 {
-        const result = linux.io_uring_enter(
-            self.ring.ring_fd,
-            0, // to_submit (auto-calculated)
-            0, // min_complete
-            0, // flags
-            null, // sig
-        );
-
-        if (linux.getErrno(result) != .SUCCESS) {
-            return IoUringError.SubmissionFailed;
-        }
-
-        return @intCast(result);
-    }
-
-    /// Submit and wait for completions
-    pub fn submitAndWait(self: *Self, wait_nr: u32) !u32 {
-        const result = linux.io_uring_enter(
-            self.ring.ring_fd,
-            0, // to_submit
-            wait_nr,
-            linux.IORING_ENTER_GETEVENTS,
-            null, // sig
-        );
-
-        if (linux.getErrno(result) != .SUCCESS) {
-            return IoUringError.SubmissionFailed;
-        }
-
-        return @intCast(result);
-    }
-
-    /// Peek at completion queue
-    pub fn peekCqe(self: *Self) ?CompletionEntry {
-        const head = @atomicLoad(u32, self.ring.cq.head, .acquire);
-        const tail = self.ring.cq.tail.*;
-
-        if (head == tail) {
-            return null; // No completions
-        }
-
-        const mask = self.ring.cq.ring_mask.*;
-        const index = head & mask;
-        const cqe = &self.ring.cq.cqes[index];
-
-        return CompletionEntry{ .cqe = cqe };
-    }
-
-    /// Advance completion queue head
-    pub fn cqAdvance(self: *Self, count: u32) void {
-        @atomicStore(u32, self.ring.cq.head, self.ring.cq.head.* + count, .release);
-    }
-
-    /// Wait for and return a completion
-    pub fn waitCqe(self: *Self) !CompletionEntry {
-        // Check if completion is already available
-        if (self.peekCqe()) |cqe| {
-            return cqe;
-        }
-
-        // Submit and wait for at least one completion
-        _ = try self.submitAndWait(1);
-
-        // Should have at least one completion now
-        return self.peekCqe() orelse IoUringError.CompletionFailed;
-    }
-
-    /// Process all available completions
-    pub fn processCompletions(self: *Self, handler: anytype) !u32 {
-        var processed: u32 = 0;
+        const tail = self.sq.tail.*;
+        const head = @atomicLoad(u32, self.sq.head, .acquire);
+        const to_submit = tail - head;
         
-        while (self.peekCqe()) |cqe| {
-            handler(cqe) catch {};
-            self.cqAdvance(1);
-            processed += 1;
+        if (to_submit == 0) {
+            return 0;
         }
-
-        return processed;
+        
+        const ret = io_uring_enter(self.ring_fd, to_submit, 0, 0, null);
+        if (ret < 0) {
+            const errno_val = @as(u32, @intCast(-ret));
+            return switch (errno_val) {
+                16 => IoUringError.Busy,     // EBUSY
+                22 => IoUringError.SetupFailed, // EINVAL -> SetupFailed (more appropriate) 
+                else => IoUringError.SubmissionFailed,
+            };
+        }
+        
+        return @intCast(ret);
     }
-};
-
-/// Async I/O operation future
-pub const AsyncIoOp = struct {
-    user_data: u64,
-    completed: bool = false,
-    result: i32 = 0,
-    error_code: std.posix.E = .SUCCESS,
-
-    const Self = @This();
-
-    pub fn init(user_data: u64) Self {
-        return Self{ .user_data = user_data };
+    
+    /// Wait for and retrieve completion events
+    pub fn getCompletions(self: *Self, cqes: []IoUringCqe) u32 {
+        var count: u32 = 0;
+        const head = self.cq.head.*;
+        const tail = @atomicLoad(u32, self.cq.tail, .acquire);
+        const mask = self.cq.ring_mask.*;
+        
+        var current_head = head;
+        while (current_head != tail and count < cqes.len) {
+            const idx = current_head & mask;
+            cqes[count] = self.cq.cqes[idx];
+            current_head += 1;
+            count += 1;
+        }
+        
+        if (count > 0) {
+            @atomicStore(u32, self.cq.head, current_head, .release);
+        }
+        
+        return count;
     }
-
-    pub fn isReady(self: *const Self) bool {
-        return self.completed;
-    }
-
-    pub fn getResult(self: *const Self) !i32 {
-        if (!self.completed) return error.NotReady;
-        if (self.error_code != .SUCCESS) return std.posix.unexpectedErrno(self.error_code);
-        return self.result;
-    }
-
-    pub fn complete(self: *Self, result: i32, error_code: std.posix.E) void {
-        self.result = result;
-        self.error_code = error_code;
-        self.completed = true;
-    }
-};
-
-/// io_uring-based reactor for high-performance I/O
-pub const IoUringReactor = struct {
-    ring: IoUring,
-    pending_ops: std.HashMap(u64, *AsyncIoOp, std.hash_map.AutoContext(u64), std.hash_map.default_max_load_percentage),
-    allocator: std.mem.Allocator,
-
-    const Self = @This();
-
-    pub fn init(allocator: std.mem.Allocator, config: IoUringConfig) !Self {
-        return Self{
-            .ring = try IoUring.init(allocator, config),
-            .pending_ops = std.HashMap(u64, *AsyncIoOp, std.hash_map.AutoContext(u64), std.hash_map.default_max_load_percentage).init(allocator),
-            .allocator = allocator,
+    
+    /// Setup a read operation
+    pub fn prepRead(sqe: *IoUringSqe, fd: i32, buffer: []u8, offset: u64, user_data: u64) void {
+        sqe.* = IoUringSqe{
+            .opcode = IORING_OP_READ,
+            .flags = 0,
+            .ioprio = 0,
+            .fd = fd,
+            .off_addr2 = .{ .off = offset },
+            .addr_splice_off_in = .{ .addr = @intFromPtr(buffer.ptr) },
+            .len = @intCast(buffer.len),
+            .op_flags = .{ .rw_flags = 0 },
+            .user_data = user_data,
+            .buf_index_personality = .{ .buf_index = 0 },
+            .file_index = 0,
+            .addr3 = 0,
+            .__pad2 = [_]u64{0},
         };
     }
-
-    pub fn deinit(self: *Self) void {
-        self.ring.deinit();
-        self.pending_ops.deinit();
+    
+    /// Setup a write operation
+    pub fn prepWrite(sqe: *IoUringSqe, fd: i32, data: []const u8, offset: u64, user_data: u64) void {
+        sqe.* = IoUringSqe{
+            .opcode = IORING_OP_WRITE,
+            .flags = 0,
+            .ioprio = 0,
+            .fd = fd,
+            .off_addr2 = .{ .off = offset },
+            .addr_splice_off_in = .{ .addr = @intFromPtr(data.ptr) },
+            .len = @intCast(data.len),
+            .op_flags = .{ .rw_flags = 0 },
+            .user_data = user_data,
+            .buf_index_personality = .{ .buf_index = 0 },
+            .file_index = 0,
+            .addr3 = 0,
+            .__pad2 = [_]u64{0},
+        };
     }
-
-    /// Async read operation
-    pub fn readAsync(self: *Self, fd: i32, buffer: []u8, offset: u64) !*AsyncIoOp {
-        const sqe = self.ring.getSqe() orelse return IoUringError.QueueFull;
-        
-        const op = try self.allocator.create(AsyncIoOp);
-        op.* = AsyncIoOp.init(sqe.user_data);
-        
-        sqe.prepRead(fd, buffer, offset);
-        try self.pending_ops.put(sqe.user_data, op);
-        
-        return op;
+    
+    /// Setup an accept operation
+    pub fn prepAccept(sqe: *IoUringSqe, fd: i32, addr: ?*std.net.Address, user_data: u64) void {
+        sqe.* = IoUringSqe{
+            .opcode = IORING_OP_ACCEPT,
+            .flags = 0,
+            .ioprio = 0,
+            .fd = fd,
+            .off_addr2 = .{ .off = 0 },
+            .addr_splice_off_in = .{ .addr = if (addr) |a| @intFromPtr(a) else 0 },
+            .len = if (addr != null) @sizeOf(std.net.Address) else 0,
+            .op_flags = .{ .accept_flags = 0 },
+            .user_data = user_data,
+            .buf_index_personality = .{ .buf_index = 0 },
+            .file_index = 0,
+            .addr3 = 0,
+            .__pad2 = [_]u64{0},
+        };
     }
-
-    /// Async write operation
-    pub fn writeAsync(self: *Self, fd: i32, buffer: []const u8, offset: u64) !*AsyncIoOp {
-        const sqe = self.ring.getSqe() orelse return IoUringError.QueueFull;
-        
-        const op = try self.allocator.create(AsyncIoOp);
-        op.* = AsyncIoOp.init(sqe.user_data);
-        
-        sqe.prepWrite(fd, buffer, offset);
-        try self.pending_ops.put(sqe.user_data, op);
-        
-        return op;
+    
+    /// Setup a connect operation
+    pub fn prepConnect(sqe: *IoUringSqe, fd: i32, addr: *const std.net.Address, user_data: u64) void {
+        sqe.* = IoUringSqe{
+            .opcode = IORING_OP_CONNECT,
+            .flags = 0,
+            .ioprio = 0,
+            .fd = fd,
+            .off_addr2 = .{ .off = 0 },
+            .addr_splice_off_in = .{ .addr = @intFromPtr(addr) },
+            .len = @sizeOf(std.net.Address),
+            .op_flags = .{ .rw_flags = 0 },
+            .user_data = user_data,
+            .buf_index_personality = .{ .buf_index = 0 },
+            .file_index = 0,
+            .addr3 = 0,
+            .__pad2 = [_]u64{0},
+        };
     }
+    
+    /// Setup a close operation
+    pub fn prepClose(sqe: *IoUringSqe, fd: i32, user_data: u64) void {
+        sqe.* = IoUringSqe{
+            .opcode = IORING_OP_CLOSE,
+            .flags = 0,
+            .ioprio = 0,
+            .fd = fd,
+            .off_addr2 = .{ .off = 0 },
+            .addr_splice_off_in = .{ .addr = 0 },
+            .len = 0,
+            .op_flags = .{ .rw_flags = 0 },
+            .user_data = user_data,
+            .buf_index_personality = .{ .buf_index = 0 },
+            .file_index = 0,
+            .addr3 = 0,
+            .__pad2 = [_]u64{0},
+        };
+    }
+};
 
-    /// Process I/O events
-    pub fn poll(self: *Self, timeout_ms: u32) !u32 {
-        _ = timeout_ms;
-        
-        // Submit pending operations
-        _ = try self.ring.submit();
-        
-        // Process completions
-        const CompletionHandler = struct {
-            reactor: *Self,
-            
-            fn handleCompletion(handler: @This(), cqe: CompletionEntry) void {
-                const user_data = cqe.getUserData();
-                if (handler.reactor.pending_ops.get(user_data)) |op| {
-                    const result = cqe.getResult();
-                    const error_code = if (cqe.isError()) cqe.getError() else .SUCCESS;
-                    op.complete(result, error_code);
-                    
-                    _ = handler.reactor.pending_ops.remove(user_data);
-                    handler.reactor.allocator.destroy(op);
+/// Operation types for io_uring
+pub const Operation = struct {
+    opcode: enum { read, write, readv, writev, accept, connect, close, sendfile, copy_file_range },
+    fd: i32,
+    buffer: []u8 = &[_]u8{},
+    data: []const u8 = &[_]u8{},
+    offset: u64 = 0,
+    addr: ?*std.net.Address = null,
+};
+
+/// Future-like structure for async operations
+pub const Future = struct {
+    user_data: u64,
+    reactor: *IoUringReactor,
+    
+    const FutureSelf = @This();
+    
+    pub fn await(self: FutureSelf) !i32 {
+        // Polling until completion
+        while (true) {
+            if (self.reactor.pending_ops.get(self.user_data)) |pending_op| {
+                if (pending_op.completed.load(.acquire)) {
+                    const result = pending_op.result;
+                    // Clean up
+                    _ = self.reactor.pending_ops.remove(self.user_data);
+                    self.reactor.allocator.destroy(pending_op);
+                    return result;
                 }
             }
-        };
+            
+            // Poll for more completions
+            _ = self.reactor.poll(1) catch 0;
+            std.time.sleep(1000000); // 1ms
+        }
+    }
+    
+    pub fn destroy(self: FutureSelf, _: std.mem.Allocator) void {
+        // Cleanup if operation is still pending
+        if (self.reactor.pending_ops.get(self.user_data)) |pending_op| {
+            _ = self.reactor.pending_ops.remove(self.user_data);
+            self.reactor.allocator.destroy(pending_op);
+        }
+    }
+};
+
+/// High-level io_uring reactor for async operations
+pub const IoUringReactor = struct {
+    ring: IoUring,
+    allocator: std.mem.Allocator,
+    pending_ops: std.AutoHashMap(u64, *PendingOperation),
+    
+    const Self = @This();
+    
+    const PendingOperation = struct {
+        result: i32 = 0,
+        completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        waker: ?*anyopaque = null,
+    };
+    
+    pub fn init(allocator: std.mem.Allocator, config: IoUringConfig) !Self {
+        const ring = try IoUring.init(allocator, config);
         
-        const handler = CompletionHandler{ .reactor = self };
-        return self.ring.processCompletions(handler.handleCompletion);
+        return Self{
+            .ring = ring,
+            .allocator = allocator,
+            .pending_ops = std.AutoHashMap(u64, *PendingOperation).init(allocator),
+        };
+    }
+    
+    pub fn deinit(self: *Self) void {
+        // Clean up any remaining pending operations
+        var iterator = self.pending_ops.iterator();
+        while (iterator.next()) |entry| {
+            self.allocator.destroy(entry.value_ptr.*);
+        }
+        self.pending_ops.deinit();
+        
+        self.ring.deinit();
+    }
+    
+    /// Submit an operation and return a Future-like structure
+    pub fn submitOperation(self: *Self, operation: Operation) !Future {
+        const sqe = self.ring.getSqe() orelse return IoUringError.QueueFull;
+        const user_data = self.ring.next_user_data.fetchAdd(1, .monotonic);
+        
+        // Create pending operation tracking
+        const pending_op = try self.allocator.create(PendingOperation);
+        pending_op.* = PendingOperation{};
+        
+        try self.pending_ops.put(user_data, pending_op);
+        
+        // Setup the SQE based on operation type
+        switch (operation.opcode) {
+            .read => IoUring.prepRead(sqe, operation.fd, operation.buffer, operation.offset, user_data),
+            .write => IoUring.prepWrite(sqe, operation.fd, @constCast(operation.data), operation.offset, user_data),
+            .accept => IoUring.prepAccept(sqe, operation.fd, operation.addr, user_data),
+            .connect => IoUring.prepConnect(sqe, operation.fd, operation.addr.?, user_data),
+            .close => IoUring.prepClose(sqe, operation.fd, user_data),
+            else => return IoUringError.NotSupported,
+        }
+        
+        self.ring.submitSqe(sqe);
+        _ = try self.ring.submit();
+        
+        return Future{
+            .user_data = user_data,
+            .reactor = self,
+        };
+    }
+    
+    /// Poll for completions and process them
+    pub fn poll(self: *Self, timeout_ms: u32) !u32 {
+        _ = timeout_ms; // TODO: Implement timeout
+        
+        var cqes: [32]IoUringCqe = undefined;
+        const count = self.ring.getCompletions(&cqes);
+        
+        for (cqes[0..count]) |cqe| {
+            if (self.pending_ops.get(cqe.user_data)) |pending_op| {
+                pending_op.result = cqe.res;
+                pending_op.completed.store(true, .release);
+                
+                // Wake up any waiting futures
+                if (pending_op.waker) |waker| {
+                    // Wake the future - implementation depends on waker type
+                    _ = waker;
+                }
+            }
+        }
+        
+        return count;
     }
 };
 
