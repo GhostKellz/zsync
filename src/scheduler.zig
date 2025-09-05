@@ -133,17 +133,17 @@ const TaskQueue = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .items = std.ArrayList(ScheduledTask).init(allocator),
+            .items = std.ArrayList(ScheduledTask){},
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.items.deinit();
+        self.items.deinit(self.allocator);
     }
 
     pub fn push(self: *Self, task: ScheduledTask) !void {
-        try self.items.append(task);
+        try self.items.append(self.allocator, task);
         // Sort by priority (bubble up)
         var i = self.items.items.len - 1;
         while (i > 0) {
@@ -217,7 +217,7 @@ pub const AsyncScheduler = struct {
             .allocator = allocator,
             .ready_queue = TaskQueue.init(allocator),
             .suspended_frames = std.HashMap(u32, *AsyncFrame, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(allocator),
-            .frame_pool = std.ArrayList(*AsyncFrame).init(allocator),
+            .frame_pool = std.ArrayList(*AsyncFrame){},
             .next_frame_id = std.atomic.Value(u32).init(1),
             .running = std.atomic.Value(bool).init(false),
             .mutex = std.Thread.Mutex{},
@@ -245,7 +245,7 @@ pub const AsyncScheduler = struct {
             }
             self.allocator.destroy(frame);
         }
-        self.frame_pool.deinit();
+        self.frame_pool.deinit(self.allocator);
     }
 
     /// Generate next frame ID
@@ -268,7 +268,7 @@ pub const AsyncScheduler = struct {
         frame.* = AsyncFrame.init(frame_id, @ptrCast(frame), @sizeOf(AsyncFrame), self.allocator);
         
         // Store frame in pool for lifecycle management
-        try self.frame_pool.append(frame);
+        try self.frame_pool.append(self.allocator, frame);
         
         const task = ScheduledTask.init(frame.*, priority, @as(u64, @intCast(std.time.milliTimestamp())));
         try self.ready_queue.push(task);
@@ -277,7 +277,9 @@ pub const AsyncScheduler = struct {
         // For now, we create a task wrapper that will execute when scheduled
         const TaskWrapper = struct {
             pub fn run() !void {
-                _ = @call(.auto, func, args);
+                @call(.auto, func, args) catch |err| {
+                    std.debug.print("Task failed with error: {}\n", .{err});
+                };
             }
         };
         _ = TaskWrapper;

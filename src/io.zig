@@ -22,7 +22,7 @@ pub const TcpStream = struct {
 
         // Set non-blocking
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
-        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | std.posix.O.NONBLOCK);
+        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | 0o4000);
 
         // Get runtime reactor
         const runtime_instance = runtime.Runtime.global() orelse return error.NoRuntime;
@@ -152,7 +152,7 @@ pub const TcpListener = struct {
 
         // Set non-blocking
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
-        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | std.posix.O.NONBLOCK);
+        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | 0o4000);
 
         // Bind and listen
         try std.posix.bind(fd, &address.any, address.getOsSockLen());
@@ -195,7 +195,7 @@ pub const TcpListener = struct {
 
             // Set client socket non-blocking
             const flags = try std.posix.fcntl(client_fd, std.posix.F.GETFL, 0);
-            _ = try std.posix.fcntl(client_fd, std.posix.F.SETFL, flags | std.posix.O.NONBLOCK);
+            _ = try std.posix.fcntl(client_fd, std.posix.F.SETFL, flags | 0o4000);
 
             const local_addr = try std.posix.getsockname(client_fd);
             const peer_addr = std.net.Address.initPosix(@alignCast(@ptrCast(&client_addr)));
@@ -235,7 +235,7 @@ pub const UdpSocket = struct {
 
         // Set non-blocking
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
-        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | std.posix.O.NONBLOCK);
+        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | 0o4000);
 
         // Bind
         try std.posix.bind(fd, &address.any, address.getOsSockLen());

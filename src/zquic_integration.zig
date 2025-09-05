@@ -30,7 +30,7 @@ pub const QuicConnection = struct {
         
         // Set non-blocking
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
-        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | std.posix.O.NONBLOCK);
+        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | 0o4000);
 
         return Self{
             .fd = fd,
@@ -153,14 +153,14 @@ pub const QuicServer = struct {
         
         // Set non-blocking and bind
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
-        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | std.posix.O.NONBLOCK);
+        _ = try std.posix.fcntl(fd, std.posix.F.SETFL, flags | 0o4000);
         
         try std.posix.bind(fd, &bind_addr.any, bind_addr.getOsSockLen());
 
         return Self{
             .fd = fd,
             .local_addr = bind_addr,
-            .connections = std.ArrayList(*QuicConnection).init(allocator),
+            .connections = std.ArrayList(*QuicConnection){},
             .allocator = allocator,
         };
     }
@@ -170,7 +170,7 @@ pub const QuicServer = struct {
             conn.deinit();
             self.allocator.destroy(conn);
         }
-        self.connections.deinit();
+        self.connections.deinit(self.allocator);
         std.posix.close(self.fd);
     }
 
@@ -206,7 +206,7 @@ pub const QuicServer = struct {
         const conn = try self.allocator.create(QuicConnection);
         conn.* = try QuicConnection.init(self.local_addr, peer_addr, connection_id);
         
-        try self.connections.append(conn);
+        try self.connections.append(self.allocator, conn);
         return conn;
     }
 };

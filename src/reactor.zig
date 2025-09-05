@@ -80,8 +80,8 @@ pub const Reactor = struct {
     }
 
     /// Get the next event from the last poll
-    pub fn nextEvent(self: *Self) ?Event {
-        return self.backend.nextEvent();
+    pub fn nextEvent(self: *Self) !?Event {
+        return try self.backend.nextEvent();
     }
 };
 
@@ -156,7 +156,7 @@ const EpollBackend = struct {
         return self.event_count;
     }
 
-    pub fn nextEvent(self: *Self) ?Event {
+    pub fn nextEvent(self: *Self) !?Event {
         if (self.event_index >= self.event_count) {
             return null;
         }
@@ -166,7 +166,7 @@ const EpollBackend = struct {
 
         return Event{
             .fd = @intCast(epoll_event.data.fd),
-            .events = self.epollToIoEvent(epoll_event.events),
+            .events = try self.epollToIoEvent(epoll_event.events),
             .user_data = epoll_event.data.ptr,
         };
     }
@@ -183,8 +183,18 @@ const EpollBackend = struct {
         return epoll_events;
     }
 
-    fn epollToIoEvent(self: *Self, epoll_events: u32) IoEvent {
+    fn epollToIoEvent(self: *Self, epoll_events: u32) !IoEvent {
         _ = self;
+        // Validate that we have recognized epoll events
+        const valid_events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.OUT | 
+                            std.os.linux.EPOLL.ERR | std.os.linux.EPOLL.HUP | 
+                            std.os.linux.EPOLL.RDHUP | std.os.linux.EPOLL.PRI |
+                            std.os.linux.EPOLL.ET | std.os.linux.EPOLL.ONESHOT;
+        
+        if (epoll_events & ~valid_events != 0) {
+            return error.InvalidEpollEvents;
+        }
+        
         return IoEvent{
             .readable = (epoll_events & std.os.linux.EPOLL.IN) != 0,
             .writable = (epoll_events & std.os.linux.EPOLL.OUT) != 0,

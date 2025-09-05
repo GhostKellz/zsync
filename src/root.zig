@@ -166,7 +166,9 @@ pub fn spawn(comptime task_fn: anytype, args: anytype) !Future {
         defer temp_runtime.deinit();
         
         // Execute the task directly in blocking mode
-        _ = @call(.auto, task_fn, args);
+        @call(.auto, task_fn, args) catch |err| {
+            std.debug.print("Task failed with error: {}\n", .{err});
+        };
         
         // Create a completed future
         const DummyFuture = struct {
