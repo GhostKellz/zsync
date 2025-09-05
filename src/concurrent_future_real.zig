@@ -1,6 +1,7 @@
 const std = @import("std");
 const arch = @import("arch/x86_64.zig");
-const platform = @import("platform/linux.zig");
+const platform_imports = @import("platform_imports.zig");
+const platform = platform_imports.linux.platform_linux;
 
 // Real concurrent future implementation using green threads and io_uring
 pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {

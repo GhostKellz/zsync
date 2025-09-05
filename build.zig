@@ -145,7 +145,7 @@ pub fn build(b: *std.Build) void {
     const wasm_exe = b.addExecutable(.{
         .name = "zsync-wasm",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main_v4.zig"),
+            .root_source_file = b.path("src/main_cross.zig"),
             .target = b.resolveTargetQuery(.{
                 .cpu_arch = .wasm32,
                 .os_tag = .freestanding,
@@ -168,7 +168,7 @@ pub fn build(b: *std.Build) void {
     const arm64_exe = b.addExecutable(.{
         .name = "zsync-arm64",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main_v4.zig"),
+            .root_source_file = b.path("src/main_cross.zig"),
             .target = b.resolveTargetQuery(.{
                 .cpu_arch = .aarch64,
                 .os_tag = .linux,
@@ -188,7 +188,7 @@ pub fn build(b: *std.Build) void {
     const arm64_macos_exe = b.addExecutable(.{
         .name = "zsync-arm64-macos",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main_v4.zig"),
+            .root_source_file = b.path("src/main_cross.zig"),
             .target = b.resolveTargetQuery(.{
                 .cpu_arch = .aarch64,
                 .os_tag = .macos,
@@ -208,7 +208,7 @@ pub fn build(b: *std.Build) void {
     const windows_exe = b.addExecutable(.{
         .name = "zsync-windows",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main_v4.zig"),
+            .root_source_file = b.path("src/main_cross.zig"),
             .target = b.resolveTargetQuery(.{
                 .cpu_arch = .x86_64,
                 .os_tag = .windows,

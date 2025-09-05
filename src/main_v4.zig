@@ -15,37 +15,37 @@ pub fn main() !void {
     
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const std.heap.page_allocator = gpa.std.heap.page_allocator();
+    const allocator = gpa.allocator();
     
-    try Zsync.helloWorld(std.heap.page_allocator);
+    try Zsync.helloWorld(allocator);
     std.debug.print("\n", .{});
     
     // Demo 2: Multiple Execution Models
     std.debug.print("🔥 Demo 2: Multiple Execution Models\n", .{});
     std.debug.print("=" ** 50 ++ "\n", .{});
     
-    try demonstrateExecutionModels(std.heap.page_allocator);
+    try demonstrateExecutionModels(allocator);
     std.debug.print("\n", .{});
     
     // Demo 3: Future Combinators
     std.debug.print("⚡ Demo 3: Future Combinators\n", .{});
     std.debug.print("=" ** 50 ++ "\n", .{});
     
-    try demonstrateCombinators(std.heap.page_allocator);
+    try demonstrateCombinators(allocator);
     std.debug.print("\n", .{});
     
     // Demo 4: Cancellation and Timeouts
     std.debug.print("🛑 Demo 4: Cancellation & Timeouts\n", .{});
     std.debug.print("=" ** 50 ++ "\n", .{});
     
-    try demonstrateCancellation(std.heap.page_allocator);
+    try demonstrateCancellation(allocator);
     std.debug.print("\n", .{});
     
     // Demo 5: Performance Metrics
     std.debug.print("📊 Demo 5: Performance Metrics\n", .{});
     std.debug.print("=" ** 50 ++ "\n", .{});
     
-    try demonstrateMetrics(std.heap.page_allocator);
+    try demonstrateMetrics(allocator);
     std.debug.print("\n", .{});
     
     std.debug.print("🎉 Zsync v0.4.0 Demo Complete!\n", .{});
@@ -57,16 +57,17 @@ fn demonstrateExecutionModels(_: std.mem.Allocator) !void {
     const ColorblindTask = struct {
         fn task(io: Zsync.Io) !void {
             const model_name = @tagName(io.getMode());
+            const io_allocator = io.getAllocator();
             const message = std.fmt.allocPrint(
-                std.heap.page_std.heap.page_allocator,
+                io_allocator,
                 "✨ Colorblind async running on {s} model!\n",
                 .{model_name}
             ) catch "✨ Colorblind async works!\n";
-            defer if (message.ptr != "✨ Colorblind async works!\n".ptr) std.heap.page_std.heap.page_allocator.free(message);
+            defer if (message.ptr != "✨ Colorblind async works!\n".ptr) io_allocator.free(message);
             
             var io_mut = io;
             var future = try io_mut.write(message);
-            defer future.destroy(std.heap.page_std.heap.page_allocator);
+            defer future.destroy(io_allocator);
             try future.await();
         }
     };
@@ -81,7 +82,7 @@ fn demonstrateExecutionModels(_: std.mem.Allocator) !void {
 }
 
 /// Demonstrate Future combinators in action
-fn demonstrateCombinators(std.heap.page_allocator: std.mem.Allocator) !void {
+fn demonstrateCombinators(allocator: std.mem.Allocator) !void {
     const CombinatorTask = struct {
         fn concurrentTask(io: Zsync.Io) !void {
             std.debug.print("🔀 Testing concurrent operations with all()...\n", .{});
@@ -94,15 +95,15 @@ fn demonstrateCombinators(std.heap.page_allocator: std.mem.Allocator) !void {
             
             // Wait for all to complete
             var futures = [_]Zsync.Future{ future1, future2, future3 };
-            var all_future = try Zsync.Combinators.all(std.heap.page_std.heap.page_allocator, &futures);
-            defer all_future.destroy(std.heap.page_std.heap.page_allocator);
+            var all_future = try Zsync.Combinators.all(allocator, &futures);
+            defer all_future.destroy(allocator);
             
             try all_future.await();
             
             // Cleanup
-            future1.destroy(std.heap.page_std.heap.page_allocator);
-            future2.destroy(std.heap.page_std.heap.page_allocator);
-            future3.destroy(std.heap.page_std.heap.page_allocator);
+            future1.destroy(allocator);
+            future2.destroy(allocator);
+            future3.destroy(allocator);
             
             std.debug.print("✅ All concurrent tasks completed!\n", .{});
         }
@@ -115,13 +116,13 @@ fn demonstrateCombinators(std.heap.page_allocator: std.mem.Allocator) !void {
             var future2 = try io_mut.write("Slow task loses...");
             
             var futures = [_]Zsync.Future{ future1, future2 };
-            var race_future = try Zsync.Combinators.race(std.heap.page_allocator, &futures);
-            defer race_future.destroy(std.heap.page_allocator);
+            var race_future = try Zsync.Combinators.race(allocator, &futures);
+            defer race_future.destroy(allocator);
             
             try race_future.await();
             
-            future1.destroy(std.heap.page_allocator);
-            future2.destroy(std.heap.page_allocator);
+            future1.destroy(allocator);
+            future2.destroy(allocator);
             
             std.debug.print("\n✅ Race completed!\n", .{});
         }
@@ -131,11 +132,11 @@ fn demonstrateCombinators(std.heap.page_allocator: std.mem.Allocator) !void {
             
             var io_mut = io;
             var write_future = try io_mut.write("Operation with timeout completed!\n");
-            var timeout_future = try Zsync.Combinators.timeout(std.heap.page_allocator, write_future, 1000); // 1 second
-            defer timeout_future.destroy(std.heap.page_allocator);
+            var timeout_future = try Zsync.Combinators.timeout(allocator, write_future, 1000); // 1 second
+            defer timeout_future.destroy(allocator);
             
             try timeout_future.await();
-            write_future.destroy(std.heap.page_allocator);
+            write_future.destroy(allocator);
             
             std.debug.print("✅ Timeout test passed!\n", .{});
         }
@@ -147,19 +148,19 @@ fn demonstrateCombinators(std.heap.page_allocator: std.mem.Allocator) !void {
 }
 
 /// Demonstrate cancellation capabilities
-fn demonstrateCancellation(std.heap.page_allocator: std.mem.Allocator) !void {
+fn demonstrateCancellation(allocator: std.mem.Allocator) !void {
     const CancelTask = struct {
         fn task(io: Zsync.Io) !void {
             std.debug.print("🛑 Creating cancellable operation...\n", .{});
             
             // Create a cancellation token
-            var token = try Zsync.CancelToken.init(std.heap.page_allocator, .user_requested);
+            var token = try Zsync.CancelToken.init(allocator, .user_requested);
             defer token.deinit();
             
             var io_mut = io;
             var future = try io_mut.write("This operation can be cancelled!\n");
             future.setCancelToken(token);
-            defer future.destroy(std.heap.page_allocator);
+            defer future.destroy(allocator);
             
             // Simulate cancellation (would happen asynchronously in real use)
             std.debug.print("⏰ Simulating user cancellation...\n", .{});
@@ -175,7 +176,7 @@ fn demonstrateCancellation(std.heap.page_allocator: std.mem.Allocator) !void {
 }
 
 /// Demonstrate performance metrics collection
-fn demonstrateMetrics(std.heap.page_allocator: std.mem.Allocator) !void {
+fn demonstrateMetrics(allocator: std.mem.Allocator) !void {
     const MetricsTask = struct {
         fn task(io: Zsync.Io) !void {
             std.debug.print("📈 Performing operations to collect metrics...\n", .{});
@@ -192,7 +193,7 @@ fn demonstrateMetrics(std.heap.page_allocator: std.mem.Allocator) !void {
             var io_mut = io;
             for (operations) |op| {
                 var future = try io_mut.write(op);
-                defer future.destroy(std.heap.page_allocator);
+                defer future.destroy(allocator);
                 try future.await();
             }
             
@@ -207,7 +208,7 @@ fn demonstrateMetrics(std.heap.page_allocator: std.mem.Allocator) !void {
         .enable_debugging = true,
     };
     
-    var runtime = try Zsync.Runtime.init(std.heap.page_allocator, config);
+    var runtime = try Zsync.Runtime.init(allocator, config);
     defer runtime.deinit();
     
     try runtime.run(MetricsTask.task, {});
@@ -220,7 +221,7 @@ fn demonstrateMetrics(std.heap.page_allocator: std.mem.Allocator) !void {
 }
 
 /// Benchmark colorblind async performance
-fn benchmarkPerformance(std.heap.page_allocator: std.mem.Allocator) !void {
+fn benchmarkPerformance(allocator: std.mem.Allocator) !void {
     const BenchmarkTask = struct {
         fn task(io: Zsync.Io) !void {
             const iterations = 10000;
@@ -229,7 +230,7 @@ fn benchmarkPerformance(std.heap.page_allocator: std.mem.Allocator) !void {
             for (0..iterations) |i| {
                 _ = i;
                 var future = try io.write(".");
-                defer future.destroy(std.heap.page_allocator);
+                defer future.destroy(allocator);
                 try future.await();
             }
             
@@ -250,13 +251,13 @@ fn benchmarkPerformance(std.heap.page_allocator: std.mem.Allocator) !void {
 
 test "Zsync v0.4.0 integration test" {
     const testing = std.testing;
-    const std.heap.page_allocator = testing.std.heap.page_allocator;
+    const allocator = testing.allocator;
     
     const TestTask = struct {
         fn task(io: Zsync.Io) !void {
             // Test basic write operation
             var future = try io.write("Integration test passed!");
-            defer future.destroy(std.heap.page_allocator);
+            defer future.destroy(allocator);
             try future.await();
             
             // Test execution mode detection

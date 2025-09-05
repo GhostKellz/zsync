@@ -234,7 +234,7 @@ pub const EventLoop = struct {
     pub fn init(allocator: std.mem.Allocator) !EventLoop {
         return EventLoop{
             .source = try EventSource.init(),
-            .timers = std.ArrayList(Timer).init(allocator),
+            .timers = .{},
             .allocator = allocator,
         };
     }
@@ -243,7 +243,7 @@ pub const EventLoop = struct {
         for (self.timers.items) |*timer| {
             timer.deinit();
         }
-        self.timers.deinit();
+        self.timers.deinit(self.allocator);
         self.source.deinit();
     }
     
@@ -273,7 +273,7 @@ pub const EventLoop = struct {
     
     pub fn createTimer(self: *EventLoop) !*Timer {
         const timer = try Timer.init();
-        try self.timers.append(timer);
+        try self.timers.append(self.allocator, timer);
         return &self.timers.items[self.timers.items.len - 1];
     }
     

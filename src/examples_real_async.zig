@@ -2,7 +2,8 @@ const std = @import("std");
 const io_interface = @import("io_v2.zig");
 const greenthreads = @import("greenthreads_io.zig");
 const arch = @import("arch/x86_64.zig");
-const platform = @import("platform/linux.zig");
+const platform_imports = @import("platform_imports.zig");
+const platform = platform_imports.linux.platform_linux;
 const compat = @import("compat/async_builtins.zig");
 const registry = @import("async_registry.zig");
 

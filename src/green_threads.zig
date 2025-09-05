@@ -4,7 +4,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
-const io_uring = @import("io_uring.zig");
+const platform_imports = @import("platform_imports.zig");
+const io_uring = platform_imports.linux.io_uring;
 const platform_detect = @import("platform_detect.zig");
 const arch = switch (builtin.cpu.arch) {
     .x86_64 => @import("arch/x86_64.zig"),

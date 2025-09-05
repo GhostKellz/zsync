@@ -1,12 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const platform_imports = @import("platform_imports.zig");
 
-// Platform-specific imports
+// Platform-specific imports using conditional system
 pub const Platform = switch (builtin.target.os.tag) {
-    .linux => @import("platform/linux.zig"),
-    .macos => @import("platform/macos.zig"),
-    .windows => @import("platform/windows.zig"),
-    .freestanding => if (builtin.target.cpu.arch.isWasm()) @import("platform/wasm.zig") else @compileError("Unsupported freestanding platform"),
+    .linux => platform_imports.linux.platform_linux,
+    .macos => platform_imports.macos.kqueue,
+    .windows => platform_imports.windows.iocp,
+    .freestanding => if (builtin.target.cpu.arch.isWasm()) platform_imports.wasm.stackless else @compileError("Unsupported freestanding platform"),
     else => @compileError("Unsupported platform"),
 };
 

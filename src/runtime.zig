@@ -7,8 +7,11 @@ const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 const blocking_io = @import("blocking_io.zig");
 const thread_pool = @import("thread_pool.zig");
-const green_threads = @import("green_threads.zig");
+const platform_imports = @import("platform_imports.zig");
 const platform_detect = @import("platform_detect.zig");
+
+// Use conditional imports
+const green_threads = platform_imports.linux.green_threads;
 
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
@@ -142,6 +145,7 @@ pub const RuntimeError = error{
     OutOfMemory,
     SystemResourceExhausted,
     ConfigurationError,
+    PlatformUnsupported,
 };
 
 /// Performance metrics for the runtime
@@ -199,7 +203,7 @@ pub const Runtime = struct {
         auto: void, // Will be resolved
         blocking: blocking_io.BlockingIo,
         thread_pool: thread_pool.ThreadPoolIo,
-        green_threads: green_threads.GreenThreadsIo,
+        green_threads: if (green_threads != void) green_threads.GreenThreadsIo else void,
         stackless: void, // TODO: Implement in next phase
     };
     
@@ -246,6 +250,9 @@ pub const Runtime = struct {
                 }
             },
             .green_threads => {
+                if (green_threads == void) {
+                    return RuntimeError.PlatformUnsupported;
+                }
                 if (config.green_thread_stack_size < 4096) {
                     return RuntimeError.ConfigurationError;
                 }
@@ -267,7 +274,7 @@ pub const Runtime = struct {
                     config.buffer_size
                 )
             },
-            .green_threads => IoImplementation{ .green_threads = try green_threads.createGreenThreadsIo(allocator, config.queue_depth orelse 256) },
+            .green_threads => IoImplementation{ .green_threads = if (green_threads != void) try green_threads.createGreenThreadsIo(allocator, config.queue_depth orelse 256) else {} },
             .stackless => IoImplementation{ .stackless = {} }, // TODO
             .auto => unreachable, // Should be resolved above
         };
@@ -281,7 +288,7 @@ pub const Runtime = struct {
         switch (self.io_impl) {
             .blocking => |*blocking| blocking.deinit(),
             .thread_pool => |*tp| tp.deinit(),
-            .green_threads => |*impl| impl.deinit(),
+            .green_threads => |*impl| if (green_threads != void) impl.deinit(),
             .stackless => {}, // TODO
             .auto => {},
         }
@@ -312,7 +319,7 @@ pub const Runtime = struct {
         return switch (self.io_impl) {
             .blocking => |*blocking| blocking.io(),
             .thread_pool => |*tp| tp.io(),
-            .green_threads => |*impl| impl.io(),
+            .green_threads => |*impl| if (green_threads != void) impl.io() else unreachable,
             .stackless => unreachable, // TODO
             .auto => unreachable,
         };

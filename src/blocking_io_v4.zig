@@ -83,6 +83,7 @@ pub const BlockingIo = struct {
         .get_mode = getMode,
         .supports_vectorized = supportsVectorized,
         .supports_zero_copy = supportsZeroCopy,
+        .get_allocator = getAllocator,
     };
     
     // Implementation functions
@@ -320,6 +321,11 @@ pub const BlockingIo = struct {
     /// Check if zero-copy operations are supported
     fn supportsZeroCopy(_: *anyopaque) bool {
         return false; // Blocking I/O doesn't support zero-copy
+    }
+    
+    fn getAllocator(context: *anyopaque) std.mem.Allocator {
+        const self: *Self = @ptrCast(@alignCast(context));
+        return self.allocator;
     }
 };
 

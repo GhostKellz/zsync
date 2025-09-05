@@ -70,14 +70,14 @@ pub const CancelToken = struct {
             .cancelled = std.atomic.Value(bool).init(false),
             .reason = reason,
             .parent = null,
-            .children = std.ArrayList(*CancelToken).init(allocator),
+            .children = std.ArrayList(*CancelToken){},
             .allocator = allocator,
         };
         return token;
     }
     
     pub fn deinit(self: *CancelToken) void {
-        self.children.deinit();
+        self.children.deinit(self.allocator);
         self.allocator.destroy(self);
     }
     
@@ -167,7 +167,7 @@ pub const Future = struct {
                 .pending => {
                     // Yield based on execution mode
                     switch (io_mode) {
-                        .blocking => std.time.sleep(100_000), // 100μs cooperative yield
+                        .blocking => std.Thread.sleep(100_000), // 100μs cooperative yield
                         .evented => yield(), // Platform-specific yield
                         .auto => autoYield(),
                     }
@@ -271,6 +271,7 @@ pub const Io = struct {
         get_mode: *const fn (context: *anyopaque) IoMode,
         supports_vectorized: *const fn (context: *anyopaque) bool,
         supports_zero_copy: *const fn (context: *anyopaque) bool,
+        get_allocator: *const fn (context: *anyopaque) std.mem.Allocator,
     };
     
     pub fn init(vtable: *const IoVTable, context: *anyopaque) Io {
@@ -357,6 +358,10 @@ pub const Io = struct {
     /// Check if zero-copy operations are supported
     pub fn supportsZeroCopy(self: *const Io) bool {
         return self.vtable.supports_zero_copy(self.context);
+    }
+    
+    pub fn getAllocator(self: *const Io) std.mem.Allocator {
+        return self.vtable.get_allocator(self.context);
     }
     
     /// Convenience method for simple blocking read

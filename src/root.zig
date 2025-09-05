@@ -9,6 +9,11 @@ pub const io_interface = @import("io_interface.zig");
 pub const runtime = @import("runtime.zig");
 pub const blocking_io = @import("blocking_io.zig");
 
+// v0.5.2 Platform-Specific Runtime System
+pub const platform_runtime = @import("platform_runtime.zig");
+pub const runtime_factory = @import("runtime_factory.zig");
+pub const platform_imports = @import("platform_imports.zig");
+
 // Missing API modules that zquic needs
 pub const timer = @import("timer.zig");
 pub const channel = @import("channel.zig");
