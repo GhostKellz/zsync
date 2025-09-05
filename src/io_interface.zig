@@ -267,7 +267,10 @@ pub const Io = struct {
         
         // Network operations
         accept: *const fn (context: *anyopaque, listener_fd: std.posix.fd_t) IoError!Future,
-        connect: *const fn (context: *anyopaque, fd: std.posix.fd_t, address: std.net.Address) IoError!Future,
+        connect: if (builtin.target.cpu.arch == .wasm32) 
+            *const fn (context: *anyopaque, fd: std.posix.fd_t, address: []const u8) IoError!Future
+        else
+            *const fn (context: *anyopaque, fd: std.posix.fd_t, address: std.net.Address) IoError!Future,
         
         // Resource management
         close: *const fn (context: *anyopaque, fd: std.posix.fd_t) IoError!Future,

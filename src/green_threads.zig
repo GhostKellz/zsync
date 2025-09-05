@@ -9,6 +9,7 @@ const io_uring = platform_imports.linux.io_uring;
 const platform_detect = @import("platform_detect.zig");
 const arch = switch (builtin.cpu.arch) {
     .x86_64 => @import("arch/x86_64.zig"),
+    .aarch64 => @import("arch/aarch64.zig"),
     else => @compileError("Architecture not supported for green threads"),
 };
 

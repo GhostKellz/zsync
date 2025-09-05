@@ -280,17 +280,36 @@ pub const IoUring = struct {
     const IORING_OP_PROVIDE_BUFFERS: u8 = 31;
     const IORING_OP_REMOVE_BUFFERS: u8 = 32;
     
-    // Raw syscall wrappers  
+    // Raw syscall wrappers - architecture-aware
     fn io_uring_setup(entries: u32, params: *IoUringParams) i32 {
-        // Use the raw syscall with correct enum values
-        const SYS_io_uring_setup = @as(std.os.linux.syscalls.X64, @enumFromInt(425)); // Linux syscall number
-        return @intCast(std.os.linux.syscall2(SYS_io_uring_setup, entries, @intFromPtr(params)));
+        // Use the correct syscall enum for the target architecture
+        switch (builtin.cpu.arch) {
+            .x86_64 => {
+                const SYS_io_uring_setup = @as(std.os.linux.syscalls.X64, @enumFromInt(425)); // x86_64 syscall number
+                return @intCast(std.os.linux.syscall2(SYS_io_uring_setup, entries, @intFromPtr(params)));
+            },
+            .aarch64 => {
+                const SYS_io_uring_setup = @as(std.os.linux.syscalls.Arm64, @enumFromInt(425)); // ARM64 syscall number
+                return @intCast(std.os.linux.syscall2(SYS_io_uring_setup, entries, @intFromPtr(params)));
+            },
+            else => @compileError("io_uring not supported on this architecture"),
+        }
     }
     
     fn io_uring_enter(fd: i32, to_submit: u32, min_complete: u32, flags: u32, sig: ?*anyopaque) i32 {
-        const SYS_io_uring_enter = @as(std.os.linux.syscalls.X64, @enumFromInt(426)); // Linux syscall number
         const sig_ptr = if (sig) |s| @intFromPtr(s) else 0;
-        return @intCast(std.os.linux.syscall5(SYS_io_uring_enter, @as(usize, @bitCast(@as(isize, fd))), to_submit, min_complete, flags, sig_ptr));
+        
+        switch (builtin.cpu.arch) {
+            .x86_64 => {
+                const SYS_io_uring_enter = @as(std.os.linux.syscalls.X64, @enumFromInt(426)); // x86_64 syscall number
+                return @intCast(std.os.linux.syscall5(SYS_io_uring_enter, @as(usize, @bitCast(@as(isize, fd))), to_submit, min_complete, flags, sig_ptr));
+            },
+            .aarch64 => {
+                const SYS_io_uring_enter = @as(std.os.linux.syscalls.Arm64, @enumFromInt(426)); // ARM64 syscall number
+                return @intCast(std.os.linux.syscall5(SYS_io_uring_enter, @as(usize, @bitCast(@as(isize, fd))), to_submit, min_complete, flags, sig_ptr));
+            },
+            else => @compileError("io_uring not supported on this architecture"),
+        }
     }
 
     /// Initialize io_uring with full implementation

@@ -6,7 +6,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 const blocking_io = @import("blocking_io.zig");
-const thread_pool = @import("thread_pool.zig");
+
+// Conditional thread pool import - not available on WASM
+const thread_pool = if (builtin.target.cpu.arch == .wasm32) 
+    @import("thread_pool_stub.zig") 
+else 
+    @import("thread_pool.zig");
+
 const platform_imports = @import("platform_imports.zig");
 const platform_detect = @import("platform_detect.zig");
 
@@ -150,12 +156,15 @@ pub const RuntimeError = error{
 
 /// Performance metrics for the runtime
 pub const RuntimeMetrics = struct {
-    tasks_spawned: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    tasks_completed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    futures_created: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    futures_cancelled: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    total_io_operations: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    average_latency_ns: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    // Use 32-bit atomics on WASM due to platform limitations
+    const CounterType = if (builtin.target.cpu.arch == .wasm32) u32 else u64;
+    
+    tasks_spawned: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+    tasks_completed: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+    futures_created: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+    futures_cancelled: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+    total_io_operations: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+    average_latency_ns: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
     
     pub fn incrementTasks(self: *RuntimeMetrics) void {
         _ = self.tasks_spawned.fetchAdd(1, .monotonic);
@@ -173,7 +182,7 @@ pub const RuntimeMetrics = struct {
         _ = self.futures_cancelled.fetchAdd(1, .monotonic);
     }
     
-    pub fn recordIoOperation(self: *RuntimeMetrics, latency_ns: u64) void {
+    pub fn recordIoOperation(self: *RuntimeMetrics, latency_ns: CounterType) void {
         _ = self.total_io_operations.fetchAdd(1, .monotonic);
         // Simple moving average
         const current_avg = self.average_latency_ns.load(.monotonic);

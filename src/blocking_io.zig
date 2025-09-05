@@ -22,20 +22,23 @@ pub const BlockingIo = struct {
     
     /// Performance metrics for monitoring
     const Metrics = struct {
-        operations_completed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-        bytes_read: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-        bytes_written: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-        error_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+        // Use 32-bit atomics on WASM due to platform limitations
+        const CounterType = if (builtin.target.cpu.arch == .wasm32) u32 else u64;
+        
+        operations_completed: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+        bytes_read: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+        bytes_written: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
+        error_count: std.atomic.Value(CounterType) = std.atomic.Value(CounterType).init(0),
         
         pub fn incrementOps(self: *Metrics) void {
             _ = self.operations_completed.fetchAdd(1, .monotonic);
         }
         
-        pub fn addBytesRead(self: *Metrics, bytes: u64) void {
+        pub fn addBytesRead(self: *Metrics, bytes: CounterType) void {
             _ = self.bytes_read.fetchAdd(bytes, .monotonic);
         }
         
-        pub fn addBytesWritten(self: *Metrics, bytes: u64) void {
+        pub fn addBytesWritten(self: *Metrics, bytes: CounterType) void {
             _ = self.bytes_written.fetchAdd(bytes, .monotonic);
         }
         
@@ -405,7 +408,7 @@ pub const BlockingIo = struct {
     }
     
     /// Connect to address (simplified implementation)
-    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: std.net.Address) IoError!Future {
+    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: if (builtin.target.cpu.arch == .wasm32) []const u8 else std.net.Address) IoError!Future {
         _ = context;
         _ = fd;
         _ = address;

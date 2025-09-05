@@ -3,6 +3,7 @@
 //! Following Zig's latest async paradigm for maximum performance and ergonomics
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // Core v0.5.0 APIs - Colorblind Async Interface  
 pub const io_interface = @import("io_interface.zig");
@@ -17,7 +18,13 @@ pub const platform_imports = @import("platform_imports.zig");
 // Missing API modules that zquic needs
 pub const timer = @import("timer.zig");
 pub const channel = @import("channel.zig");
-pub const networking = @import("networking.zig");
+
+// Conditional networking support - not available on WASM
+pub const networking = if (builtin.target.cpu.arch == .wasm32) 
+    @import("networking_stub.zig") 
+else 
+    @import("networking.zig");
+
 pub const threadpool_io = @import("threadpool_io.zig");
 pub const scheduler = @import("scheduler.zig");
 pub const reactor = @import("reactor.zig");
@@ -227,8 +234,39 @@ pub fn createThreadPoolIo(allocator: std.mem.Allocator) !*ThreadPoolIo {
     return pool;
 }
 
-/// UDP socket implementation (from networking module)
-pub const UdpSocket = struct {
+/// UDP socket implementation (conditional for WASM)
+pub const UdpSocket = if (builtin.target.cpu.arch == .wasm32) struct {
+    allocator: std.mem.Allocator,
+    
+    const Self = @This();
+    
+    /// Create a new UDP socket (stub for WASM)
+    pub fn bind(allocator: std.mem.Allocator, address: []const u8) !Self {
+        _ = allocator;
+        _ = address;
+        return error.NetworkingNotAvailable;
+    }
+    
+    /// Send data to a specific address (stub for WASM)
+    pub fn sendTo(self: *Self, data: []const u8, address: []const u8) !usize {
+        _ = self;
+        _ = data;
+        _ = address;
+        return error.NetworkingNotAvailable;
+    }
+    
+    /// Receive data from any address (stub for WASM)
+    pub fn recvFrom(self: *Self, buffer: []u8) !struct { bytes_received: usize, address: []const u8 } {
+        _ = self;
+        _ = buffer;
+        return error.NetworkingNotAvailable;
+    }
+    
+    /// Close the UDP socket (stub for WASM)
+    pub fn close(self: *Self) void {
+        _ = self;
+    }
+} else struct {
     socket_fd: std.posix.fd_t,
     allocator: std.mem.Allocator,
     
