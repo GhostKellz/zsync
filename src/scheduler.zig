@@ -382,7 +382,7 @@ pub const AsyncScheduler = struct {
 
 /// Helper function to yield execution (compatibility version)
 pub fn yield() void {
-    std.time.sleep(1000); // 1μs yield
+    std.Thread.sleep(1000); // 1μs yield
 }
 
 /// Helper to create async task with default priority

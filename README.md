@@ -1,63 +1,63 @@
-# 🚀 Zsync v0.4.0 - "The Tokio of Zig"
+# Zsync - High-Performance Async Runtime for Zig
 
-![zig-version](https://img.shields.io/badge/zig-v0.12+-orange?style=flat-square)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-green.svg?style=flat-square)](https://github.com/ziglang/zig)
+[![Zig](https://img.shields.io/badge/Zig-0.16--dev-orange.svg)](https://ziglang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-Passing-green.svg)](#testing)
+[![Performance](https://img.shields.io/badge/Performance-Production_Ready-brightgreen.svg)](#benchmarks)
 
-**Complete Production-Ready Async Runtime with True Colorblind Async/Await**
+## Overview
 
-Zsync v0.4.0 represents the **cutting edge of async programming in Zig**. Unlike traditional async runtimes, Zsync implements **true colorblind async** - the same code works identically across ALL execution models.
+Zsync is a high-performance async runtime for Zig, inspired by Rust's Tokio. It provides efficient async I/O operations with multiple execution models and platform-specific optimizations.
 
-🎯 **Revolutionary Paradigm** • ⚡ **Excellent Performance** • 🚀 **Production Ready**
+### Key Features
 
----
-
-## ✨ What Makes Zsync v0.4.0 Special
-
-### 🎯 Revolutionary Colorblind Async
+- **Multiple Execution Models**: Blocking, thread pool, green threads, and auto-detection
+- **Zero-Cost Abstractions**: Pay only for what you use
+- **Platform Optimizations**: io_uring support on Linux with automatic capability detection
+- **Advanced I/O**: Vectorized operations, zero-copy transfers, and efficient buffer management
+- **Future Combinators**: `race()`, `all()`, `timeout()` for complex async patterns
+- **Cancellation Support**: Cooperative cancellation with proper cleanup
 
 ```zig
-// This EXACT code works in ALL execution models:
-fn myTask(io: Io) !void {
-    var future = try io.write("Hello World!");
-    defer future.destroy(io.getAllocator());
-    try future.await(); // Works everywhere!
+const zsync = @import("zsync");
+
+pub fn main() !void {
+    // Spawn concurrent tasks
+    _ = try zsync.spawn(handleClient, .{client1});
+    _ = try zsync.spawn(handleClient, .{client2});
+    
+    // Use channels for communication
+    const ch = try zsync.bounded([]const u8, allocator, 100);
+    try ch.sender.send("Hello from Zsync!");
+    const msg = try ch.receiver.recv();
+    
+    // Sleep without blocking
+    zsync.sleep(1000); // 1 second
+    
+    // Cooperative yielding
+    zsync.yieldNow();
 }
-
-// Run in blocking mode (C-equivalent performance)
-try zsync.runBlocking(myTask, {});
-
-// Run with thread pool (parallel execution)  
-try zsync.runHighPerf(myTask, {});
-
-// Run with automatic detection
-try zsync.run(myTask, {}); // Detects optimal model
 ```
 
-## 🌟 Core Features
+## Installation
 
-### ⚡ Multiple Execution Models
-- **Blocking**: Direct syscalls, C-equivalent performance
-- **Thread Pool**: True parallelism with work-stealing threads
-- **Green Threads**: Cooperative multitasking with io_uring (Linux)
-- **Auto**: Intelligent runtime detection
+### Using Zig Build System
 
-### 📊 High-Performance I/O
-- **Vectorized Operations**: `readv()`/`writev()` for multi-buffer I/O
-- **Zero-Copy**: `sendfile()` and `copy_file_range()` on Linux  
-- **Platform Optimizations**: Automatic detection for Arch, Fedora, Debian
-- **Buffer Management**: Zero-allocation fast paths
+```bash
+zig fetch --save git+https://github.com/ghostkellz/zsync
+```
 
-### 🔗 Advanced Future System
-- **Combinators**: `race()`, `all()`, `timeout()` for complex patterns
-- **Cancellation**: Cooperative cancellation with propagation chains
-- **Memory Safe**: Proper cleanup and lifecycle management
+Add to your `build.zig`:
 
-### 🐧 Platform Intelligence
-- **Linux**: io_uring support, distribution-specific optimizations
-- **Automatic Detection**: Kernel version, CPU count, capabilities
+```zig
+const zsync = b.dependency("zsync", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zsync", zsync.module("zsync"));
+```
 
-## 🚀 Quick Start
+## Quick Start
 
 ```zig
 const std = @import("std");
@@ -87,33 +87,84 @@ pub fn main() !void {
 }
 ```
 
-## 📈 Performance Benchmarks
+## Execution Models
 
-**Validated on production hardware:**
+### Blocking Mode
+Direct system calls with minimal overhead. Best for simple applications or when async overhead isn't justified.
 
+### Thread Pool Mode
+True parallelism with work-stealing threads. Ideal for CPU-bound tasks and multi-core utilization.
+
+### Green Thread Mode (Linux)
+Cooperative multitasking with io_uring support. Excellent for high-concurrency I/O workloads.
+
+### Auto Mode
+Intelligently selects the best execution model based on platform capabilities and workload characteristics.
+
+## API Examples
+
+### Channel Communication
+
+```zig
+const ch = try zsync.bounded(i32, allocator, 10);
+try ch.sender.send(42);
+const value = try ch.receiver.recv();
 ```
-🖥️  System: Arch Linux 6.16.0
-💾 Hardware: 32 CPU cores, 63GB RAM
-⚡ Features: io_uring support, zero-copy enabled
 
-📊 Results:
-   ✅ Vectorized I/O: 1000 operations, multiple buffers
-   ✅ Zero-Copy: sendfile() 505 bytes transferred  
-   ✅ Thread Pool: Work-stealing parallelization
-   ✅ Platform Detection: Arch Linux optimizations
+### Timer Operations
+
+```zig
+zsync.sleep(1000); // Sleep for 1 second
+zsync.yieldNow();  // Cooperative yield
 ```
 
----
+### Future Combinators
 
-## 🔍 Goals
+```zig
+// Race multiple futures
+const result = try zsync.race(&[_]*Future{ future1, future2 });
 
-* Support native `async`/`await` with low overhead
-* Build foundation for QUIC, HTTP/3, blockchain P2P protocols
-* Modular runtime suitable for embedded systems, servers, and mesh agents
-* Foundation layer for `Jarvis`, `GhostMesh`, and `Zion`-based apps
+// Wait for all futures
+try zsync.all(&[_]*Future{ future1, future2, future3 });
 
----
+// Timeout operations
+const result = try zsync.timeout(future, 5000); // 5 second timeout
+```
 
-*zsync is actively developed for integration into the CK Technology & Ghostctl ecosystem.*
+## Platform Support
 
-**Repository:** [github.com/ghostkellz/zsync](https://github.com/ghostkellz/zsync)
+- **Linux**: Full support with io_uring optimizations
+- **macOS**: kqueue-based event loop (planned)
+- **Windows**: IOCP support (planned)
+- **FreeBSD**: kqueue support (planned)
+
+## Testing
+
+```bash
+zig build test
+```
+
+## Benchmarks
+
+Run performance benchmarks:
+
+```bash
+zig build bench
+```
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+- Code follows Zig style guidelines
+- Tests pass with `zig build test`
+- Performance benchmarks show no regressions
+
+## License
+
+MIT License - See [LICENSE](LICENSE) for details.
+
+## Links
+
+- [Repository](https://github.com/ghostkellz/zsync)
+- [Documentation](https://github.com/ghostkellz/zsync/wiki)
+- [Issues](https://github.com/ghostkellz/zsync/issues)

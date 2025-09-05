@@ -124,7 +124,7 @@ const TaskQueue = struct {
     
     fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .tasks = std.ArrayList(Task).init(allocator),
+            .tasks = std.ArrayList(Task).empty,
             .mutex = std.Thread.Mutex{},
             .condition = std.Thread.Condition{},
             .allocator = allocator,
@@ -137,14 +137,14 @@ const TaskQueue = struct {
         self.shutdown = true;
         self.condition.broadcast();
         self.mutex.unlock();
-        self.tasks.deinit();
+        self.tasks.deinit(self.allocator);
     }
     
     fn put(self: *Self, task: Task) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        try self.tasks.append(task);
+        try self.tasks.append(self.allocator, task);
         self.condition.signal();
     }
     
@@ -181,7 +181,7 @@ const Worker = struct {
                 }
             } else {
                 // No tasks available, yield briefly
-                std.time.sleep(1000_000); // 1ms
+                std.Thread.sleep(1000_000); // 1ms
             }
         }
     }

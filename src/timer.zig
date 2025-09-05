@@ -221,7 +221,7 @@ pub const TimerWheel = struct {
 pub fn sleep(duration_ms: u64) void {
     // This would integrate with the runtime's timer wheel
     // For now, we'll implement a simple version using thread sleep
-    std.time.sleep(duration_ms * std.time.ns_per_ms);
+    std.Thread.sleep(duration_ms * std.time.ns_per_ms);
 }
 
 /// Create an interval timer that fires repeatedly
@@ -337,7 +337,7 @@ test "timer cancellation" {
 test "time measurement" {
     const TestFunction = struct {
         fn slowFunction() u32 {
-            std.time.sleep(1 * std.time.ns_per_ms); // Sleep for 1ms
+            std.Thread.sleep(1 * std.time.ns_per_ms); // Sleep for 1ms
             return 42;
         }
     };

@@ -48,6 +48,12 @@ pub const IoError = error{
     NotSupported,
 } || std.mem.Allocator.Error;
 
+/// Result type for I/O operations
+pub const IoResult = struct {
+    bytes_transferred: usize,
+    error_code: ?IoError = null,
+};
+
 /// Cancellation token for cooperative cancellation
 pub const CancelToken = struct {
     cancelled: std.atomic.Value(bool),

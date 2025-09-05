@@ -31,7 +31,7 @@ pub fn Channel(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
         capacity: Capacity,
-        buffer: std.RingBuffer,
+        buffer: std.ArrayList(u8),
         closed: std.atomic.Value(bool),
         sender_count: std.atomic.Value(u32),
         receiver_count: std.atomic.Value(u32),
@@ -45,18 +45,10 @@ pub fn Channel(comptime T: type) type {
 
         /// Initialize a new channel
         pub fn init(allocator: std.mem.Allocator, capacity: Capacity) !Self {
-            const buffer_size = switch (capacity) {
-                .unbounded => 1024, // Default size for unbounded
-                .bounded => |size| size,
-            };
-
-            const element_size = @sizeOf(MessageType);
-            const total_capacity = buffer_size * element_size;
-            
             return Self{
                 .allocator = allocator,
                 .capacity = capacity,
-                .buffer = try std.RingBuffer.init(allocator, total_capacity),
+                .buffer = std.ArrayList(u8).empty,
                 .closed = std.atomic.Value(bool).init(false),
                 .sender_count = std.atomic.Value(u32).init(0),
                 .receiver_count = std.atomic.Value(u32).init(0),
@@ -112,15 +104,14 @@ pub fn Channel(comptime T: type) type {
 
             // Check if we have space
             const element_size = @sizeOf(MessageType);
-            if (self.buffer.len() + element_size > self.buffer.data.len) {
-                if (self.capacity == .bounded) {
+            if (self.capacity == .bounded) {
+                const bounded_size = switch (self.capacity) {
+                    .bounded => |size| size * element_size,
+                    .unbounded => unreachable,
+                };
+                if (self.buffer.items.len + element_size > bounded_size) {
                     return ChannelError.ChannelFull;
                 }
-                
-                // For unbounded channels, we would need to expand the buffer
-                // This is more complex with the new RingBuffer API, so for now
-                // we'll return an error for simplicity
-                return ChannelError.ChannelFull;
             }
 
             const message = MessageType{
@@ -129,7 +120,7 @@ pub fn Channel(comptime T: type) type {
             };
 
             const bytes = std.mem.asBytes(&message);
-            self.buffer.writeSlice(bytes) catch return ChannelError.ChannelFull;
+            self.buffer.appendSlice(self.allocator, bytes) catch return ChannelError.ChannelFull;
             
             // Signal while still holding the lock to prevent race conditions
             self.not_empty.signal();
@@ -140,7 +131,7 @@ pub fn Channel(comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            while (self.buffer.len() < @sizeOf(MessageType)) {
+            while (self.buffer.items.len < @sizeOf(MessageType)) {
                 if (self.isClosed() and self.sender_count.load(.monotonic) == 0) {
                     return ChannelError.ChannelClosed;
                 }
@@ -150,7 +141,19 @@ pub fn Channel(comptime T: type) type {
 
             var message: MessageType = undefined;
             const bytes = std.mem.asBytes(&message);
-            self.buffer.readFirst(bytes, bytes.len) catch return ChannelError.ChannelEmpty;
+            
+            if (self.buffer.items.len < bytes.len) {
+                return ChannelError.ChannelEmpty;
+            }
+            
+            @memcpy(bytes, self.buffer.items[0..bytes.len]);
+            
+            // Remove the consumed bytes
+            var i: usize = 0;
+            while (i < bytes.len) {
+                _ = self.buffer.orderedRemove(0);
+                i += 1;
+            }
             
             self.not_full.signal();
             return message.data;
@@ -210,13 +213,25 @@ pub fn Receiver(comptime T: type) type {
             self.channel.mutex.lock();
             defer self.channel.mutex.unlock();
 
-            if (self.channel.buffer.len() < @sizeOf(Message(T))) {
+            if (self.channel.buffer.items.len < @sizeOf(Message(T))) {
                 return ChannelError.ChannelEmpty;
             }
 
             var message: Message(T) = undefined;
             const bytes = std.mem.asBytes(&message);
-            self.channel.buffer.readFirst(bytes, bytes.len) catch return ChannelError.ChannelEmpty;
+            
+            if (self.channel.buffer.items.len < bytes.len) {
+                return ChannelError.ChannelEmpty;
+            }
+            
+            @memcpy(bytes, self.channel.buffer.items[0..bytes.len]);
+            
+            // Remove the consumed bytes
+            var i: usize = 0;
+            while (i < bytes.len) {
+                _ = self.channel.buffer.orderedRemove(0);
+                i += 1;
+            }
             
             self.channel.not_full.signal();
             return message.data;
