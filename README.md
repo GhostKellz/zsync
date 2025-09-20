@@ -1,9 +1,14 @@
-# Zsync - High-Performance Async Runtime for Zig
+<div align="center">
+  <img src="assets/icons/zsync.png" alt="Zsync Logo" width="200" height="200">
 
-[![Zig](https://img.shields.io/badge/Zig-0.16--dev-orange.svg)](https://ziglang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-Passing-green.svg)](#testing)
-[![Performance](https://img.shields.io/badge/Performance-Production_Ready-brightgreen.svg)](#benchmarks)
+  # Zsync - High-Performance Async Runtime for Zig
+
+  [![Zig](https://img.shields.io/badge/Zig-0.16--dev-orange.svg)](https://ziglang.org/)
+  [![Green Threads](https://img.shields.io/badge/Green_Threads-Async-green.svg)](#green-thread-mode-linux)
+  [![io_uring](https://img.shields.io/badge/io__uring-Linux-blue.svg)](#platform-support)
+  [![Performance](https://img.shields.io/badge/Performance-Production_Ready-brightgreen.svg)](#benchmarks)
+  [![Zero Cost](https://img.shields.io/badge/Zero_Cost-Abstractions-purple.svg)](#key-features)
+</div>
 
 ## Overview
 
@@ -43,8 +48,10 @@ pub fn main() !void {
 
 ### Using Zig Build System
 
+Add as a dependency to your Zig project:
+
 ```bash
-zig fetch --save git+https://github.com/ghostkellz/zsync
+zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/heads/main.tar.gz
 ```
 
 Add to your `build.zig`:
