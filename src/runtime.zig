@@ -136,14 +136,122 @@ pub const Config = struct {
     
     pub const LogLevel = enum {
         trace,
-        debug, 
+        debug,
         info,
         warn,
         err,
     };
+
+    /// Create optimal configuration for current platform
+    pub fn optimal() Config {
+        const model = ExecutionModel.detect();
+        const cpu_count = std.Thread.getCpuCount() catch 4;
+
+        return Config{
+            .execution_model = model,
+            .thread_pool_threads = @intCast(@min(cpu_count, 16)),
+            .enable_zero_copy = switch (builtin.os.tag) {
+                .linux => ExecutionModel.checkIoUringSupport(),
+                else => false,
+            },
+            .enable_vectorized_io = true,
+            .enable_metrics = false,
+            .enable_debugging = false,
+        };
+    }
+
+    /// Create optimal configuration for CLI applications
+    pub fn forCli() Config {
+        return Config{
+            .execution_model = .blocking, // CLI tools don't need async overhead
+            .enable_metrics = false,
+            .enable_debugging = false,
+        };
+    }
+
+    /// Create optimal configuration for servers
+    pub fn forServer() Config {
+        const cpu_count = std.Thread.getCpuCount() catch 4;
+
+        return Config{
+            .execution_model = .thread_pool,
+            .thread_pool_threads = @intCast(@min(cpu_count * 2, 32)),
+            .enable_zero_copy = true,
+            .enable_vectorized_io = true,
+            .enable_metrics = true,
+            .enable_debugging = false,
+        };
+    }
+
+    /// Create minimal configuration for embedded systems
+    pub fn forEmbedded() Config {
+        return Config{
+            .execution_model = .blocking,
+            .buffer_size = 1024, // Minimal buffer
+            .buffer_pool_size = 8, // Small pool
+            .enable_metrics = false,
+            .enable_zero_copy = false,
+            .enable_vectorized_io = false,
+            .enable_debugging = false,
+        };
+    }
+
+    /// Validate configuration and print warnings
+    pub fn validate(self: Config) !void {
+        // Thread pool validation
+        if (self.execution_model == .thread_pool) {
+            if (self.thread_pool_threads > 128) {
+                std.debug.print("⚠️  Warning: thread_pool_threads={} is very high (max recommended: 128)\n", .{self.thread_pool_threads});
+                std.debug.print("   Consider reducing for better performance.\n", .{});
+                return RuntimeError.InvalidThreadCount;
+            }
+
+            if (self.thread_pool_threads == 1) {
+                std.debug.print("⚠️  Warning: thread_pool_threads=1 provides no parallelism benefit.\n", .{});
+                std.debug.print("   Consider using execution_model = .blocking instead.\n", .{});
+            }
+        }
+
+        // Green threads validation
+        if (self.execution_model == .green_threads) {
+            if (builtin.os.tag != .linux) {
+                std.debug.print("❌ Error: Green threads only supported on Linux\n", .{});
+                return RuntimeError.GreenThreadsNotSupported;
+            }
+
+            if (self.green_thread_stack_size < 4096) {
+                std.debug.print("❌ Error: green_thread_stack_size too small (min 4096 bytes)\n", .{});
+                return RuntimeError.BufferSizeTooSmall;
+            }
+        }
+
+        // Buffer size validation
+        if (self.buffer_size < 1024) {
+            std.debug.print("⚠️  Warning: buffer_size={} is very small (min recommended: 1024)\n", .{self.buffer_size});
+            std.debug.print("   This may hurt performance.\n", .{});
+        }
+
+        // Zero-copy validation
+        if (self.enable_zero_copy) {
+            const has_support = switch (builtin.os.tag) {
+                .linux => ExecutionModel.checkIoUringSupport(),
+                else => false,
+            };
+
+            if (!has_support) {
+                std.debug.print("⚠️  Warning: enable_zero_copy=true but zero-copy not available on this platform.\n", .{});
+                std.debug.print("   Feature will be disabled.\n", .{});
+            }
+        }
+
+        // Debug validation
+        if (self.enable_debugging and self.enable_metrics) {
+            std.debug.print("💡 Info: Both debugging and metrics enabled. This may impact performance.\n", .{});
+        }
+    }
 };
 
-/// Runtime errors
+/// Runtime errors with helpful context
 pub const RuntimeError = error{
     AlreadyRunning,
     RuntimeShutdown,
@@ -152,7 +260,53 @@ pub const RuntimeError = error{
     SystemResourceExhausted,
     ConfigurationError,
     PlatformUnsupported,
+    // v0.6.0 New specific errors
+    ThreadPoolExhausted,
+    TaskQueueFull,
+    FutureAlreadyAwaited,
+    CancellationRequested,
+    TimeoutExpired,
+    IoUringNotAvailable,
+    InvalidThreadCount,
+    BufferSizeTooSmall,
+    GreenThreadsNotSupported,
 };
+
+/// Format error with helpful message and suggestions
+pub fn formatError(err: RuntimeError) []const u8 {
+    return switch (err) {
+        error.ThreadPoolExhausted =>
+            "Thread pool has no available workers. Consider increasing thread_pool_threads in Config or reducing concurrent task load.",
+        error.IoUringNotAvailable =>
+            "io_uring not available on this system. Linux kernel 5.1+ required. Consider using execution_model = .thread_pool instead.",
+        error.InvalidThreadCount =>
+            "Invalid thread count specified. Must be between 1 and 128. Use 0 for auto-detection based on CPU count.",
+        error.BufferSizeTooSmall =>
+            "Buffer size too small. Minimum 1024 bytes recommended. Increase Config.buffer_size for better performance.",
+        error.GreenThreadsNotSupported =>
+            "Green threads not supported on this platform. Only available on Linux with io_uring. Use execution_model = .thread_pool instead.",
+        error.ConfigurationError =>
+            "Invalid configuration detected. Run Config.validate() for detailed error information.",
+        error.PlatformUnsupported =>
+            "This execution model is not supported on your platform. Use ExecutionModel.detect() for optimal model.",
+        error.AlreadyRunning =>
+            "Runtime is already running. Cannot start multiple instances simultaneously.",
+        error.RuntimeShutdown =>
+            "Runtime has been shutdown. Create a new Runtime instance to continue.",
+        error.TaskQueueFull =>
+            "Task queue is full. Too many pending tasks. Wait for some to complete or increase queue_size.",
+        error.FutureAlreadyAwaited =>
+            "Future has already been awaited. Futures can only be awaited once.",
+        error.TimeoutExpired =>
+            "Operation timed out. Increase timeout duration or check if operation is stalled.",
+        else => @errorName(err),
+    };
+}
+
+/// Print error with helpful context
+pub fn printError(err: RuntimeError) void {
+    std.debug.print("❌ Zsync Error: {s}\n", .{formatError(err)});
+}
 
 /// Performance metrics for the runtime
 pub const RuntimeMetrics = struct {
@@ -368,9 +522,17 @@ pub const Runtime = struct {
         // Execute main task with colorblind async
         const io = self.getIo();
         try self.executeTask(task_fn, args, io);
-        
+
+        // CRITICAL FIX: Auto-shutdown after task completes
+        // This signals thread pool workers to exit immediately
+        // instead of waiting indefinitely for more work
+        self.shutdown();
+
+        // Give workers a brief moment to receive shutdown signal and exit
+        std.Thread.sleep(5 * std.time.ns_per_ms);
+
         const execution_time = std.time.nanoTimestamp() - start_time;
-        
+
         if (self.config.enable_debugging) {
             logInfo("✅ Runtime completed in {d}ms", .{@divTrunc(execution_time, std.time.ns_per_ms)});
             self.printMetrics();
@@ -537,6 +699,66 @@ pub fn getGlobalIo() ?Io {
     return runtime.getIo();
 }
 
+/// Initialize a global runtime with custom configuration
+pub fn initGlobalRuntime(allocator: std.mem.Allocator, config: Config) !void {
+    global_runtime_mutex.lock();
+    defer global_runtime_mutex.unlock();
+
+    if (global_runtime != null) {
+        return RuntimeError.AlreadyRunning;
+    }
+
+    global_runtime = try Runtime.init(allocator, config);
+}
+
+/// Deinitialize the global runtime
+pub fn deinitGlobalRuntime() void {
+    global_runtime_mutex.lock();
+    defer global_runtime_mutex.unlock();
+
+    if (global_runtime) |runtime| {
+        runtime.deinit();
+        global_runtime = null;
+    }
+}
+
+/// Get the global runtime (if initialized)
+pub fn getGlobalRuntime() ?*Runtime {
+    return Runtime.global();
+}
+
+/// Run a simple synchronous task without async overhead
+/// Perfect for CLI commands like --help, --version, etc.
+pub fn runSimple(comptime task_fn: anytype, args: anytype) !void {
+    // No GPA needed for truly simple tasks
+    var buffer: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const allocator = fba.allocator();
+
+    // Execute task directly without runtime overhead
+    const TaskType = @TypeOf(task_fn);
+    const task_info = @typeInfo(TaskType);
+
+    if (task_info != .@"fn") {
+        @compileError("Task must be a function");
+    }
+
+    // Call task based on signature
+    return switch (@typeInfo(@TypeOf(args))) {
+        .@"struct" => |struct_info| blk: {
+            if (struct_info.fields.len == 0) {
+                // No args
+                break :blk task_fn(allocator);
+            } else {
+                // With args
+                break :blk @call(.auto, task_fn, .{allocator} ++ args);
+            }
+        },
+        .void => task_fn(allocator),
+        else => task_fn(allocator, args),
+    };
+}
+
 // Logging utilities
 fn logInfo(comptime fmt: []const u8, args: anytype) void {
     std.debug.print("[Zsync] " ++ fmt ++ "\n", args);
@@ -578,16 +800,78 @@ test "Colorblind async example" {
 test "Runtime metrics" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const config = Config{
         .execution_model = .blocking,
         .enable_metrics = true,
     };
-    
+
     const runtime = try Runtime.init(allocator, config);
     defer runtime.deinit();
-    
+
     const metrics = runtime.getMetrics();
     try testing.expect(metrics.tasks_spawned.load(.monotonic) == 0);
     try testing.expect(metrics.tasks_completed.load(.monotonic) == 0);
 }
+
+/// Runtime Builder for ergonomic configuration
+pub const RuntimeBuilder = struct {
+    config: Config,
+    allocator: std.mem.Allocator,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return Self{
+            .config = Config{},
+            .allocator = allocator,
+        };
+    }
+
+    /// Set execution model
+    pub fn executionModel(self: *Self, model: ExecutionModel) *Self {
+        self.config.execution_model = model;
+        return self;
+    }
+
+    /// Set thread count
+    pub fn threads(self: *Self, count: u32) *Self {
+        self.config.thread_pool_threads = count;
+        return self;
+    }
+
+    /// Set buffer size
+    pub fn bufferSize(self: *Self, size: usize) *Self {
+        self.config.buffer_size = size;
+        return self;
+    }
+
+    /// Enable metrics
+    pub fn enableMetrics(self: *Self) *Self {
+        self.config.enable_metrics = true;
+        return self;
+    }
+
+    /// Enable debugging
+    pub fn enableDebugging(self: *Self) *Self {
+        self.config.enable_debugging = true;
+        return self;
+    }
+
+    /// Enable zero-copy I/O
+    pub fn enableZeroCopy(self: *Self) *Self {
+        self.config.enable_zero_copy = true;
+        return self;
+    }
+
+    /// Enable vectorized I/O
+    pub fn enableVectorizedIo(self: *Self) *Self {
+        self.config.enable_vectorized_io = true;
+        return self;
+    }
+
+    /// Build the runtime
+    pub fn build(self: *Self) !*Runtime {
+        return Runtime.init(self.allocator, self.config);
+    }
+};

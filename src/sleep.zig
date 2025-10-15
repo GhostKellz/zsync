@@ -1,0 +1,44 @@
+//! Zsync v0.6.0 - Sleep and Yield Primitives
+//! Async sleep and cooperative yielding
+
+const std = @import("std");
+
+/// Cooperatively yield control to other tasks
+pub fn yieldNow() !void {
+    // For now, just yield the thread
+    // TODO: Integrate with runtime scheduler for true cooperative yielding
+    try std.Thread.yield();
+}
+
+/// Sleep for the specified number of milliseconds
+pub fn sleep(ms: u64) void {
+    const ns = ms * std.time.ns_per_ms;
+    std.Thread.sleep(ns);
+}
+
+/// Sleep for the specified number of microseconds
+pub fn sleepMicros(us: u64) void {
+    const ns = us * std.time.ns_per_us;
+    std.Thread.sleep(ns);
+}
+
+/// Sleep for the specified number of nanoseconds
+pub fn sleepNanos(ns: u64) void {
+    std.Thread.sleep(ns);
+}
+
+// Tests
+test "yieldNow basic" {
+    try yieldNow();
+    try yieldNow();
+    try yieldNow();
+}
+
+test "sleep milliseconds" {
+    const start = std.time.milliTimestamp();
+    sleep(10);
+    const elapsed = std.time.milliTimestamp() - start;
+
+    // Should sleep at least 10ms (allow some tolerance)
+    try std.testing.expect(elapsed >= 9);
+}

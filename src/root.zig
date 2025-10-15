@@ -1,14 +1,57 @@
-//! Zsync v0.5.0 - The Tokio of Zig
+//! Zsync v0.6.0 - The Tokio of Zig
 //! Colorblind Async Runtime with True Function Color Elimination
 //! Following Zig's latest async paradigm for maximum performance and ergonomics
 
 const std = @import("std");
 const builtin = @import("builtin");
 
-// Core v0.5.0 APIs - Colorblind Async Interface  
+// Core v0.6.0 APIs - Colorblind Async Interface
 pub const io_interface = @import("io_interface.zig");
 pub const runtime = @import("runtime.zig");
 pub const blocking_io = @import("blocking_io.zig");
+
+// v0.6.0 New APIs - Task Spawning and Concurrency
+pub const spawn_mod = @import("spawn.zig");
+pub const channels = @import("channels.zig");
+pub const future_mod = @import("future.zig");
+pub const executor_mod = @import("executor.zig");
+pub const sync_mod = @import("sync.zig");
+pub const sleep_mod = @import("sleep.zig");
+pub const select_mod = @import("select.zig");
+
+// v0.6.0 Diagnostics and HTTP
+pub const diagnostics = @import("diagnostics.zig");
+pub const http_server = @import("http/server.zig");
+pub const http_client = @import("http/client.zig");
+pub const http3 = @import("http/http3.zig");
+
+// v0.6.0 Advanced Networking - DoQ and gRPC
+pub const doq = @import("net/doq.zig");
+pub const grpc_server = @import("grpc/server.zig");
+pub const grpc_client = @import("grpc/client.zig");
+pub const rate_limit = @import("net/rate_limit.zig");
+pub const connection_pool = @import("net/pool.zig");
+pub const file_watch = @import("dev/watch.zig");
+pub const websocket = @import("net/websocket.zig");
+
+// v0.6.0 WASM Support
+pub const wasm_microtask = @import("wasm/microtask.zig");
+pub const wasm_async = @import("wasm/async.zig");
+
+// v0.6.0 LSP Server (for Grim/Grove)
+pub const lsp_server = @import("lsp/server.zig");
+
+// v0.6.0 Terminal/PTY (for Ghostshell)
+pub const pty = @import("terminal/pty.zig");
+
+// v0.6.0 Plugin System (for GShell)
+pub const plugin_system = @import("plugin/system.zig");
+
+// v0.6.0 Script Runtime (for Ghostlang)
+pub const script_runtime = @import("script/runtime.zig");
+
+// v0.6.0 Compression Streaming (for zpack)
+pub const compression = @import("compression/stream.zig");
 
 // v0.5.2 Platform-Specific Runtime System
 pub const platform_runtime = @import("platform_runtime.zig");
@@ -52,7 +95,149 @@ pub const BlockingIo = blocking_io.BlockingIo;
 pub const run = runtime.run;
 pub const runBlocking = runtime.runBlocking;
 pub const runHighPerf = runtime.runHighPerf;
+pub const runSimple = runtime.runSimple;
 pub const getGlobalIo = runtime.getGlobalIo;
+pub const initGlobalRuntime = runtime.initGlobalRuntime;
+pub const deinitGlobalRuntime = runtime.deinitGlobalRuntime;
+pub const getGlobalRuntime = runtime.getGlobalRuntime;
+pub const formatError = runtime.formatError;
+pub const printError = runtime.printError;
+
+// v0.6.0 New Convenience Functions
+pub const TaskHandle = spawn_mod.TaskHandle;
+pub const GenericFuture = future_mod.Future;
+pub const Executor = executor_mod.Executor;
+pub const Semaphore = sync_mod.Semaphore;
+pub const Barrier = sync_mod.Barrier;
+pub const Latch = sync_mod.Latch;
+pub const Channel = channels.Channel;
+pub const UnboundedChannel = channels.UnboundedChannel;
+
+// Task spawning
+pub const spawnTask = spawn_mod.spawn;
+pub const spawnOn = spawn_mod.spawnOn;
+
+// Channels
+pub const boundedChannel = channels.bounded;
+pub const unboundedChannel = channels.unbounded;
+
+// Sleep and yield
+pub const yieldTask = sleep_mod.yieldNow;
+pub const sleepMs = sleep_mod.sleep;
+pub const sleepMicros = sleep_mod.sleepMicros;
+pub const sleepNanos = sleep_mod.sleepNanos;
+
+// Future combinators
+pub const selectFuture = select_mod.select;
+pub const selectTimeout = select_mod.selectTimeout;
+pub const allFutures = select_mod.all;
+pub const anyFuture = select_mod.any;
+
+// Diagnostics
+pub const RuntimeDiagnostics = diagnostics.RuntimeDiagnostics;
+pub const RuntimeStats = diagnostics.RuntimeStats;
+
+// HTTP Server & Client (v0.6.0 new)
+pub const HttpServerV2 = http_server.HttpServer;
+pub const HttpClientV2 = http_client.HttpClient;
+pub const HttpRequestV2 = http_server.Request;
+pub const HttpResponseV2 = http_server.Response;
+
+// HTTP/3 over QUIC (v0.6.0)
+pub const Http3Server = http3.Http3Server;
+pub const Http3Client = http3.Http3Client;
+pub const Http3Request = http3.Http3Request;
+pub const Http3Response = http3.Http3Response;
+
+// DNS over QUIC (v0.6.0)
+pub const DoqClient = doq.DoqClient;
+pub const DoqServer = doq.DoqServer;
+pub const DoqQuery = doq.DoqQuery;
+pub const DoqResponse = doq.DoqResponse;
+pub const DnsRecordType = doq.RecordType;
+
+// gRPC Server & Client (v0.6.0)
+pub const GrpcServer = grpc_server.GrpcServer;
+pub const GrpcClient = grpc_client.GrpcClient;
+pub const GrpcContext = grpc_server.Context;
+pub const GrpcMetadata = grpc_server.Metadata;
+pub const GrpcStatusCode = grpc_server.StatusCode;
+pub const GrpcChannel = grpc_client.Channel;
+
+// Rate Limiting (v0.6.0)
+pub const TokenBucket = rate_limit.TokenBucket;
+pub const LeakyBucket = rate_limit.LeakyBucket;
+pub const SlidingWindow = rate_limit.SlidingWindow;
+
+// Connection Pool (v0.6.0)
+pub const ConnectionPool = connection_pool.ConnectionPool;
+pub const PoolConfig = connection_pool.PoolConfig;
+pub const PoolStats = connection_pool.PoolStats;
+
+// File Watcher (v0.6.0)
+pub const FileWatcher = file_watch.FileWatcher;
+pub const PollingWatcher = file_watch.PollingWatcher;
+pub const WatchEvent = file_watch.WatchEvent;
+
+// Async Locks (v0.6.0)
+pub const AsyncMutex = sync_mod.AsyncMutex;
+pub const AsyncRwLock = sync_mod.AsyncRwLock;
+pub const WaitGroup = sync_mod.WaitGroup;
+
+// WebSocket (v0.6.0)
+pub const WebSocketConnectionV2 = websocket.WebSocketConnection;
+pub const WebSocketServerV2 = websocket.WebSocketServer;
+pub const WebSocketClientV2 = websocket.WebSocketClient;
+pub const WebSocketMessageV2 = websocket.Message;
+pub const WebSocketOpCodeV2 = websocket.OpCode;
+pub const WebSocketCloseCodeV2 = websocket.CloseCode;
+
+// WASM Async Helpers (v0.6.0)
+pub const MicrotaskQueue = wasm_microtask.MicrotaskQueue;
+pub const queueMicrotask = wasm_microtask.queueMicrotask;
+pub const flushMicrotasks = wasm_microtask.flushMicrotasks;
+pub const Promise = wasm_async.Promise;
+pub const AsyncContext = wasm_async.AsyncContext;
+pub const EventEmitter = wasm_async.EventEmitter;
+pub const AbortController = wasm_async.AbortController;
+pub const fetch = wasm_async.fetch;
+pub const FetchResponse = wasm_async.FetchResponse;
+
+// LSP Server (v0.6.0) - For Grim/Grove
+pub const LspServer = lsp_server.LspServer;
+pub const LspServerConfig = lsp_server.ServerConfig;
+pub const LspPosition = lsp_server.Position;
+pub const LspRange = lsp_server.Range;
+pub const LspLocation = lsp_server.Location;
+pub const LspDiagnostic = lsp_server.Diagnostic;
+
+// PTY/Terminal (v0.6.0) - For Ghostshell
+pub const Pty = pty.Pty;
+pub const PtyConfig = pty.PtyConfig;
+pub const Winsize = pty.Winsize;
+pub const TermAttr = pty.TermAttr;
+
+// Plugin System (v0.6.0) - For GShell
+pub const Plugin = plugin_system.Plugin;
+pub const PluginManager = plugin_system.PluginManager;
+pub const PluginMetadata = plugin_system.PluginMetadata;
+pub const PluginState = plugin_system.PluginState;
+pub const discoverPlugins = plugin_system.discoverPlugins;
+
+// Script Runtime (v0.6.0) - For Ghostlang
+pub const ScriptEngine = script_runtime.ScriptEngine;
+pub const ScriptValue = script_runtime.ScriptValue;
+pub const ScriptChannel = script_runtime.ScriptChannel;
+pub const ScriptTimer = script_runtime.ScriptTimer;
+pub const ScriptFFI = script_runtime.FFI;
+
+// Compression Streaming (v0.6.0) - For zpack
+pub const AsyncCompressor = compression.AsyncCompressor;
+pub const AsyncDecompressor = compression.AsyncDecompressor;
+pub const CompressionConfig = compression.CompressionConfig;
+pub const CompressionAlgorithm = compression.Algorithm;
+pub const compressFileAsync = compression.compressFileAsync;
+pub const decompressFileAsync = compression.decompressFileAsync;
 
 // Set global execution mode for colorblind async
 pub const setIoMode = setGlobalIoMode;
@@ -423,30 +608,43 @@ pub const ChannelError = channel.ChannelError;
 pub const Sender = channel.Sender;
 pub const Receiver = channel.Receiver;
 
-// Version information  
-pub const VERSION = "0.5.0";
+// Version information
+pub const VERSION = "0.6.0";
 pub const VERSION_MAJOR = 0;
-pub const VERSION_MINOR = 5;
+pub const VERSION_MINOR = 6;
 pub const VERSION_PATCH = 0;
 
 /// Print Zsync version and capabilities
 pub fn printVersion() void {
     std.debug.print("🚀 Zsync v{s} - The Tokio of Zig\n", .{VERSION});
-    std.debug.print("Features:\n", .{});
+    std.debug.print("Core Features:\n", .{});
     std.debug.print("  ✅ Colorblind Async/Await\n", .{});
     std.debug.print("  ✅ Multiple Execution Models\n", .{});
     std.debug.print("  ✅ Future Combinators\n", .{});
     std.debug.print("  ✅ Cooperative Cancellation\n", .{});
     std.debug.print("  ✅ Zero-Cost Abstractions\n", .{});
     std.debug.print("  ✅ Cross-Platform Support\n", .{});
-    std.debug.print("  ✅ Channel Message Passing\n", .{});
-    std.debug.print("  ✅ UDP Socket Support\n", .{});
-    std.debug.print("  ✅ Thread Pool I/O\n", .{});
-    std.debug.print("  ✅ Cooperative Yielding\n", .{});
-    std.debug.print("  ✅ Timer System\n", .{});
-    
+    std.debug.print("\nv0.6.0 New Features:\n", .{});
+    std.debug.print("  ✅ Task Spawning & Channels\n", .{});
+    std.debug.print("  ✅ HTTP/3 over QUIC\n", .{});
+    std.debug.print("  ✅ DNS over QUIC (DoQ)\n", .{});
+    std.debug.print("  ✅ gRPC Server & Client (HTTP/2 and HTTP/3)\n", .{});
+    std.debug.print("  ✅ WebSocket Client & Server\n", .{});
+    std.debug.print("  ✅ Rate Limiting (Token Bucket, Leaky Bucket, Sliding Window)\n", .{});
+    std.debug.print("  ✅ Connection Pool with Health Checks\n", .{});
+    std.debug.print("  ✅ File Watcher (cross-platform)\n", .{});
+    std.debug.print("  ✅ Async Locks (AsyncMutex, AsyncRwLock, WaitGroup)\n", .{});
+    std.debug.print("  ✅ WASM Async Support (Promise, EventEmitter, AbortController)\n", .{});
+    std.debug.print("  ✅ Microtask Queue (browser-compatible)\n", .{});
+    std.debug.print("  ✅ LSP Server (for Grim/Grove)\n", .{});
+    std.debug.print("  ✅ PTY/Terminal I/O (for Ghostshell)\n", .{});
+    std.debug.print("  ✅ Plugin System (for GShell)\n", .{});
+    std.debug.print("  ✅ Script Runtime Integration (for Ghostlang)\n", .{});
+    std.debug.print("  ✅ Runtime Diagnostics & Metrics\n", .{});
+    std.debug.print("  ✅ Runtime Builder Pattern\n", .{});
+
     const optimal_model = detectOptimalModel();
-    std.debug.print("Optimal execution model for this platform: {}\n", .{optimal_model});
+    std.debug.print("\nOptimal execution model for this platform: {}\n", .{optimal_model});
 }
 
 /// Simple hello world example showcasing colorblind async
@@ -537,11 +735,11 @@ test "Runtime with optimal configuration" {
 
 test "Version information" {
     const testing = std.testing;
-    
+
     try testing.expect(VERSION_MAJOR == 0);
-    try testing.expect(VERSION_MINOR == 5);
+    try testing.expect(VERSION_MINOR == 6);
     try testing.expect(VERSION_PATCH == 0);
-    try testing.expect(std.mem.eql(u8, VERSION, "0.5.0"));
+    try testing.expect(std.mem.eql(u8, VERSION, "0.6.0"));
 }
 
 /// Legacy compatibility function

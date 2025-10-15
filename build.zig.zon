@@ -1,6 +1,6 @@
 .{
     .name = .zsync,
-    .version = "0.5.4",
+    .version = "0.5.5",
     .minimum_zig_version = "0.15.0",
     .fingerprint = 0x782f251579a10b28,
 
