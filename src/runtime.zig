@@ -1,5 +1,5 @@
-//! Zsync v0.4.0 - Colorblind Async Runtime
-//! The definitive async runtime for Zig following the latest async paradigm
+//! Zsync v0.6.0 - The Tokio of Zig
+//! Production-ready colorblind async runtime with comprehensive platform support
 //! True colorblind async: same code works across all execution models
 
 const std = @import("std");
@@ -349,7 +349,7 @@ pub const RuntimeMetrics = struct {
 var global_runtime: ?*Runtime = null;
 var global_runtime_mutex = std.Thread.Mutex{};
 
-/// Zsync v0.4.0 Modern Async Runtime
+/// Zsync v0.6.0 - The Tokio of Zig - Production-Ready Async Runtime
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     config: Config,
@@ -514,7 +514,7 @@ pub const Runtime = struct {
         
         const model_name = @tagName(self.execution_model);
         if (self.config.enable_debugging) {
-            logInfo("🚀 Zsync v0.4.0 Runtime starting with {s} execution model", .{model_name});
+            logInfo("🚀 Zsync v0.6.0 - The Tokio of Zig - starting with {s} execution model", .{model_name});
         }
         
         const start_time = std.time.nanoTimestamp();
@@ -786,7 +786,7 @@ test "Runtime basic operations" {
 test "Colorblind async example" {
     const TestTask = struct {
         fn task(io: Io) !void {
-            const data = "Hello, Zsync v0.4.0!";
+            const data = "Hello, Zsync v0.6.0 - The Tokio of Zig!";
             var io_mut = io;
             var future = try io_mut.write(data);
             defer future.destroy(io.getAllocator());

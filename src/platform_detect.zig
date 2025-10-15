@@ -1,5 +1,5 @@
-//! Platform Detection Module for Zsync v0.4.0
-//! Detects specific Linux distributions and system capabilities
+//! Platform Detection Module for Zsync v0.6.0
+//! Detects distributions, package managers, and system capabilities
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -283,12 +283,12 @@ pub fn printSystemInfo() void {
         std.debug.print("Platform: {} {}\n", .{ builtin.os.tag, builtin.cpu.arch });
         return;
     }
-    
+
     const caps = detectSystemCapabilities();
     const settings = getDistroOptimalSettings(caps.distro);
-    
+
     std.debug.print("🐧 Linux Distribution: {s}\n", .{@tagName(caps.distro)});
-    std.debug.print("🔧 Kernel: {}.{}.{}\n", .{ 
+    std.debug.print("🔧 Kernel: {}.{}.{}\n", .{
         caps.kernel_version.major,
         caps.kernel_version.minor,
         caps.kernel_version.patch
@@ -303,6 +303,151 @@ pub fn printSystemInfo() void {
     std.debug.print("  • Aggressive threading: {}\n", .{settings.aggressive_threading});
     std.debug.print("  • Buffer size: {} bytes\n", .{settings.buffer_size});
     std.debug.print("  • Huge pages: {}\n", .{settings.use_huge_pages});
+}
+
+/// Package manager types
+pub const PackageManager = enum {
+    homebrew,
+    apt,
+    pacman,
+    yum,
+    dnf,
+    nix,
+    guix,
+    chocolatey,
+    scoop,
+    winget,
+    unknown,
+};
+
+/// Package manager paths for common package managers
+pub const PackageManagerPaths = struct {
+    bin_path: []const u8,
+    lib_path: []const u8,
+    include_path: []const u8,
+
+    pub fn forPackageManager(pm: PackageManager) ?PackageManagerPaths {
+        return switch (pm) {
+            .homebrew => .{
+                .bin_path = if (builtin.cpu.arch == .aarch64)
+                    "/opt/homebrew/bin"
+                else
+                    "/usr/local/bin",
+                .lib_path = if (builtin.cpu.arch == .aarch64)
+                    "/opt/homebrew/lib"
+                else
+                    "/usr/local/lib",
+                .include_path = if (builtin.cpu.arch == .aarch64)
+                    "/opt/homebrew/include"
+                else
+                    "/usr/local/include",
+            },
+            .apt => .{
+                .bin_path = "/usr/bin",
+                .lib_path = "/usr/lib",
+                .include_path = "/usr/include",
+            },
+            .pacman => .{
+                .bin_path = "/usr/bin",
+                .lib_path = "/usr/lib",
+                .include_path = "/usr/include",
+            },
+            .yum, .dnf => .{
+                .bin_path = "/usr/bin",
+                .lib_path = "/usr/lib64",
+                .include_path = "/usr/include",
+            },
+            .nix => .{
+                .bin_path = "/nix/var/nix/profiles/default/bin",
+                .lib_path = "/nix/var/nix/profiles/default/lib",
+                .include_path = "/nix/var/nix/profiles/default/include",
+            },
+            .chocolatey => .{
+                .bin_path = "C:\\ProgramData\\chocolatey\\bin",
+                .lib_path = "C:\\ProgramData\\chocolatey\\lib",
+                .include_path = "",
+            },
+            .scoop => .{
+                .bin_path = "%USERPROFILE%\\scoop\\shims",
+                .lib_path = "%USERPROFILE%\\scoop",
+                .include_path = "",
+            },
+            .winget => .{
+                .bin_path = "C:\\Program Files\\WindowsApps",
+                .lib_path = "",
+                .include_path = "",
+            },
+            else => null,
+        };
+    }
+};
+
+/// Detect installed package manager
+pub fn detectPackageManager() PackageManager {
+    // Check for Homebrew (macOS/Linux)
+    if (std.fs.accessAbsolute("/opt/homebrew/bin/brew", .{}) catch false or
+        std.fs.accessAbsolute("/usr/local/bin/brew", .{}) catch false or
+        std.fs.accessAbsolute("/home/linuxbrew/.linuxbrew/bin/brew", .{}) catch false)
+    {
+        return .homebrew;
+    }
+
+    // Check for apt (Debian/Ubuntu)
+    if (std.fs.accessAbsolute("/usr/bin/apt", .{}) catch false or
+        std.fs.accessAbsolute("/usr/bin/apt-get", .{}) catch false)
+    {
+        return .apt;
+    }
+
+    // Check for pacman (Arch Linux)
+    if (std.fs.accessAbsolute("/usr/bin/pacman", .{}) catch false) {
+        return .pacman;
+    }
+
+    // Check for dnf (Fedora 22+)
+    if (std.fs.accessAbsolute("/usr/bin/dnf", .{}) catch false) {
+        return .dnf;
+    }
+
+    // Check for yum (RHEL/CentOS/older Fedora)
+    if (std.fs.accessAbsolute("/usr/bin/yum", .{}) catch false) {
+        return .yum;
+    }
+
+    // Check for nix
+    if (std.fs.accessAbsolute("/nix/var/nix/profiles/default/bin/nix", .{}) catch false or
+        std.fs.accessAbsolute("/run/current-system/sw/bin/nix", .{}) catch false)
+    {
+        return .nix;
+    }
+
+    // Check for guix
+    if (std.fs.accessAbsolute("/usr/bin/guix", .{}) catch false or
+        std.fs.accessAbsolute("/var/guix/profiles/per-user/root/current-guix/bin/guix", .{}) catch false)
+    {
+        return .guix;
+    }
+
+    // Windows package managers
+    if (builtin.os.tag == .windows) {
+        // Check for Chocolatey
+        if (std.fs.accessAbsolute("C:\\ProgramData\\chocolatey\\bin\\choco.exe", .{}) catch false) {
+            return .chocolatey;
+        }
+
+        // Check for Scoop (in user profile)
+        // Note: This is a simplified check
+        if (std.posix.getenv("SCOOP")) |_| {
+            return .scoop;
+        }
+
+        // Check for winget
+        if (std.fs.accessAbsolute("C:\\Program Files\\WindowsApps", .{}) catch false) {
+            return .winget;
+        }
+    }
+
+    return .unknown;
 }
 
 // Tests

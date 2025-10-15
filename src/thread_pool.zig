@@ -1,5 +1,5 @@
-//! Zsync v0.4.0 - Thread Pool Execution Model
-//! High-performance thread pool with work-stealing for true parallelism
+//! Zsync v0.6.0 - Thread Pool Execution Model
+//! High-performance thread pool with auto-shutdown and work-stealing
 //! Implements the Io interface for seamless colorblind async
 
 const std = @import("std");
@@ -105,11 +105,11 @@ const WorkQueue = struct {
     pub fn pop(self: *Self) ?*WorkItem {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         while (self.head == null and !self.shutdown.load(.acquire)) {
             self.condition.wait(&self.mutex);
         }
-        
+
         if (self.head) |head| {
             self.head = head.next;
             if (self.head == null) {
@@ -117,7 +117,7 @@ const WorkQueue = struct {
             }
             return head;
         }
-        
+
         return null;
     }
     
@@ -751,21 +751,19 @@ test "ThreadPoolIo basic operations - skipped" {
 }
 
 test "ThreadPoolIo basic operations - old" {
-    if (true) return error.SkipZigTest; // Skip for now
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var thread_pool = try ThreadPoolIo.init(allocator, 2, 1024);
-    
+
     const io = thread_pool.io();
-    
+
     // Test execution mode
     try testing.expect(io.getMode() == .evented);
     try testing.expect(io.supportsVectorized());
     try testing.expect(!io.supportsZeroCopy());
-    
-    // Explicitly shutdown before deinit
-    thread_pool.queue.requestShutdown();
+
+    // Properly shutdown
     thread_pool.deinit();
 }
 

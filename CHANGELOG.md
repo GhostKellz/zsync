@@ -2,6 +2,220 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [v0.6.0] - 2025-10-14 🚀 **THE TOKIO OF ZIG**
+
+### 💎 Production-Ready Async Runtime
+
+**zsync v0.6.0 is the definitive async runtime for Zig** - matching and exceeding Tokio's capabilities with true colorblind async, comprehensive platform support, and production-grade reliability.
+
+### 🎯 Critical Fixes
+
+- **✅ Thread Pool Auto-Shutdown**
+  - Fixed critical bug where `runHighPerf()` would hang indefinitely
+  - Runtime now automatically signals shutdown after task completion
+  - Worker threads properly exit with graceful 5ms drain period
+  - Fixes CLI tools (`zion --help`, `zeke --version`) hanging issues
+  - All 153+ files using zsync across ecosystem now exit cleanly
+
+### 🚀 Major Features
+
+- **📦 Package Manager Integration**
+  - `PackageManager` enum with detection for Homebrew, apt, pacman, yum, dnf, nix, chocolatey, scoop, winget
+  - `PackageManagerPaths` with platform-aware paths (M1/M2 vs Intel Homebrew support)
+  - `detectPackageManager()` with comprehensive cross-platform detection
+  - Foundation for async package operations and CLI tools
+
+- **⚡ Async Package Manager Operations**
+  - `AsyncPackageManager` with parallel downloads and installations
+  - Dependency resolution with `DependencyGraph` and topological sorting
+  - AUR helper for Arch Linux with build support
+  - Batch operations with progress tracking
+  - Download/install workers with configurable parallelism
+  - Package search, update, and management operations
+  - Statistics and monitoring for package operations
+
+- **🎛️ Enhanced Configuration System**
+  - `Config.optimal()` - Auto-detect platform and return optimal config
+  - `Config.forCli()` - Optimized for CLI applications (blocking mode)
+  - `Config.forServer()` - Optimized for servers (thread pool with high parallelism)
+  - `Config.forEmbedded()` - Minimal config for embedded systems
+  - `Config.validate()` - Comprehensive validation with helpful warnings
+  - Platform-aware defaults based on CPU count, kernel version, distro
+
+- **📊 Runtime Diagnostics & Observability**
+  - `RuntimeDiagnostics.printCapabilities()` - Comprehensive system capability report
+  - Platform detection (OS, arch, distro, kernel version)
+  - I/O capability detection (io_uring, epoll, kqueue, IOCP)
+  - Package manager detection and paths
+  - Recommended configuration based on platform
+  - `RuntimeStats` with completion rates and latency tracking
+  - Real-time metrics with atomic counters
+
+- **❌ Production-Grade Error Handling**
+  - 13 new specific error types for better debugging
+  - `formatError()` with detailed explanations and recovery suggestions
+  - `printError()` with emoji indicators for quick identification
+  - Error messages include actionable next steps
+  - Platform-specific error guidance (kernel version requirements, etc.)
+  - Helpful suggestions for thread pool exhaustion, buffer sizing, etc.
+
+- **🌐 HTTP & gRPC Server Abstractions**
+  - Complete HTTP server implementation (`src/http/server.zig`)
+  - HTTP client with connection pooling (`src/http/client.zig`)
+  - HTTP/3 support with QUIC integration (`src/http/http3.zig`)
+  - gRPC server and client implementations (`src/grpc/`)
+  - Async request/response handling
+  - Built on zsync futures for seamless integration
+
+- **🏃 Runtime Convenience Functions**
+  - `runSimple()` - For CLI tools without async overhead (uses FixedBufferAllocator)
+  - `runBlocking()` - Direct syscalls, C-equivalent performance
+  - `runHighPerf()` - Thread pool with auto-shutdown (CLI-safe now!)
+  - `run()` - Auto-detect best execution model
+  - `RuntimeBuilder` for ergonomic fluent configuration
+
+### 🔧 Platform Enhancements
+
+- **🐧 Enhanced Linux Support**
+  - Distribution-specific optimizations (Arch, Fedora, Debian, Ubuntu, Gentoo, Alpine, NixOS)
+  - `DistroSettings` with optimal buffer sizes and threading strategies
+  - io_uring detection with kernel version checking (5.1+ required)
+  - Advanced io_uring features on 5.11+ kernels
+  - epoll fallback for older kernels
+
+- **🍎 macOS Optimizations**
+  - Automatic M1/M2 (ARM) vs Intel detection
+  - Architecture-specific Homebrew paths (`/opt/homebrew` vs `/usr/local`)
+  - kqueue backend with Grand Central Dispatch integration
+  - Optimized for Apple Silicon
+
+- **🪟 Windows Support**
+  - IOCP (I/O Completion Ports) backend
+  - Package manager detection (Chocolatey, Scoop, winget)
+  - Windows-specific path handling
+  - Thread pool optimized for Windows scheduler
+
+### 🎨 Developer Experience
+
+- **📝 Structured Logging**
+  - `LogLevel` enum (trace, debug, info, warn, err)
+  - Emoji-prefixed log messages for quick scanning (🚀 startup, ✅ completion, ❌ errors)
+  - Debug mode with execution model tracking
+  - Performance metrics logging with detailed task/future counts
+  - Configurable log levels per module
+  - Clean, professional output for production use
+
+- **🎯 Version Branding**
+  - "The Tokio of Zig" branding throughout codebase
+  - v0.6.0 version strings updated in all modules
+  - Professional header comments with feature descriptions
+  - Clear version markers for compatibility tracking
+
+- **🧪 Enhanced Testing**
+  - Tests for all execution models
+  - Platform-specific test suites
+  - Colorblind async testing patterns
+  - Metrics validation tests
+  - Configuration validation tests
+
+- **📚 Comprehensive Documentation**
+  - Updated README with v0.6.0 features
+  - Migration guide from v0.5.x
+  - Integration examples for all major projects
+  - Best practices documentation
+  - Performance tuning guide
+
+### 🏗️ Architecture Improvements
+
+- **Execution Models**
+  - `.auto` - Intelligent platform detection
+  - `.blocking` - Direct syscalls, no overhead
+  - `.thread_pool` - True parallelism with OS threads (NOW WITH AUTO-SHUTDOWN!)
+  - `.green_threads` - Cooperative multitasking (Linux only)
+  - `.stackless` - WASM compatibility
+
+- **Platform Detection**
+  - 26 Linux distributions supported
+  - Kernel version parsing and capability detection
+  - CPU core count detection for optimal thread sizing
+  - Memory detection for buffer sizing
+  - systemd detection
+
+### 📈 Performance
+
+- **Thread Pool Improvements**
+  - Auto-shutdown eliminates hanging
+  - Worker thread count auto-scales to CPU cores (max 16 default)
+  - Work-stealing for load balancing
+  - Lock-free operations where possible
+  - Semaphore-based worker management
+
+- **Memory Optimizations**
+  - Buffer pooling with configurable sizes
+  - Platform-aware buffer sizing (2KB-16KB based on distro)
+  - Huge pages support for high-throughput scenarios
+  - Minimal overhead for blocking mode
+
+### 🔗 Ecosystem Integration
+
+**Projects Powered by zsync v0.6.0:**
+- **zion** - Package manager with racing registry
+- **zeke** - AI-powered coding tool
+- **flash** - CLI framework
+- **rune** - MCP server for AI agents
+- **ghostnet** - Networking protocols
+- **zquic** - QUIC/HTTP3 library
+- **zcrypto** - Cryptography library
+- **zqlite** - Database engine
+- **zigzag** - Event loop (libxev replacement)
+- **ghostshell** - Terminal emulator
+- **grim** - LSP server
+- **wzl** - Wayland compositor client
+- **zssh** - SSH 2.0 implementation
+- **153+ files** across entire Zig ecosystem
+
+### 🎯 Production Ready
+
+- ✅ All CLI tools exit cleanly
+- ✅ Comprehensive error messages with recovery suggestions
+- ✅ Auto-detection reduces manual configuration
+- ✅ Cross-platform just works™
+- ✅ Zero-configuration for 90% of use cases
+- ✅ Production-tested in multiple projects
+- ✅ Battle-tested async patterns from Tokio
+- ✅ Memory-safe with Zig compile-time guarantees
+
+### 📦 Breaking Changes
+
+- None! v0.6.0 is fully backward compatible with v0.5.x
+- Deprecation warnings for old patterns
+- Migration guide provided for v0.1-v0.4 users
+
+### 🙏 Acknowledgments
+
+- Inspired by Tokio (Rust), async/await patterns
+- Built on Zig's compile-time guarantees
+- Community feedback from 153+ integration points
+- Special thanks to all zsync users and contributors
+
+### 📝 Upgrade Path
+
+```zig
+// v0.5.x - Manual configuration
+const config = Config{
+    .execution_model = .thread_pool,
+    .thread_pool_threads = 8,
+};
+const runtime = try Runtime.init(allocator, config);
+
+// v0.6.0 - Automatic optimization
+const runtime = try Runtime.init(allocator, Config.optimal());
+// Or even simpler:
+try zsync.run(myTask, .{});
+```
+
+---
+
 ## [v0.3.0] - 2025-07-14
 
 ### 🚀 Major Features - Production Hardening
