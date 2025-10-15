@@ -29,7 +29,7 @@ pub const Executor = struct {
 
         return Self{
             .runtime = runtime,
-            .tasks = std.ArrayList(*TaskHandle).init(allocator),
+            .tasks = std.ArrayList(*TaskHandle){},
             .allocator = allocator,
         };
     }
@@ -40,7 +40,7 @@ pub const Executor = struct {
 
         return Self{
             .runtime = runtime,
-            .tasks = std.ArrayList(*TaskHandle).init(allocator),
+            .tasks = std.ArrayList(*TaskHandle){},
             .allocator = allocator,
         };
     }
@@ -51,7 +51,7 @@ pub const Executor = struct {
         for (self.tasks.items) |task| {
             task.deinit();
         }
-        self.tasks.deinit();
+        self.tasks.deinit(self.allocator);
 
         // Clean up runtime
         self.runtime.deinit();
@@ -60,7 +60,7 @@ pub const Executor = struct {
     /// Spawn a task on this executor
     pub fn spawn(self: *Self, comptime task_fn: anytype, args: anytype) !*TaskHandle {
         const handle = try spawn_mod.spawnOn(self.runtime, task_fn, args);
-        try self.tasks.append(handle);
+        try self.tasks.append(self.allocator, handle);
         return handle;
     }
 
