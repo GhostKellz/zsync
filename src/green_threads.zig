@@ -134,7 +134,7 @@ pub const GreenThreadsIo = struct {
         
         pub fn spawn(self: *SchedulerSelf, task: Task) !*GreenThread {
             const thread = try GreenThread.init(self.allocator, task);
-            try self.ready_queue.append(thread);
+            try self.ready_queue.append(self.allocator, thread);
             return thread;
         }
         
@@ -142,7 +142,7 @@ pub const GreenThreadsIo = struct {
             if (self.current_thread) |current| {
                 // Save context and move to ready queue
                 current.state = .ready;
-                self.ready_queue.append(current) catch return;
+                self.ready_queue.append(self.allocator, current) catch return;
                 
                 // Context switch back to scheduler
                 const scheduler_ctx = arch.getCurrentContext();
@@ -156,7 +156,7 @@ pub const GreenThreadsIo = struct {
         }
         
         pub fn block(self: *SchedulerSelf, thread: *GreenThread) !void {
-            try self.blocked_queue.append(thread);
+            try self.blocked_queue.append(self.allocator, thread);
         }
         
         pub fn unblock(self: *SchedulerSelf, thread: *GreenThread) !void {
@@ -164,7 +164,7 @@ pub const GreenThreadsIo = struct {
             for (self.blocked_queue.items, 0..) |blocked_thread, i| {
                 if (blocked_thread == thread) {
                     _ = self.blocked_queue.swapRemove(i);
-                    try self.ready_queue.append(thread);
+                    try self.ready_queue.append(self.allocator, thread);
                     break;
                 }
             }

@@ -359,8 +359,8 @@ const PollBackend = struct {
         _ = config; // PollBackend doesn't need max_events configuration
         return Self{
             .allocator = allocator,
-            .poll_fds = std.ArrayList(std.posix.pollfd).init(allocator),
-            .user_data = std.ArrayList(usize).init(allocator),
+            .poll_fds = std.ArrayList(std.posix.pollfd){ .allocator = allocator },
+            .user_data = std.ArrayList(usize){ .allocator = allocator },
         };
     }
 
@@ -374,12 +374,12 @@ const PollBackend = struct {
         if (interest.events.readable) events |= std.posix.POLL.IN;
         if (interest.events.writable) events |= std.posix.POLL.OUT;
 
-        try self.poll_fds.append(.{
+        try self.poll_fds.append(self.allocator, .{
             .fd = interest.fd,
             .events = events,
             .revents = 0,
         });
-        try self.user_data.append(interest.user_data);
+        try self.user_data.append(self.allocator, interest.user_data);
     }
 
     pub fn modify(self: *Self, interest: Interest) !void {

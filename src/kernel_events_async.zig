@@ -243,9 +243,9 @@ pub const AsyncFileWatcher = struct {
             .inotify_fd = inotify_fd,
             .watches = HashMap(i32, []const u8, std.hash_map.AutoContext(i32), std.hash_map.default_max_load_percentage).init(allocator),
             .watch_paths = HashMap([]const u8, i32, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .event_buffer = ArrayList(u8).init(allocator),
+            .event_buffer = ArrayList(u8){ .allocator = allocator },
             .max_events = 1024,
-            .event_handlers = ArrayList(EventHandler).init(allocator),
+            .event_handlers = ArrayList(EventHandler){ .allocator = allocator },
             .user_data = null,
         };
     }
@@ -297,7 +297,7 @@ pub const AsyncFileWatcher = struct {
     }
     
     pub fn addEventHandler(self: *Self, handler: EventHandler) !void {
-        try self.event_handlers.append(handler);
+        try self.event_handlers.append(self.allocator, handler);
     }
     
     pub fn setUserData(self: *Self, user_data: *anyopaque) void {
@@ -309,7 +309,7 @@ pub const AsyncFileWatcher = struct {
         
         // In a real implementation, we'd read from inotify_fd
         // For now, we'll simulate reading events
-        var events = ArrayList(KernelEvent).init(self.allocator);
+        var events = ArrayList(KernelEvent){ .allocator = self.allocator };
         
         // Simulate a file creation event
         const simulated_event = KernelEvent{
@@ -322,7 +322,7 @@ pub const AsyncFileWatcher = struct {
             },
         };
         
-        try events.append(simulated_event);
+        try events.append(allocator, simulated_event);
         
         // Notify event handlers
         for (events.items) |*event| {
@@ -375,12 +375,12 @@ pub const AsyncSignalHandler = struct {
         const signal_num = signal.toLinux();
         
         var handlers = self.signal_handlers.get(signal_num) orelse blk: {
-            var new_handlers = ArrayList(EventHandler).init(self.allocator);
+            var new_handlers = ArrayList(EventHandler){ .allocator = self.allocator };
             try self.signal_handlers.put(signal_num, new_handlers);
             break :blk self.signal_handlers.getPtr(signal_num).?;
         };
         
-        try handlers.append(handler);
+        try handlers.append(allocator, handler);
     }
     
     pub fn removeSignalHandler(self: *Self, signal: SignalType) void {
@@ -414,7 +414,7 @@ pub const AsyncSignalHandler = struct {
     pub fn readSignalsAsync(self: *Self, io_context: *io.Io) ![]KernelEvent {
         _ = io_context;
         
-        var events = ArrayList(KernelEvent).init(self.allocator);
+        var events = ArrayList(KernelEvent){ .allocator = self.allocator };
         
         // Simulate receiving a SIGCHLD signal
         const simulated_event = KernelEvent{
@@ -427,7 +427,7 @@ pub const AsyncSignalHandler = struct {
             },
         };
         
-        try events.append(simulated_event);
+        try events.append(allocator, simulated_event);
         
         // Notify signal handlers
         for (events.items) |*event| {
@@ -469,7 +469,7 @@ pub const AsyncEpollManager = struct {
             .allocator = allocator,
             .epoll_fd = epoll_fd,
             .watched_fds = HashMap(i32, u32, std.hash_map.AutoContext(i32), std.hash_map.default_max_load_percentage).init(allocator),
-            .event_handlers = ArrayList(EventHandler).init(allocator),
+            .event_handlers = ArrayList(EventHandler){ .allocator = allocator },
             .max_events = 1024,
             .timeout_ms = 1000,
             .user_data = null,
@@ -510,7 +510,7 @@ pub const AsyncEpollManager = struct {
     }
     
     pub fn addEventHandler(self: *Self, handler: EventHandler) !void {
-        try self.event_handlers.append(handler);
+        try self.event_handlers.append(self.allocator, handler);
     }
     
     pub fn setTimeout(self: *Self, timeout_ms: i32) void {
@@ -520,7 +520,7 @@ pub const AsyncEpollManager = struct {
     pub fn waitForEventsAsync(self: *Self, io_context: *io.Io) ![]KernelEvent {
         _ = io_context;
         
-        var events = ArrayList(KernelEvent).init(self.allocator);
+        var events = ArrayList(KernelEvent){ .allocator = self.allocator };
         
         // Simulate epoll events
         var fd_iterator = self.watched_fds.iterator();
@@ -539,7 +539,7 @@ pub const AsyncEpollManager = struct {
                     },
                 };
                 
-                try events.append(simulated_event);
+                try events.append(allocator, simulated_event);
             }
         }
         
@@ -577,7 +577,7 @@ pub const AsyncKernelEventManager = struct {
             .file_watcher = try AsyncFileWatcher.init(allocator),
             .signal_handler = try AsyncSignalHandler.init(allocator),
             .epoll_manager = try AsyncEpollManager.init(allocator),
-            .event_queue = ArrayList(KernelEvent).init(allocator),
+            .event_queue = ArrayList(KernelEvent){ .allocator = allocator },
             .queue_mutex = std.Thread.Mutex{},
             .running = std.atomic.Value(bool).init(false),
             .worker_thread = null,
@@ -781,8 +781,8 @@ pub const AsyncInterruptMonitor = struct {
             .interrupt_count = std.atomic.Value(u64).init(0),
             .last_optimization = std.atomic.Value(u64).init(0),
             .optimization_threshold = 10000,
-            .hot_interrupts = ArrayList(u32).init(allocator),
-            .cold_interrupts = ArrayList(u32).init(allocator),
+            .hot_interrupts = ArrayList(u32){ .allocator = allocator },
+            .cold_interrupts = ArrayList(u32){ .allocator = allocator },
             .stats_mutex = std.Thread.Mutex{},
         };
     }
@@ -893,9 +893,9 @@ pub const AsyncInterruptMonitor = struct {
             const count = handler.invocation_count.load(.monotonic);
             
             if (count > 1000) {
-                try self.hot_interrupts.append(vector);
+                try self.hot_interrupts.append(self.allocator, vector);
             } else if (count < 10) {
-                try self.cold_interrupts.append(vector);
+                try self.cold_interrupts.append(self.allocator, vector);
             }
         }
         
@@ -978,10 +978,10 @@ pub const RealTimeScheduler = struct {
             .allocator = allocator,
             .task_queue = try io.RingBuffer(RealTimeTask).init(allocator, 256),
             .priority_queues = [4]ArrayList(RealTimeTask){
-                ArrayList(RealTimeTask).init(allocator),
-                ArrayList(RealTimeTask).init(allocator),
-                ArrayList(RealTimeTask).init(allocator),
-                ArrayList(RealTimeTask).init(allocator),
+                ArrayList(RealTimeTask){ .allocator = allocator },
+                ArrayList(RealTimeTask){ .allocator = allocator },
+                ArrayList(RealTimeTask){ .allocator = allocator },
+                ArrayList(RealTimeTask){ .allocator = allocator },
             },
             .current_task = null,
             .scheduler_active = std.atomic.Value(bool).init(false),
@@ -998,7 +998,7 @@ pub const RealTimeScheduler = struct {
     
     pub fn scheduleTask(self: *Self, task: RealTimeTask) !void {
         const priority_idx = @intFromEnum(task.priority);
-        try self.priority_queues[priority_idx].append(task);
+        try self.priority_queues[priority_idx].append(self.allocator, task);
     }
     
     pub fn getNextTask(self: *Self) ?RealTimeTask {
@@ -1013,7 +1013,7 @@ pub const RealTimeScheduler = struct {
     pub fn preemptCurrentTask(self: *Self) void {
         if (self.current_task) |task| {
             const priority_idx = @intFromEnum(task.priority);
-            self.priority_queues[priority_idx].append(task.*) catch {};
+            self.priority_queues[priority_idx].append(self.allocator, task.*) catch {};
             self.current_task = null;
         }
     }

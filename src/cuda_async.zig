@@ -28,7 +28,7 @@ pub const GpuMemoryPool = struct {
             .device_id = device_id,
             .total_memory = 8 * 1024 * 1024 * 1024, // 8GB simulated
             .free_memory = 8 * 1024 * 1024 * 1024,
-            .blocks = std.ArrayList(MemoryBlock).init(allocator),
+            .blocks = std.ArrayList(MemoryBlock){ .allocator = allocator },
             .mutex = .{},
             .io = io,
         };
@@ -162,13 +162,13 @@ pub const MultiGpuCoordinator = struct {
     
     /// Initialize multi-GPU coordinator
     pub fn init(allocator: std.mem.Allocator, io: io_v2.Io, device_count: u32) !MultiGpuCoordinator {
-        var pools = std.ArrayList(*GpuMemoryPool).init(allocator);
+        var pools = std.ArrayList(*GpuMemoryPool){ .allocator = allocator };
         
         // Create memory pools for each GPU
         for (0..device_count) |i| {
             const pool = try allocator.create(GpuMemoryPool);
             pool.* = try GpuMemoryPool.init(allocator, io, @intCast(i));
-            try pools.append(pool);
+            try pools.append(allocator, pool);
         }
         
         return MultiGpuCoordinator{
@@ -196,7 +196,7 @@ pub const MultiGpuCoordinator = struct {
             .coordinator = self,
             .task = task,
             .allocator = allocator,
-            .results = std.ArrayList(ComputeResult).init(allocator),
+            .results = std.ArrayList(ComputeResult){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -267,8 +267,8 @@ pub const CryptoAccelerator = struct {
     pub fn init(allocator: std.mem.Allocator, coordinator: *MultiGpuCoordinator) !CryptoAccelerator {
         return CryptoAccelerator{
             .coordinator = coordinator,
-            .hash_kernels = std.ArrayList(HashKernel).init(allocator),
-            .signature_kernels = std.ArrayList(SignatureKernel).init(allocator),
+            .hash_kernels = std.ArrayList(HashKernel){ .allocator = allocator },
+            .signature_kernels = std.ArrayList(SignatureKernel){ .allocator = allocator },
         };
     }
     
@@ -428,7 +428,7 @@ fn allocPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
         .stream_id = ctx.stream_id,
     };
     
-    ctx.pool.blocks.append(block) catch |err| {
+    ctx.pool.blocks.append(pool.allocator, block) catch |err| {
         return .{ .ready = err };
     };
     
@@ -500,7 +500,7 @@ fn distributePoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
             .execution_time = 1000 + @as(u64, @intCast(i)) * 100, // Simulated time
         };
         
-        ctx.results.append(result) catch |err| {
+        ctx.results.append(ctx.allocator, result) catch |err| {
             return .{ .ready = err };
         };
         
@@ -562,7 +562,7 @@ fn batchHashPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
             },
         }
         
-        ctx.results.append(hash) catch |err| {
+        ctx.results.append(ctx.allocator, hash) catch |err| {
             return .{ .ready = err };
         };
     }
@@ -592,7 +592,7 @@ fn batchVerifyPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
             .Schnorr => true,
         };
         
-        ctx.results.append(is_valid) catch |err| {
+        ctx.results.append(ctx.allocator, is_valid) catch |err| {
             return .{ .ready = err };
         };
     }

@@ -375,7 +375,7 @@ pub const AsyncRateLimiter = struct {
             .leaky_bucket = null,
             .sliding_window = null,
             .adaptive_limiter = null,
-            .request_queue = std.ArrayList(QueuedRequest).init(allocator),
+            .request_queue = std.ArrayList(QueuedRequest){ .allocator = allocator },
             .request_id_counter = std.atomic.Value(u64).init(1),
             .worker_thread = null,
             .worker_active = std.atomic.Value(bool).init(false),
@@ -510,7 +510,7 @@ pub const AsyncRateLimiter = struct {
             .limiter = self,
             .requests = try allocator.dupe(RateLimitRequest, requests),
             .allocator = allocator,
-            .results = std.ArrayList(RateLimitResult).init(allocator),
+            .results = std.ArrayList(RateLimitResult){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -806,7 +806,7 @@ fn waitRateLimitPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult 
         .estimated_wait_time_ms = 1000, // Estimate 1 second
         .retry_count = 0,
     };
-    ctx.limiter.request_queue.append(queued_request) catch {};
+    ctx.limiter.request_queue.append(ctx.limiter.allocator, queued_request) catch {};
     ctx.limiter.queue_condition.signal();
     ctx.limiter.mutex.unlock();
     
@@ -827,7 +827,7 @@ fn batchRateLimitPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult
     
     for (ctx.requests) |request| {
         const result = if (ctx.limiter.checkRateLimit(request)) .allowed else .denied;
-        ctx.results.append(result) catch return .{ .ready = error.OutOfMemory };
+        ctx.results.append(ctx.allocator, result) catch return .{ .ready = error.OutOfMemory };
     }
     
     return .{ .ready = ctx.results.items.len };

@@ -187,7 +187,7 @@ pub const ResourceTracker = struct {
     
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .resources = std.ArrayList(Resource).init(allocator),
+            .resources = std.ArrayList(Resource){ .allocator = allocator },
             .allocator = allocator,
             .mutex = std.Thread.Mutex{},
         };
@@ -225,7 +225,7 @@ pub const ResourceTracker = struct {
             .timestamp = std.time.milliTimestamp(),
         };
         
-        try self.resources.append(resource);
+        try self.resources.append(self.allocator, resource);
         return id;
     }
     

@@ -410,7 +410,7 @@ pub const EventLoop = struct {
     pub fn init(allocator: std.mem.Allocator) !EventLoop {
         return EventLoop{
             .source = try EventSource.init(true),
-            .timers = std.ArrayList(Timer).init(allocator),
+            .timers = std.ArrayList(Timer){ .allocator = allocator },
         };
     }
 
@@ -492,7 +492,7 @@ pub const ArchLinuxOptimizations = struct {
     // NUMA topology detection and optimization
     pub fn detectNumaTopology() ![]u32 {
         // Read NUMA node information from /sys/devices/system/node/
-        var nodes = std.ArrayList(u32).init(std.heap.page_allocator);
+        var nodes = std.ArrayList(u32){ .allocator = std.heap.page_allocator };
 
         var dir = std.fs.openDirAbsolute("/sys/devices/system/node/", .{ .iterate = true }) catch return nodes.toOwnedSlice();
         defer dir.close();
@@ -501,7 +501,7 @@ pub const ArchLinuxOptimizations = struct {
         while (try iter.next()) |entry| {
             if (std.mem.startsWith(u8, entry.name, "node") and entry.kind == .directory) {
                 const node_id = std.fmt.parseInt(u32, entry.name[4..], 10) catch continue;
-                try nodes.append(node_id);
+                try nodes.append(std.heap.page_allocator, node_id);
             }
         }
 

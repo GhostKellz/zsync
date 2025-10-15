@@ -133,14 +133,14 @@ pub const StateMachineManager = struct {
         
         /// Get valid transitions from a given state
         pub fn getTransitionsFrom(self: *const @This(), state_id: StateId, allocator: std.mem.Allocator) ![]TransitionDefinition {
-            var transitions = std.ArrayList(TransitionDefinition).init(allocator);
+            var transitions = std.ArrayList(TransitionDefinition){ .allocator = allocator };
             
             var iterator = self.transitions.iterator();
             while (iterator.next()) |entry| {
                 const transition = entry.value_ptr.*;
                 const state_id_context = StateIdContext{};
                 if (state_id_context.eql(transition.from_state, state_id)) {
-                    try transitions.append(transition);
+                    try transitions.append(allocator, transition);
                 }
             }
             
@@ -261,7 +261,7 @@ pub const StateMachineManager = struct {
         
         /// Check for expired suspend points
         pub fn getExpiredSuspendPoints(self: *const @This(), allocator: std.mem.Allocator) ![]SuspendPointId {
-            var expired = std.ArrayList(SuspendPointId).init(allocator);
+            var expired = std.ArrayList(SuspendPointId){ .allocator = allocator };
             const now = std.time.nanoTimestamp();
             
             var iterator = self.active_suspend_points.iterator();
@@ -269,7 +269,7 @@ pub const StateMachineManager = struct {
                 const data = entry.value_ptr.*;
                 if (data.timeout_at) |timeout| {
                     if (now > timeout) {
-                        try expired.append(data.id);
+                        try expired.append(allocator, data.id);
                     }
                 }
             }
@@ -381,7 +381,7 @@ pub const StateMachineManager = struct {
         pub fn init(allocator: std.mem.Allocator) @This() {
             return @This(){
                 .optimization_enabled = true,
-                .call_stack = std.ArrayList(TailCallFrame).init(allocator),
+                .call_stack = std.ArrayList(TailCallFrame){ .allocator = allocator },
                 .allocator = allocator,
             };
         }
@@ -427,7 +427,7 @@ pub const StateMachineManager = struct {
                 .return_address = null,
             };
             
-            try self.call_stack.append(frame);
+            try self.call_stack.append(self.allocator, frame);
         }
         
         /// Execute accumulated tail calls

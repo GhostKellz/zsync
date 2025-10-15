@@ -212,7 +212,7 @@ pub const KeyRotationManager = struct {
         return KeyRotationManager{
             .allocator = allocator,
             .current_keys = std.hash_map.HashMap([]const u8, KeyPair, std.hash_map.StringContext, 80).init(allocator),
-            .rotation_schedule = std.ArrayList(RotationTask).init(allocator),
+            .rotation_schedule = std.ArrayList(RotationTask){ .allocator = allocator },
             .io = io,
         };
     }
@@ -224,7 +224,7 @@ pub const KeyRotationManager = struct {
             entry.value_ptr.deinit(self.allocator);
         }
         self.current_keys.deinit();
-        self.rotation_schedule.deinit();
+        self.rotation_schedule.deinit(self.allocator);
     }
     
     /// Schedule key rotation
@@ -236,7 +236,7 @@ pub const KeyRotationManager = struct {
             .algorithm = algorithm,
         };
         
-        try self.rotation_schedule.append(task);
+        try self.rotation_schedule.append(self.allocator, task);
     }
     
     /// Perform key rotation asynchronously
@@ -284,7 +284,7 @@ pub const ThresholdKeyManager = struct {
             .allocator = allocator,
             .threshold = threshold,
             .total_parties = total_parties,
-            .key_shares = std.ArrayList(KeyShare).init(allocator),
+            .key_shares = std.ArrayList(KeyShare){ .allocator = allocator },
             .io = io,
         };
     }
@@ -297,7 +297,7 @@ pub const ThresholdKeyManager = struct {
             self.allocator.free(share.share);
             self.allocator.free(share.public_verification);
         }
-        self.key_shares.deinit();
+        self.key_shares.deinit(self.allocator);
     }
     
     /// Generate threshold key shares asynchronously
@@ -360,7 +360,7 @@ pub const KeyBackupManager = struct {
     pub fn init(allocator: std.mem.Allocator, io: io_v2.Io, encryption_key: [32]u8) KeyBackupManager {
         return KeyBackupManager{
             .allocator = allocator,
-            .backup_locations = std.ArrayList(BackupLocation).init(allocator),
+            .backup_locations = std.ArrayList(BackupLocation){ .allocator = allocator },
             .encryption_key = encryption_key,
             .io = io,
         };
@@ -370,11 +370,11 @@ pub const KeyBackupManager = struct {
     pub fn deinit(self: *KeyBackupManager) void {
         // Zero out encryption key
         @memset(&self.encryption_key, 0);
-        
+
         for (self.backup_locations.items) |location| {
             self.allocator.free(location.path);
         }
-        self.backup_locations.deinit();
+        self.backup_locations.deinit(self.allocator);
     }
     
     /// Add backup location
@@ -384,7 +384,7 @@ pub const KeyBackupManager = struct {
             .encryption_enabled = encryption_enabled,
             .redundancy_level = redundancy_level,
         };
-        try self.backup_locations.append(location);
+        try self.backup_locations.append(self.allocator, location);
     }
     
     /// Backup key asynchronously
@@ -568,7 +568,7 @@ fn thresholdGenPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
             .public_verification = verification_data,
         };
         
-        ctx.manager.key_shares.append(share) catch |err| {
+        ctx.manager.key_shares.append(ctx.manager.allocator, share) catch |err| {
             ctx.manager.allocator.free(share_data);
             ctx.manager.allocator.free(verification_data);
             return .{ .ready = err };

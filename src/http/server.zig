@@ -58,7 +58,7 @@ pub const Response = struct {
         return Response{
             .status_code = 200,
             .headers = std.StringHashMap([]const u8).init(allocator),
-            .body = std.ArrayList(u8).init(allocator),
+            .body = std.ArrayList(u8){ .allocator = allocator },
             .allocator = allocator,
         };
     }

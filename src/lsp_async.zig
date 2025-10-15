@@ -399,8 +399,8 @@ pub const AsyncLSPClient = struct {
             .server_capabilities = LSPServerCapabilities{},
             .initialized = std.atomic.Value(bool).init(false),
             .worker_active = std.atomic.Value(bool).init(false),
-            .outgoing_messages = std.ArrayList(LSPMessage).init(allocator),
-            .incoming_messages = std.ArrayList(LSPMessage).init(allocator),
+            .outgoing_messages = std.ArrayList(LSPMessage){ .allocator = allocator },
+            .incoming_messages = std.ArrayList(LSPMessage){ .allocator = allocator },
             .mutex = .{},
             .message_condition = .{},
         };
@@ -460,7 +460,7 @@ pub const AsyncLSPClient = struct {
             .document_uri = try allocator.dupe(u8, document_uri),
             .position = position,
             .allocator = allocator,
-            .completion_items = std.ArrayList(LSPCompletionItem).init(allocator),
+            .completion_items = std.ArrayList(LSPCompletionItem){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -504,7 +504,7 @@ pub const AsyncLSPClient = struct {
             .document_uri = try allocator.dupe(u8, document_uri),
             .position = position,
             .allocator = allocator,
-            .locations = std.ArrayList(LSPLocation).init(allocator),
+            .locations = std.ArrayList(LSPLocation){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -569,7 +569,7 @@ pub const AsyncLSPClient = struct {
             .client = self,
             .document_uri = try allocator.dupe(u8, document_uri),
             .allocator = allocator,
-            .text_edits = std.ArrayList(LSPTextEdit).init(allocator),
+            .text_edits = std.ArrayList(LSPTextEdit){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -590,7 +590,7 @@ pub const AsyncLSPClient = struct {
             .client = self,
             .document_uri = try allocator.dupe(u8, document_uri),
             .allocator = allocator,
-            .diagnostics = std.ArrayList(LSPDiagnostic).init(allocator),
+            .diagnostics = std.ArrayList(LSPDiagnostic){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -741,7 +741,7 @@ pub const AsyncLSPClient = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        try self.incoming_messages.append(message);
+        try self.incoming_messages.append(self.allocator, message);
         self.message_condition.signal();
     }
     
@@ -941,7 +941,7 @@ fn completionPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     };
     
     for (mock_completions) |item| {
-        ctx.completion_items.append(item) catch return .{ .ready = error.OutOfMemory };
+        ctx.completion_items.append(ctx.allocator, item) catch return .{ .ready = error.OutOfMemory };
     }
     
     return .{ .ready = ctx.completion_items.items.len };
@@ -1007,8 +1007,8 @@ fn definitionPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
         },
     };
     
-    ctx.locations.append(location) catch return .{ .ready = error.OutOfMemory };
-    
+    ctx.locations.append(ctx.allocator, location) catch return .{ .ready = error.OutOfMemory };
+
     return .{ .ready = ctx.locations.items.len };
 }
 
@@ -1095,8 +1095,8 @@ fn formatDocumentPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult
         .new_text = ctx.allocator.dupe(u8, "formatted_text") catch return .{ .ready = error.OutOfMemory },
     };
     
-    ctx.text_edits.append(edit) catch return .{ .ready = error.OutOfMemory };
-    
+    ctx.text_edits.append(ctx.allocator, edit) catch return .{ .ready = error.OutOfMemory };
+
     return .{ .ready = ctx.text_edits.items.len };
 }
 
@@ -1133,8 +1133,8 @@ fn diagnosticsPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
         .related_information = null,
     };
     
-    ctx.diagnostics.append(diagnostic) catch return .{ .ready = error.OutOfMemory };
-    
+    ctx.diagnostics.append(ctx.allocator, diagnostic) catch return .{ .ready = error.OutOfMemory };
+
     return .{ .ready = ctx.diagnostics.items.len };
 }
 

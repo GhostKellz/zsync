@@ -86,7 +86,7 @@ pub const SyscallBatch = struct {
     
     pub fn init(allocator: Allocator, max_batch_size: usize) Self {
         return Self{
-            .requests = ArrayList(SyscallRequest).init(allocator),
+            .requests = ArrayList(SyscallRequest){ .allocator = allocator },
             .max_batch_size = max_batch_size,
             .batch_timeout_ns = 1_000_000, // 1ms default batch timeout
         };
@@ -101,7 +101,7 @@ pub const SyscallBatch = struct {
             return false; // Batch is full
         }
         
-        try self.requests.append(request);
+        try self.requests.append(self.allocator, request);
         return true;
     }
     
@@ -138,10 +138,10 @@ pub const AsyncSyscallExecutor = struct {
     pub fn init(allocator: Allocator, max_concurrent_batches: usize) Self {
         return Self{
             .allocator = allocator,
-            .pending_batches = ArrayList(SyscallBatch).init(allocator),
-            .completed_results = ArrayList(SyscallResult).init(allocator),
+            .pending_batches = ArrayList(SyscallBatch){ .allocator = allocator },
+            .completed_results = ArrayList(SyscallResult){ .allocator = allocator },
             .max_concurrent_batches = max_concurrent_batches,
-            .worker_threads = ArrayList(std.Thread).init(allocator),
+            .worker_threads = ArrayList(std.Thread){ .allocator = allocator },
             .shutdown_flag = std.atomic.Value(bool).init(false),
             .batch_mutex = std.Thread.Mutex{},
             .result_mutex = std.Thread.Mutex{},
@@ -172,7 +172,7 @@ pub const AsyncSyscallExecutor = struct {
     pub fn start(self: *Self) !void {
         for (0..self.max_concurrent_batches) |_| {
             const thread = try std.Thread.spawn(.{}, workerThread, .{self});
-            try self.worker_threads.append(thread);
+            try self.worker_threads.append(self.allocator, thread);
         }
     }
     
@@ -221,7 +221,7 @@ pub const AsyncSyscallExecutor = struct {
             {
                 self.result_mutex.lock();
                 defer self.result_mutex.unlock();
-                try self.completed_results.append(result);
+                try self.completed_results.append(self.allocator, result);
             }
             
             // Call completion callback if provided
@@ -271,7 +271,7 @@ pub const AsyncSyscallExecutor = struct {
         self.batch_mutex.lock();
         defer self.batch_mutex.unlock();
         
-        try self.pending_batches.append(batch);
+        try self.pending_batches.append(self.allocator, batch);
     }
     
     pub fn submitRequest(self: *Self, request: SyscallRequest) !void {

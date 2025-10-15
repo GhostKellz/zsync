@@ -94,13 +94,13 @@ fn testRealGreenThreads() !void {
     const files = [_][]const u8{ "test1.txt", "test2.txt", "test3.txt" };
     const data = [_][]const u8{ "Hello from thread 1", "Hello from thread 2", "Hello from thread 3" };
     
-    var futures = std.ArrayList(Future).init(allocator);
+    var futures = std.ArrayList(Future){ .allocator = allocator };
     defer futures.deinit();
     
     // Spawn multiple async operations
     for (files, data) |file_path, file_data| {
         const future = try io.async(asyncFileOperation, .{ io, file_path, file_data });
-        try futures.append(future);
+        try futures.append(allocator, future);
     }
     
     // Wait for all operations to complete

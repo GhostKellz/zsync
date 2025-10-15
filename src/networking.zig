@@ -267,7 +267,7 @@ pub const HttpClient = struct {
         };
 
         // Send request
-        var buffer = std.ArrayList(u8).init(self.allocator);
+        var buffer = std.ArrayList(u8){ .allocator = self.allocator };
         defer buffer.deinit();
         
         try req.serialize(buffer.writer());
@@ -451,26 +451,26 @@ pub const WebSocketConnection = struct {
     /// Send WebSocket frame
     pub fn sendFrame(self: *Self, opcode: u8, data: []const u8) !void {
         if (self.state != .open) return error.ConnectionNotOpen;
-        
-        var frame = std.ArrayList(u8).init(self.allocator);
+
+        var frame = std.ArrayList(u8){ .allocator = self.allocator };
         defer frame.deinit();
         
         // First byte: FIN(1) + RSV(3) + Opcode(4)
-        try frame.append(0x80 | opcode);
-        
+        try frame.append(self.allocator, 0x80 | opcode);
+
         // Payload length
         if (data.len < 126) {
-            try frame.append(@intCast(data.len));
+            try frame.append(self.allocator, @intCast(data.len));
         } else if (data.len < 65536) {
-            try frame.append(126);
-            try frame.append(@intCast(data.len >> 8));
-            try frame.append(@intCast(data.len & 0xFF));
+            try frame.append(self.allocator, 126);
+            try frame.append(self.allocator, @intCast(data.len >> 8));
+            try frame.append(self.allocator, @intCast(data.len & 0xFF));
         } else {
-            try frame.append(127);
+            try frame.append(self.allocator, 127);
             var i: u8 = 8;
             while (i > 0) {
                 i -= 1;
-                try frame.append(@intCast((data.len >> (@as(u6, @intCast(i)) * 8)) & 0xFF));
+                try frame.append(self.allocator, @intCast((data.len >> (@as(u6, @intCast(i)) * 8)) & 0xFF));
             }
         }
         

@@ -185,7 +185,7 @@ pub const EventLoop = struct {
     pub fn init(allocator: std.mem.Allocator) !EventLoop {
         return EventLoop{
             .source = try EventSource.init(),
-            .timers = std.ArrayList(Timer).init(allocator),
+            .timers = std.ArrayList(Timer){ .allocator = allocator },
             .allocator = allocator,
         };
     }
@@ -240,7 +240,7 @@ pub const EventLoop = struct {
     
     pub fn createTimer(self: *EventLoop) !*Timer {
         const timer = Timer.init(&self.source.kqueue);
-        try self.timers.append(timer);
+        try self.timers.append(self.allocator, timer);
         return &self.timers.items[self.timers.items.len - 1];
     }
 };

@@ -95,8 +95,8 @@ pub const TestSuite = struct {
             .allocator = allocator,
             .config = config,
             .results = TestResults{
-                .edge_case_tests = std.ArrayList(TestResults.EdgeCaseResult).init(allocator),
-                .stress_test_results = std.ArrayList(TestResults.StressTestResult).init(allocator),
+                .edge_case_tests = std.ArrayList(TestResults.EdgeCaseResult){ .allocator = allocator },
+                .stress_test_results = std.ArrayList(TestResults.StressTestResult){ .allocator = allocator },
                 .performance_benchmarks = TestResults.PerformanceBenchmarks{},
             },
             .memory_validator = error_management.MemorySafetyValidator.init(allocator),
@@ -236,7 +236,7 @@ pub const TestSuite = struct {
             
             if (@TypeOf(result) == void) {
                 const execution_time = std.time.nanoTimestamp() - start_time;
-                try self.results.edge_case_tests.append(TestResults.EdgeCaseResult{
+                try self.results.edge_case_tests.append(self.allocator, TestResults.EdgeCaseResult{
                     .test_name = edge_case.name,
                     .passed = true,
                     .error_message = null,
@@ -274,7 +274,7 @@ pub const TestSuite = struct {
                 };
             };
             
-            try self.results.stress_test_results.append(result);
+            try self.results.stress_test_results.append(allocator, result);
             
             if (result.passed) {
                 std.debug.print("   ✅ {s}: {d:.0} ops/s, {d:.1}% efficiency\n", .{
@@ -491,7 +491,7 @@ pub const TestSuite = struct {
     
     // Concurrency and cancellation tests
     fn runConcurrencyTests(self: *Self, io: Zsync.Io) !void {
-        var futures = std.ArrayList(Zsync.Future).init(self.allocator);
+        var futures = std.ArrayList(Zsync.Future){ .allocator = self.allocator };
         defer {
             for (futures.items) |*future| {
                 future.cancel(io) catch {};
@@ -506,7 +506,7 @@ pub const TestSuite = struct {
             defer self.allocator.free(task_name);
             
             const future = try io.async(concurrentTestTask, .{ io, task_name });
-            try futures.append(future);
+            try futures.append(allocator, future);
         }
         
         // Wait for all to complete
@@ -535,7 +535,7 @@ pub const TestSuite = struct {
     fn runParallelismTests(self: *Self, io: Zsync.Io) !void {
         
         // Test that operations can run in parallel
-        var futures = std.ArrayList(Zsync.Future).init(self.allocator);
+        var futures = std.ArrayList(Zsync.Future){ .allocator = self.allocator };
         defer {
             for (futures.items) |*future| {
                 future.cancel(io) catch {};
@@ -549,7 +549,7 @@ pub const TestSuite = struct {
         // Start parallel CPU-bound tasks
         for (0..4) |i| {
             const future = try io.async(cpuBoundTask, .{ io, i });
-            try futures.append(future);
+            try futures.append(allocator, future);
         }
         
         // Wait for all to complete

@@ -65,7 +65,7 @@ const ThreadStorage = struct {
     
     fn init(allocator: std.mem.Allocator, thread_id: std.Thread.Id) Self {
         return Self{
-            .entries = std.ArrayList(TlsEntry).init(allocator),
+            .entries = std.ArrayList(TlsEntry){ .allocator = allocator },
             .allocator = allocator,
             .thread_id = thread_id,
         };
@@ -132,7 +132,7 @@ const TlsRegistry = struct {
             instance = Self{
                 .allocator = allocator,
                 .thread_storage = std.HashMap(std.Thread.Id, *ThreadStorage, ThreadIdContext, std.hash_map.default_max_load_percentage).init(allocator),
-                .key_destructors = std.ArrayList(?*const fn (*anyopaque) void).init(allocator),
+                .key_destructors = std.ArrayList(?*const fn (*anyopaque) void){ .allocator = allocator },
             };
         }
     }

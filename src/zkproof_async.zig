@@ -185,8 +185,8 @@ pub const AsyncZKProofSystem = struct {
         return Self{
             .allocator = allocator,
             .io = io,
-            .active_provers = std.ArrayList(ProverWorker).init(allocator),
-            .verification_queue = std.ArrayList(VerificationTask).init(allocator),
+            .active_provers = std.ArrayList(ProverWorker){ .allocator = allocator },
+            .verification_queue = std.ArrayList(VerificationTask){ .allocator = allocator },
             .completed_proofs = std.hash_map.HashMap([32]u8, ZKProof, std.hash_map.AutoContext([32]u8), 80).init(allocator),
             .circuit_cache = std.hash_map.HashMap([32]u8, CompiledCircuit, std.hash_map.AutoContext([32]u8), 80).init(allocator),
             .trusted_setups = std.hash_map.HashMap([32]u8, TrustedSetup, std.hash_map.AutoContext([32]u8), 80).init(allocator),
@@ -318,7 +318,7 @@ pub const AsyncZKProofSystem = struct {
             .system = self,
             .proofs = try allocator.dupe(ZKProof, proofs),
             .allocator = allocator,
-            .verification_results = std.ArrayList(bool).init(allocator),
+            .verification_results = std.ArrayList(bool){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -479,14 +479,14 @@ pub const MerkleTree = struct {
     }
     
     pub fn prove(self: *const MerkleTree, leaf_index: u32, allocator: std.mem.Allocator) !MerkleProof {
-        var path = std.ArrayList([32]u8).init(allocator);
+        var path = std.ArrayList([32]u8){ .allocator = allocator };
         var current_index = leaf_index;
         
         // Build Merkle path (simplified)
         for (0..self.depth) |_| {
             const sibling_index = current_index ^ 1;
             if (sibling_index < self.leaves.len) {
-                try path.append(self.leaves[sibling_index]);
+                try path.append(allocator, self.leaves[sibling_index]);
             }
             current_index /= 2;
         }
@@ -733,7 +733,7 @@ fn batchVerifyPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     // Simulate batch verification (more efficient than individual verification)
     for (ctx.proofs) |proof| {
         const is_valid = proof.proof_data.len > 0;
-        ctx.verification_results.append(is_valid) catch break;
+        ctx.verification_results.append(ctx.allocator, is_valid) catch break;
     }
     
     return .{ .ready = ctx.verification_results.items.len };

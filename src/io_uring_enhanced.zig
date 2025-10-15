@@ -146,9 +146,9 @@ pub const RegisteredFiles = struct {
         const files = try allocator.alloc(std.posix.fd_t, max_files);
         @memset(files, -1); // Initialize with invalid FDs
         
-        var free_indices = std.ArrayList(u32).init(allocator);
+        var free_indices = std.ArrayList(u32){ .allocator = allocator };
         for (0..max_files) |i| {
-            try free_indices.append(@intCast(i));
+            try free_indices.append(allocator, @intCast(i));
         }
         
         return RegisteredFiles{
@@ -174,7 +174,7 @@ pub const RegisteredFiles = struct {
     pub fn unregister(self: *RegisteredFiles, index: u32) void {
         if (index >= self.files.len) return;
         self.files[index] = -1;
-        self.free_indices.append(index) catch {}; // Ignore allocation failure for cleanup
+        self.free_indices.append(self.allocator, index) catch {}; // Ignore allocation failure for cleanup
     }
 };
 

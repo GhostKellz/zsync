@@ -63,7 +63,7 @@ pub const FrameBufferManager = struct {
         
         pub fn init(allocator: std.mem.Allocator) @This() {
             return @This(){
-                .available_frames = std.ArrayList(FrameBuffer).init(allocator),
+                .available_frames = std.ArrayList(FrameBuffer){ .allocator = allocator },
                 .active_frames = std.HashMap(usize, FrameBuffer, std.hash_map.AutoContext(usize), std.hash_map.default_max_load_percentage).init(allocator),
                 .total_allocated = std.atomic.Value(usize).init(0),
                 .peak_usage = std.atomic.Value(usize).init(0),
@@ -126,7 +126,7 @@ pub const FrameBufferManager = struct {
             if (self.active_frames.fetchRemove(frame_id)) |entry| {
                 var frame = entry.value;
                 frame.reset();
-                try self.available_frames.append(frame);
+                try self.available_frames.append(self.allocator, frame);
             }
         }
         
@@ -605,7 +605,7 @@ pub const StacklessExecutor = struct {
     /// Poll all running coroutines
     pub fn pollAll(self: *Self) !usize {
         var completed_count: usize = 0;
-        var to_remove = std.ArrayList(usize).init(self.allocator);
+        var to_remove = std.ArrayList(usize){ .allocator = self.allocator };
         defer to_remove.deinit();
         
         var iterator = self.running_coroutines.iterator();
@@ -614,7 +614,7 @@ pub const StacklessExecutor = struct {
             const result = try self.resumeCoroutine(frame_id);
             
             if (result == .completed) {
-                try to_remove.append(frame_id);
+                try to_remove.append(self.allocator, frame_id);
                 completed_count += 1;
             }
         }

@@ -222,7 +222,7 @@ pub const RealtimeStream = struct {
             .stats = StreamStats{},
             .message_ring = message_ring,
             .priority_queues = priority_queues,
-            .subscribers = std.ArrayList(Subscriber).init(allocator),
+            .subscribers = std.ArrayList(Subscriber){ .allocator = allocator },
             .subscriber_mutex = std.Thread.Mutex{},
             .backpressure_signal = std.Thread.Condition{},
             .flow_control_mutex = std.Thread.Mutex{},
@@ -387,7 +387,7 @@ pub const RealtimeStream = struct {
         defer self.subscriber_mutex.unlock();
         
         const id = @as(u32, @intCast(self.subscribers.items.len));
-        try self.subscribers.append(.{
+        try self.subscribers.append(self.allocator, .{
             .id = id,
             .callback = callback,
             .filter = filter,

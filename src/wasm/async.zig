@@ -225,7 +225,7 @@ pub fn EventEmitter(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .allocator = allocator,
-                .listeners = std.ArrayList(*const fn (T) anyerror!void).init(allocator),
+                .listeners = std.ArrayList(*const fn (T) anyerror!void){ .allocator = allocator },
                 .mutex = .{},
             };
         }
@@ -238,7 +238,7 @@ pub fn EventEmitter(comptime T: type) type {
         pub fn on(self: *Self, listener: *const fn (T) anyerror!void) !void {
             self.mutex.lock();
             defer self.mutex.unlock();
-            try self.listeners.append(listener);
+            try self.listeners.append(self.allocator, listener);
         }
 
         /// Remove event listener

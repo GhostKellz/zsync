@@ -147,7 +147,7 @@ pub const SlidingWindow = struct {
         return Self{
             .max_requests = max_requests,
             .window_ms = window_ms,
-            .timestamps = std.ArrayList(i64).init(allocator),
+            .timestamps = std.ArrayList(i64){ .allocator = allocator },
             .mutex = .{},
         };
     }
@@ -176,7 +176,7 @@ pub const SlidingWindow = struct {
 
         // Check if we can allow this request
         if (self.timestamps.items.len < self.max_requests) {
-            try self.timestamps.append(now);
+            try self.timestamps.append(self.timestamps.allocator, now);
             return true;
         }
 

@@ -204,7 +204,7 @@ pub const VmStack = struct {
     
     pub fn init(allocator: Allocator, max_size: usize) Self {
         return Self{
-            .items = ArrayList(u256).init(allocator),
+            .items = ArrayList(u256){ .allocator = allocator },
             .max_size = max_size,
         };
     }
@@ -217,7 +217,7 @@ pub const VmStack = struct {
         if (self.items.items.len >= self.max_size) {
             return VmError.StackOverflow;
         }
-        try self.items.append(value);
+        try self.items.append(self.allocator, value);
     }
     
     pub fn pop(self: *Self) !u256 {
@@ -268,7 +268,7 @@ pub const VmMemory = struct {
     
     pub fn init(allocator: Allocator) Self {
         return Self{
-            .data = ArrayList(u8).init(allocator),
+            .data = ArrayList(u8){ .allocator = allocator },
         };
     }
     
@@ -446,9 +446,9 @@ pub const AsyncVmExecutor = struct {
             .storage = VmStorage.init(allocator),
             .context = context,
             .gas_tracker = GasTracker.init(gas_limit),
-            .return_data = ArrayList(u8).init(allocator),
+            .return_data = ArrayList(u8){ .allocator = allocator },
             .state = ExecutionState.running,
-            .suspend_points = ArrayList(usize).init(allocator),
+            .suspend_points = ArrayList(usize){ .allocator = allocator },
             .execution_limit = 10000, // Instructions per execution slice
             .instructions_executed = 0,
         };
@@ -475,7 +475,7 @@ pub const AsyncVmExecutor = struct {
             // Check for async suspend point
             if (self.shouldSuspend()) {
                 self.state = ExecutionState.suspended;
-                try self.suspend_points.append(self.pc);
+                try self.suspend_points.append(self.allocator, self.pc);
                 break;
             }
         }
@@ -815,9 +815,9 @@ pub const AsyncVmCoordinator = struct {
     pub fn init(allocator: Allocator, max_concurrent: usize) Self {
         return Self{
             .allocator = allocator,
-            .executors = ArrayList(*AsyncVmExecutor).init(allocator),
-            .execution_queue = ArrayList(*AsyncVmExecutor).init(allocator),
-            .completed_executions = ArrayList(*AsyncVmExecutor).init(allocator),
+            .executors = ArrayList(*AsyncVmExecutor){ .allocator = allocator },
+            .execution_queue = ArrayList(*AsyncVmExecutor){ .allocator = allocator },
+            .completed_executions = ArrayList(*AsyncVmExecutor){ .allocator = allocator },
             .max_concurrent_executions = max_concurrent,
         };
     }
@@ -836,8 +836,8 @@ pub const AsyncVmCoordinator = struct {
         const executor = try self.allocator.create(AsyncVmExecutor);
         executor.* = AsyncVmExecutor.init(self.allocator, bytecode, context, gas_limit);
         
-        try self.executors.append(executor);
-        try self.execution_queue.append(executor);
+        try self.executors.append(self.allocator, executor);
+        try self.execution_queue.append(self.allocator, executor);
         
         return executor;
     }
@@ -854,7 +854,7 @@ pub const AsyncVmCoordinator = struct {
             
             switch (result) {
                 .completed, .reverted, .error_state => {
-                    try self.completed_executions.append(executor);
+                    try self.completed_executions.append(self.allocator, executor);
                     _ = self.execution_queue.swapRemove(i);
                     processed += 1;
                 },

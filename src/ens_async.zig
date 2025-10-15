@@ -85,7 +85,7 @@ pub const AsyncEnsClient = struct {
         return Self{
             .allocator = allocator,
             .dns_resolver = dns_resolver,
-            .ethereum_rpc_endpoints = ArrayList([]const u8).init(allocator),
+            .ethereum_rpc_endpoints = ArrayList([]const u8){ .allocator = allocator },
             .contract_abi_cache = HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .resolver_cache = HashMap([]const u8, EnsResolver, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .cache_mutex = std.Thread.Mutex{},
@@ -123,7 +123,7 @@ pub const AsyncEnsClient = struct {
     
     pub fn addRpcEndpoint(self: *Self, endpoint: []const u8) !void {
         const owned_endpoint = try self.allocator.dupe(u8, endpoint);
-        try self.ethereum_rpc_endpoints.append(owned_endpoint);
+        try self.ethereum_rpc_endpoints.append(self.allocator, owned_endpoint);
     }
     
     pub fn addDefaultRpcEndpoints(self: *Self) !void {
@@ -170,12 +170,12 @@ pub const AsyncEnsClient = struct {
         if (name.len == 0) return node;
         
         var labels = std.mem.split(u8, name, ".");
-        var label_stack = ArrayList([]const u8).init(self.allocator);
+        var label_stack = ArrayList([]const u8){ .allocator = self.allocator };
         defer label_stack.deinit();
         
         // Collect labels in reverse order
         while (labels.next()) |label| {
-            try label_stack.append(label);
+            try label_stack.append(allocator, label);
         }
         
         // Process labels from TLD to subdomain
@@ -371,7 +371,7 @@ pub const AsyncEnsClient = struct {
         
         // Call text(bytes32,string) on resolver
         // This is a simplified implementation - full ABI encoding would be more complex
-        var call_data = ArrayList(u8).init(self.allocator);
+        var call_data = ArrayList(u8){ .allocator = self.allocator };
         defer call_data.deinit();
         
         // Function selector for text(bytes32,string)
@@ -494,7 +494,7 @@ pub const AsyncEnsClient = struct {
                 .data = try std.fmt.allocPrint(self.allocator, "ethereum-address={x}", .{std.fmt.fmtSliceHexLower(&address)}),
             };
             
-            try dns_response.records.append(record);
+            try dns_response.records.append(allocator, record);
             return dns_response;
         } else {
             // For non-ENS domains, use regular DNS resolution

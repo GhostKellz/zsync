@@ -46,7 +46,7 @@ pub fn ConnectionPool(comptime T: type) type {
             var self = Self{
                 .allocator = allocator,
                 .config = config,
-                .connections = std.ArrayList(PooledConnection).init(allocator),
+                .connections = std.ArrayList(PooledConnection){ .allocator = allocator },
                 .available = sync_mod.Semaphore.init(config.max_connections),
                 .mutex = .{},
                 .factory = factory,
@@ -100,7 +100,7 @@ pub fn ConnectionPool(comptime T: type) type {
                 const conn = try self.factory(self.allocator);
                 const now = std.time.milliTimestamp();
 
-                try self.connections.append(PooledConnection{
+                try self.connections.append(self.allocator, PooledConnection{
                     .connection = conn,
                     .created_at = now,
                     .last_used = now,
@@ -135,7 +135,7 @@ pub fn ConnectionPool(comptime T: type) type {
 
             while (self.connections.items.len < self.config.min_connections) {
                 const conn = try self.factory(self.allocator);
-                try self.connections.append(PooledConnection{
+                try self.connections.append(self.allocator, PooledConnection{
                     .connection = conn,
                     .created_at = now,
                     .last_used = now,

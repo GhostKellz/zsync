@@ -45,7 +45,7 @@ pub const MemoryPool = struct {
         var pool = Self{
             .base_addr = base_addr,
             .size = aligned_size,
-            .free_blocks = std.ArrayList(MemoryBlock).init(allocator),
+            .free_blocks = std.ArrayList(MemoryBlock){ .allocator = allocator },
             .allocated_blocks = std.hash_map.HashMap(usize, MemoryBlock, std.hash_map.AutoContext(usize), 80).init(allocator),
             .block_size = block_size,
             .allocator = allocator,
@@ -61,7 +61,7 @@ pub const MemoryPool = struct {
                 .index = @intCast(i),
                 .in_use = false,
             };
-            try pool.free_blocks.append(block);
+            try pool.free_blocks.append(pool.allocator, block);
         }
         
         return pool;
@@ -97,7 +97,7 @@ pub const MemoryPool = struct {
         if (self.allocated_blocks.remove(block.index)) {
             var freed_block = block;
             freed_block.in_use = false;
-            self.free_blocks.append(freed_block) catch {};
+            self.free_blocks.append(self.allocator, freed_block) catch {};
         }
     }
     
@@ -389,7 +389,7 @@ pub const ZeroCopyNetworkInterface = struct {
             .interface = self,
             .max_packets = max_packets,
             .allocator = allocator,
-            .packets = std.ArrayList(PacketDescriptor).init(allocator),
+            .packets = std.ArrayList(PacketDescriptor){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -729,7 +729,7 @@ fn batchReceivePoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     
     if (count > 0) {
         for (batch_packets[0..count]) |packet| {
-            ctx.packets.append(packet) catch break;
+            ctx.packets.append(ctx.allocator, packet) catch break;
         }
         
         return .{ .ready = ctx.packets.items.len };

@@ -2,6 +2,20 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [v0.6.1] - 2025-10-15 🔧 **CRITICAL HOTFIX - Zig 0.16 API Compliance**
+
+### Fixed
+- **CRITICAL: Fixed all ArrayList API usage for Zig 0.16 compatibility**
+  - Changed `ArrayList.init(allocator)` → `ArrayList{}` with allocator field (62 files, 200+ instances)
+  - Changed `list.deinit()` → `list.deinit(allocator)` (7 files, 17 instances)
+  - Changed `list.append(item)` → `list.append(allocator, item)` (47 files, 100+ instances)
+  - Total: 116 files modified with 300+ API fixes
+- Fixed GitHub URL in CHANGELOG.md (user/zsync → ghostkellz/zsync)
+
+### Impact
+- **ALL projects using zsync v0.6.0 were broken** (zrpc, zion, zeke, flash, rune, ghostnet, zquic, zcrypto, zqlite, zssh, grim, wzl, and 153+ files across ecosystem)
+- v0.6.1 restores compatibility with Zig 0.16.0-dev
+
 ## [v0.6.0] - 2025-10-14 🚀 **THE TOKIO OF ZIG**
 
 ### 💎 Production-Ready Async Runtime
@@ -463,4 +477,4 @@ try zsync.run(myTask, .{});
 
 ---
 
-**Full Changelog**: https://github.com/user/zsync/compare/v0.1.0...v0.2.0
+**Full Changelog**: https://github.com/ghostkellz/zsync/compare/v0.1.0...v0.2.0

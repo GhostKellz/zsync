@@ -227,7 +227,7 @@ pub const EnhancedGreenThreadsIo = struct {
         
         pub fn detect(allocator: std.mem.Allocator) !NumaTopology {
             // Simple NUMA detection - read from /sys/devices/system/node/
-            var nodes = std.ArrayList(NumaNode).init(allocator);
+            var nodes = std.ArrayList(NumaNode){ .allocator = allocator };
             defer nodes.deinit();
             
             // For now, create a single NUMA node with all CPUs
@@ -237,7 +237,7 @@ pub const EnhancedGreenThreadsIo = struct {
                 cpu.* = @intCast(i);
             }
             
-            try nodes.append(NumaNode{
+            try nodes.append(allocator, NumaNode{
                 .id = 0,
                 .cpus = cpus,
                 .memory_size = 16 * 1024 * 1024 * 1024, // Assume 16GB for now
@@ -285,9 +285,9 @@ pub const EnhancedGreenThreadsIo = struct {
             .allocator = allocator,
             .config = config,
             .io_uring = enhanced_io_uring,
-            .threads = std.ArrayList(EnhancedGreenThread).init(allocator),
+            .threads = std.ArrayList(EnhancedGreenThread){ .allocator = allocator },
             .ready_queue = std.atomic.Queue(u32).init(),
-            .io_wait_queue = std.ArrayList(u32).init(allocator),
+            .io_wait_queue = std.ArrayList(u32){ .allocator = allocator },
             .current_thread = null,
             .main_context = undefined,
             .metrics = Metrics.init(),
@@ -353,7 +353,7 @@ pub const EnhancedGreenThreadsIo = struct {
             }
         }
         
-        try self.threads.append(thread);
+        try self.threads.append(self.allocator, thread);
         
         // Schedule thread using work-stealing scheduler
         const worker_id = thread_id % self.scheduler.num_workers;
@@ -402,7 +402,7 @@ pub const EnhancedGreenThreadsIo = struct {
                 },
                 .io_wait => {
                     // Thread is waiting for I/O, add to I/O wait queue
-                    try self.io_wait_queue.append(thread_id);
+                    try self.io_wait_queue.append(self.allocator, thread_id);
                 },
                 .suspended => {
                     // Thread yielded, put back in ready queue if it has I/O credits

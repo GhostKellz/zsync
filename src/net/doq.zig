@@ -105,7 +105,7 @@ pub const DoqQuery = struct {
     pub fn init(allocator: std.mem.Allocator, id: u16) Self {
         return Self{
             .header = DnsHeader.init(id),
-            .questions = std.ArrayList(DnsQuestion).init(allocator),
+            .questions = std.ArrayList(DnsQuestion){ .allocator = allocator },
             .allocator = allocator,
         };
     }
@@ -115,7 +115,7 @@ pub const DoqQuery = struct {
     }
 
     pub fn addQuestion(self: *Self, question: DnsQuestion) !void {
-        try self.questions.append(question);
+        try self.questions.append(self.allocator, question);
         self.header.qdcount = @intCast(self.questions.items.len);
     }
 
@@ -152,10 +152,10 @@ pub const DoqResponse = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .header = DnsHeader.init(0),
-            .questions = std.ArrayList(DnsQuestion).init(allocator),
-            .answers = std.ArrayList(DnsRecord).init(allocator),
-            .authority = std.ArrayList(DnsRecord).init(allocator),
-            .additional = std.ArrayList(DnsRecord).init(allocator),
+            .questions = std.ArrayList(DnsQuestion){ .allocator = allocator },
+            .answers = std.ArrayList(DnsRecord){ .allocator = allocator },
+            .authority = std.ArrayList(DnsRecord){ .allocator = allocator },
+            .additional = std.ArrayList(DnsRecord){ .allocator = allocator },
             .allocator = allocator,
         };
     }
@@ -176,7 +176,7 @@ pub const DoqResponse = struct {
 
     /// Get A record addresses
     pub fn getAddresses(self: *const Self) !std.ArrayList(std.net.Address) {
-        var addrs = std.ArrayList(std.net.Address).init(self.allocator);
+        var addrs = std.ArrayList(std.net.Address){ .allocator = self.allocator };
 
         for (self.answers.items) |record| {
             if (record.rtype == .A and record.rdata.len == 4) {
@@ -188,7 +188,7 @@ pub const DoqResponse = struct {
                     ),
                     53,
                 );
-                try addrs.append(ip);
+                try addrs.append(self.allocator, ip);
             }
         }
 

@@ -80,8 +80,8 @@ const Scheduler = struct {
     
     fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .ready_queue = std.ArrayList(*GreenThread).init(allocator),
-            .suspended_queue = std.ArrayList(*GreenThread).init(allocator),
+            .ready_queue = std.ArrayList(*GreenThread){ .allocator = allocator },
+            .suspended_queue = std.ArrayList(*GreenThread){ .allocator = allocator },
             .current_thread = null,
             .allocator = allocator,
         };
@@ -94,7 +94,7 @@ const Scheduler = struct {
     
     fn schedule(self: *Self, thread: *GreenThread) !void {
         thread.state = .ready;
-        try self.ready_queue.append(thread);
+        try self.ready_queue.append(self.allocator, thread);
     }
     
     fn yield_to_next(self: *Self) ?*GreenThread {
@@ -195,7 +195,7 @@ pub const GreenThreadsIo = struct {
             .allocator = allocator,
             .config = config,
             .scheduler = Scheduler.init(allocator),
-            .threads = std.ArrayList(*GreenThread).init(allocator),
+            .threads = std.ArrayList(*GreenThread){ .allocator = allocator },
             .next_thread_id = 1,
             .running = true,
         };
@@ -226,7 +226,7 @@ pub const GreenThreadsIo = struct {
         thread.* = try GreenThread.init(self.allocator, self.next_thread_id, self.config.stack_size);
         self.next_thread_id += 1;
         
-        try self.threads.append(thread);
+        try self.threads.append(self.allocator, thread);
         try self.scheduler.schedule(thread);
         
         // Simulate executing the I/O operation in the green thread context

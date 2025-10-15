@@ -161,7 +161,7 @@ pub const DependencyGraph = struct {
             .allocator = allocator,
             .packages = std.hash_map.HashMap([]const u8, *Package, std.hash_map.StringContext, 80).init(allocator),
             .dependencies = std.hash_map.HashMap([]const u8, std.ArrayList([]const u8), std.hash_map.StringContext, 80).init(allocator),
-            .resolved_order = std.ArrayList([]const u8).init(allocator),
+            .resolved_order = std.ArrayList([]const u8){ .allocator = allocator },
             .mutex = .{},
         };
     }
@@ -189,9 +189,9 @@ pub const DependencyGraph = struct {
         
         try self.packages.put(package.name, package);
         
-        var deps = std.ArrayList([]const u8).init(self.allocator);
+        var deps = std.ArrayList([]const u8){ .allocator = self.allocator };
         for (package.dependencies) |dep| {
-            try deps.append(dep.name);
+            try deps.append(allocator, dep.name);
         }
         try self.dependencies.put(package.name, deps);
     }
@@ -238,7 +238,7 @@ pub const DependencyGraph = struct {
         
         _ = in_progress.remove(package_name);
         try visited.put(package_name, true);
-        try self.resolved_order.append(package_name);
+        try self.resolved_order.append(self.allocator, package_name);
     }
 };
 
@@ -294,12 +294,12 @@ pub const AsyncPackageManager = struct {
             .config = config,
             .dependency_graph = DependencyGraph.init(allocator),
             .installed_packages = std.hash_map.HashMap([]const u8, *Package, std.hash_map.StringContext, 80).init(allocator),
-            .download_queue = std.ArrayList(DownloadTask).init(allocator),
-            .active_downloads = std.ArrayList(DownloadTask).init(allocator),
+            .download_queue = std.ArrayList(DownloadTask){ .allocator = allocator },
+            .active_downloads = std.ArrayList(DownloadTask){ .allocator = allocator },
             .download_workers = try allocator.alloc(std.Thread, config.max_parallel_downloads),
             .download_semaphore = std.Thread.Semaphore{ .permits = config.max_parallel_downloads },
-            .install_queue = std.ArrayList(InstallTask).init(allocator),
-            .active_installs = std.ArrayList(InstallTask).init(allocator),
+            .install_queue = std.ArrayList(InstallTask){ .allocator = allocator },
+            .active_installs = std.ArrayList(InstallTask){ .allocator = allocator },
             .install_workers = try allocator.alloc(std.Thread, config.max_parallel_installs),
             .install_semaphore = std.Thread.Semaphore{ .permits = config.max_parallel_installs },
             .worker_active = std.atomic.Value(bool).init(false),
@@ -376,7 +376,7 @@ pub const AsyncPackageManager = struct {
             .manager = self,
             .package_name = try allocator.dupe(u8, package_name),
             .allocator = allocator,
-            .completed_packages = std.ArrayList([]const u8).init(allocator),
+            .completed_packages = std.ArrayList([]const u8){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -418,7 +418,7 @@ pub const AsyncPackageManager = struct {
             .manager = self,
             .query = try allocator.dupe(u8, query),
             .allocator = allocator,
-            .results = std.ArrayList(*Package).init(allocator),
+            .results = std.ArrayList(*Package){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -460,7 +460,7 @@ pub const AsyncPackageManager = struct {
             .package_names = try allocator.dupe([]const u8, package_names),
             .allocator = allocator,
             .completed_count = std.atomic.Value(u32).init(0),
-            .failed_packages = std.ArrayList([]const u8).init(allocator),
+            .failed_packages = std.ArrayList([]const u8){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -508,7 +508,7 @@ pub const AsyncPackageManager = struct {
         task.worker_id = worker_id;
         task.started_at = std.time.timestamp();
         
-        try self.active_downloads.append(task);
+        try self.active_downloads.append(self.allocator, task);
         
         // Simulate download process
         defer {
@@ -550,7 +550,7 @@ pub const AsyncPackageManager = struct {
         task.worker_id = worker_id;
         task.started_at = std.time.timestamp();
         
-        try self.active_installs.append(task);
+        try self.active_installs.append(self.allocator, task);
         
         // Simulate installation process
         defer {
@@ -669,7 +669,7 @@ pub const AURHelper = struct {
             .helper = self,
             .query = try allocator.dupe(u8, query),
             .allocator = allocator,
-            .results = std.ArrayList(AURPackage).init(allocator),
+            .results = std.ArrayList(AURPackage){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -691,7 +691,7 @@ pub const AURHelper = struct {
             .package_name = try allocator.dupe(u8, package_name),
             .allocator = allocator,
             .install_complete = false,
-            .build_output = std.ArrayList(u8).init(allocator),
+            .build_output = std.ArrayList(u8){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -832,7 +832,7 @@ fn downloadPackagePoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResul
         };
         
         ctx.manager.mutex.lock();
-        ctx.manager.download_queue.append(task) catch {};
+        ctx.manager.download_queue.append(ctx.allocator, task) catch {};
         ctx.manager.mutex.unlock();
         
         ctx.download_complete = true;
@@ -874,7 +874,7 @@ fn searchPackagesPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult
                 .status = .not_installed,
             };
             
-            ctx.results.append(package) catch return .{ .ready = error.OutOfMemory };
+            ctx.results.append(ctx.allocator, package) catch return .{ .ready = error.OutOfMemory };
         }
     }
     
@@ -966,7 +966,7 @@ fn aurSearchPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     
     for (mock_aur_packages) |package| {
         if (std.mem.indexOf(u8, package.name, ctx.query) != null) {
-            ctx.results.append(package) catch return .{ .ready = error.OutOfMemory };
+            ctx.results.append(ctx.allocator, package) catch return .{ .ready = error.OutOfMemory };
         }
     }
     

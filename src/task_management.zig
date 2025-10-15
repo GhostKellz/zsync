@@ -328,7 +328,7 @@ pub const TaskBatch = struct {
         
         return Self{
             .allocator = allocator,
-            .tasks = std.ArrayList(TaskHandle).init(allocator),
+            .tasks = std.ArrayList(TaskHandle){ .allocator = allocator },
             .cancel_all_token = cancel_token,
         };
     }
@@ -349,7 +349,7 @@ pub const TaskBatch = struct {
         options: SpawnOptions,
     ) !void {
         const handle = try Task.spawn(self.allocator, func, args, options);
-        try self.tasks.append(handle);
+        try self.tasks.append(self.allocator, handle);
     }
     
     /// Cancel all tasks in the batch

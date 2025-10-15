@@ -161,7 +161,7 @@ pub const PluginManager = struct {
             .allocator = allocator,
             .runtime = runtime,
             .plugins = std.StringHashMap(*Plugin).init(allocator),
-            .plugin_dirs = std.ArrayList([]const u8).init(allocator),
+            .plugin_dirs = std.ArrayList([]const u8){ .allocator = allocator },
             .mutex = .{},
         };
     }
@@ -187,7 +187,7 @@ pub const PluginManager = struct {
     /// Add plugin search directory
     pub fn addPluginDir(self: *Self, dir: []const u8) !void {
         const owned_dir = try self.allocator.dupe(u8, dir);
-        try self.plugin_dirs.append(owned_dir);
+        try self.plugin_dirs.append(self.allocator, owned_dir);
     }
 
     /// Register plugin
@@ -265,11 +265,11 @@ pub const PluginManager = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        var names = std.ArrayList([]const u8).init(self.allocator);
+        var names = std.ArrayList([]const u8){ .allocator = self.allocator };
         var it = self.plugins.iterator();
 
         while (it.next()) |entry| {
-            try names.append(entry.key_ptr.*);
+            try names.append(self.allocator, entry.key_ptr.*);
         }
 
         return names.toOwnedSlice();
@@ -288,7 +288,7 @@ pub fn discoverPlugins(
     allocator: std.mem.Allocator,
     dir: []const u8,
 ) ![][]const u8 {
-    var plugins = std.ArrayList([]const u8).init(allocator);
+    var plugins = std.ArrayList([]const u8){ .allocator = allocator };
 
     var dir_handle = try std.fs.cwd().openDir(dir, .{ .iterate = true });
     defer dir_handle.close();
@@ -299,7 +299,7 @@ pub fn discoverPlugins(
             // Check if it's a plugin file (e.g., .gza for GShell)
             if (std.mem.endsWith(u8, entry.name, ".gza")) {
                 const plugin_name = try allocator.dupe(u8, entry.name);
-                try plugins.append(plugin_name);
+                try plugins.append(allocator, plugin_name);
             }
         }
     }

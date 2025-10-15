@@ -138,8 +138,8 @@ pub const NatTraversal = struct {
     pub fn init(allocator: std.mem.Allocator, io: io_v2.Io) !NatTraversal {
         return NatTraversal{
             .allocator = allocator,
-            .stun_servers = std.ArrayList(std.net.Address).init(allocator),
-            .turn_servers = std.ArrayList(TurnServer).init(allocator),
+            .stun_servers = std.ArrayList(std.net.Address){ .allocator = allocator },
+            .turn_servers = std.ArrayList(TurnServer){ .allocator = allocator },
             .discovered_endpoints = std.hash_map.HashMap([16]u8, std.net.Address, std.hash_map.AutoContext([16]u8), 80).init(allocator),
             .io = io,
         };
@@ -265,7 +265,7 @@ pub const MeshCoordinator = struct {
         ctx.* = .{
             .coordinator = self,
             .allocator = allocator,
-            .discovered_peers = std.ArrayList(PeerInfo).init(allocator),
+            .discovered_peers = std.ArrayList(PeerInfo){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -556,7 +556,7 @@ fn peerDiscoveryPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult 
         .latency = 50,
     };
     
-    ctx.discovered_peers.append(peer) catch |err| {
+    ctx.discovered_peers.append(ctx.allocator, peer) catch |err| {
         return .{ .ready = err };
     };
     
@@ -651,7 +651,7 @@ test "NAT traversal operations" {
     defer nat.deinit();
     
     // Add STUN server
-    try nat.stun_servers.append(std.net.Address.initIp4(.{ 8, 8, 8, 8 }, 3478));
+    try nat.stun_servers.append(ctx.allocator, std.net.Address.initIp4(.{ 8, 8, 8, 8 }, 3478));
     
     const local_endpoint = std.net.Address.initIp4(.{ 192, 168, 1, 100 }, 12345);
     

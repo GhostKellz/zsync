@@ -34,7 +34,7 @@ pub const FileWatcher = struct {
     ) !Self {
         return Self{
             .allocator = allocator,
-            .paths = std.ArrayList([]const u8).init(allocator),
+            .paths = std.ArrayList([]const u8){ .allocator = allocator },
             .callback = callback,
             .debounce_ms = debounce_ms,
             .recursive = recursive,
@@ -52,7 +52,7 @@ pub const FileWatcher = struct {
     /// Add path to watch
     pub fn watch(self: *Self, path: []const u8) !void {
         const owned_path = try self.allocator.dupe(u8, path);
-        try self.paths.append(owned_path);
+        try self.paths.append(self.allocator, owned_path);
     }
 
     /// Start watching

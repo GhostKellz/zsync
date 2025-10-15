@@ -618,7 +618,7 @@ pub const Future = struct {
             .ptr = undefined,
             .vtable = undefined,
             .state = std.atomic.Value(State).init(.pending),
-            .wakers = std.ArrayList(Waker).init(allocator),
+            .wakers = std.ArrayList(Waker){ .allocator = allocator },
         };
     }
 
@@ -821,7 +821,7 @@ pub const Future = struct {
             return;
         }
         
-        try self.wakers.append(waker);
+        try self.wakers.append(self.allocator, waker);
     }
     
     /// Chain this future with another for dependency management

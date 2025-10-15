@@ -85,7 +85,7 @@ pub const BenchmarkSuite = struct {
         return Self{
             .allocator = allocator,
             .config = config,
-            .results = std.ArrayList(BenchmarkResult).init(allocator),
+            .results = std.ArrayList(BenchmarkResult){ .allocator = allocator },
             .baseline_results = std.HashMap([]const u8, BenchmarkResult, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .performance_counters = platform.PerformanceCounters.init(),
         };
@@ -173,7 +173,7 @@ pub const BenchmarkSuite = struct {
             final_result.memory_efficiency_factor = 1.0;
         }
         
-        try self.results.append(final_result);
+        try self.results.append(self.allocator, final_result);
         
         const duration_ms = (end_time - start_time) / 1_000_000;
         std.debug.print("   ✅ Completed in {}ms: {d:.0} ops/s, {d:.2}MB/s\n", .{
@@ -416,12 +416,12 @@ pub const BenchmarkSuite = struct {
         // Group results by category
         inline for (std.meta.fields(BenchmarkResult.BenchmarkCategory)) |field| {
             const category = @field(BenchmarkResult.BenchmarkCategory, field.name);
-            var category_results = std.ArrayList(BenchmarkResult).init(self.allocator);
+            var category_results = std.ArrayList(BenchmarkResult){ .allocator = self.allocator };
             defer category_results.deinit();
             
             for (self.results.items) |result| {
                 if (result.category == category) {
-                    category_results.append(result) catch continue;
+                    category_results.append(allocator, result) catch continue;
                 }
             }
             

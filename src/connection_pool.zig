@@ -82,8 +82,8 @@ pub const ConnectionPool = struct {
         return Self{
             .allocator = allocator,
             .config = config,
-            .connections = std.ArrayList(*PooledConnection).init(allocator),
-            .idle_connections = std.ArrayList(*PooledConnection).init(allocator),
+            .connections = std.ArrayList(*PooledConnection){ .allocator = allocator },
+            .idle_connections = std.ArrayList(*PooledConnection){ .allocator = allocator },
             .connection_map = std.HashMap(u32, *PooledConnection, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(allocator),
             .next_connection_id = std.atomic.Value(u32).init(1),
             .mutex = std.Thread.Mutex{},
@@ -129,7 +129,7 @@ pub const ConnectionPool = struct {
         const conn = try self.allocator.create(PooledConnection);
         conn.* = PooledConnection.init(self.next_connection_id.fetchAdd(1, .monotonic), stream);
         
-        try self.connections.append(conn);
+        try self.connections.append(self.allocator, conn);
         try self.connection_map.put(conn.id, conn);
         
         conn.markUsed();
@@ -144,7 +144,7 @@ pub const ConnectionPool = struct {
         defer self.mutex.unlock();
 
         conn.markIdle();
-        try self.idle_connections.append(conn);
+        try self.idle_connections.append(self.allocator, conn);
         _ = self.active_count.fetchSub(1, .monotonic);
     }
 
@@ -217,7 +217,7 @@ pub const UdpMulticast = struct {
     pub fn init(allocator: std.mem.Allocator, socket: io_v2.UdpSocket) Self {
         return Self{
             .socket = socket,
-            .multicast_groups = std.ArrayList(std.net.Address).init(allocator),
+            .multicast_groups = std.ArrayList(std.net.Address){ .allocator = allocator },
             .broadcast_enabled = false,
         };
     }
@@ -229,7 +229,7 @@ pub const UdpMulticast = struct {
     /// Join a multicast group
     pub fn joinMulticastGroup(self: *Self, group_address: std.net.Address) !void {
         // In a real implementation, this would call setsockopt with IP_ADD_MEMBERSHIP
-        try self.multicast_groups.append(group_address);
+        try self.multicast_groups.append(self.allocator, group_address);
     }
     
     /// Leave a multicast group

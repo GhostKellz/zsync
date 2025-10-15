@@ -135,7 +135,7 @@ pub const CGroupsController = struct {
     pub fn init(allocator: std.mem.Allocator, cgroup_path: []const u8) !Self {
         return Self{
             .cgroup_path = try allocator.dupe(u8, cgroup_path),
-            .controllers = std.ArrayList([]const u8).init(allocator),
+            .controllers = std.ArrayList([]const u8){ .allocator = allocator },
             .allocator = allocator,
         };
     }
@@ -150,7 +150,7 @@ pub const CGroupsController = struct {
     
     pub fn addController(self: *Self, controller: []const u8) !void {
         const controller_copy = try self.allocator.dupe(u8, controller);
-        try self.controllers.append(controller_copy);
+        try self.controllers.append(self.allocator, controller_copy);
     }
     
     pub fn setMemoryLimit(self: *Self, limit: u64) !void {
@@ -664,7 +664,7 @@ pub const AsyncContainerRuntime = struct {
             .containers = std.HashMap([]const u8, ContainerInfo, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .cgroup_controllers = std.HashMap([]const u8, CGroupsController, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
             .namespace_manager = NamespaceManager.init(allocator),
-            .worker_pool = std.ArrayList(*ContainerWorker).init(allocator),
+            .worker_pool = std.ArrayList(*ContainerWorker){ .allocator = allocator },
             .operation_queue = std.atomic.Queue(ContainerOperation).init(),
             .allocator = allocator,
             .mutex = std.Thread.Mutex{},
@@ -680,7 +680,7 @@ pub const AsyncContainerRuntime = struct {
                 .worker_id = @intCast(i),
             };
             
-            try self.worker_pool.append(worker);
+            try self.worker_pool.append(self.allocator, worker);
         }
         
         return self;
@@ -763,11 +763,11 @@ pub const AsyncContainerRuntime = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        var containers = std.ArrayList(ContainerInfo).init(self.allocator);
+        var containers = std.ArrayList(ContainerInfo){ .allocator = self.allocator };
         
         var iterator = self.containers.iterator();
         while (iterator.next()) |entry| {
-            try containers.append(entry.value_ptr.*);
+            try containers.append(allocator, entry.value_ptr.*);
         }
         
         return containers.toOwnedSlice();

@@ -225,7 +225,7 @@ pub fn ClientStreamingCall(comptime Request: type, comptime Response: type) type
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .allocator = allocator,
-                .requests = std.ArrayList(Request).init(allocator),
+                .requests = std.ArrayList(Request){ .allocator = allocator },
                 .closed = false,
             };
         }
@@ -237,7 +237,7 @@ pub fn ClientStreamingCall(comptime Request: type, comptime Response: type) type
         /// Send a request
         pub fn send(self: *Self, request: Request) !void {
             if (self.closed) return error.StreamClosed;
-            try self.requests.append(request);
+            try self.requests.append(self.allocator, request);
             // TODO: Actually send to server
         }
 
@@ -263,7 +263,7 @@ pub fn ServerStreamingCall(comptime Response: type) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .allocator = allocator,
-                .responses = std.ArrayList(Response).init(allocator),
+                .responses = std.ArrayList(Response){ .allocator = allocator },
                 .index = 0,
             };
         }
@@ -300,8 +300,8 @@ pub fn BidiStreamingCall(comptime Request: type, comptime Response: type) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .allocator = allocator,
-                .requests = std.ArrayList(Request).init(allocator),
-                .responses = std.ArrayList(Response).init(allocator),
+                .requests = std.ArrayList(Request){ .allocator = allocator },
+                .responses = std.ArrayList(Response){ .allocator = allocator },
                 .resp_index = 0,
                 .closed = false,
             };
@@ -315,7 +315,7 @@ pub fn BidiStreamingCall(comptime Request: type, comptime Response: type) type {
         /// Send a request
         pub fn send(self: *Self, request: Request) !void {
             if (self.closed) return error.StreamClosed;
-            try self.requests.append(request);
+            try self.requests.append(self.allocator, request);
             // TODO: Actually send to server
         }
 
@@ -363,7 +363,7 @@ pub const Channel = struct {
             .runtime = runtime,
             .target = owned_target,
             .config = config,
-            .clients = std.ArrayList(*GrpcClient).init(allocator),
+            .clients = std.ArrayList(*GrpcClient){ .allocator = allocator },
             .mutex = .{},
         };
     }
@@ -397,7 +397,7 @@ pub const Channel = struct {
             self.target,
             self.config,
         );
-        try self.clients.append(client);
+        try self.clients.append(self.allocator, client);
 
         return client;
     }

@@ -313,7 +313,7 @@ pub fn StreamWriter(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .allocator = allocator,
-                .messages = std.ArrayList(T).init(allocator),
+                .messages = std.ArrayList(T){ .allocator = allocator },
             };
         }
 
@@ -322,7 +322,7 @@ pub fn StreamWriter(comptime T: type) type {
         }
 
         pub fn send(self: *Self, message: T) !void {
-            try self.messages.append(message);
+            try self.messages.append(self.allocator, message);
             // TODO: Actually write to stream
         }
     };
@@ -340,7 +340,7 @@ pub fn StreamReader(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
                 .allocator = allocator,
-                .messages = std.ArrayList(T).init(allocator),
+                .messages = std.ArrayList(T){ .allocator = allocator },
                 .index = 0,
             };
         }

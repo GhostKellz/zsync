@@ -82,7 +82,7 @@ pub const TlsCertificate = struct {
     pub fn init(allocator: Allocator) TlsCertificate {
         return TlsCertificate{
             .cert_data = &[_]u8{},
-            .extensions = ArrayList(TlsExtension).init(allocator),
+            .extensions = ArrayList(TlsExtension){ .allocator = allocator },
         };
     }
     
@@ -140,7 +140,7 @@ pub const TlsSession = struct {
             .session_id = [_]u8{0} ** 32,
             .cipher_suite = CipherSuite.tls_aes_256_gcm_sha384,
             .keys = TlsHandshakeKeys.init(),
-            .certificates = ArrayList(TlsCertificate).init(allocator),
+            .certificates = ArrayList(TlsCertificate){ .allocator = allocator },
             .peer_public_key = [_]u8{0} ** 32,
             .own_private_key = [_]u8{0} ** 32,
             .is_client = is_client,
@@ -172,15 +172,15 @@ pub const AsyncTlsContext = struct {
     const Self = @This();
     
     pub fn init(allocator: Allocator) Self {
-        var supported_cipher_suites = ArrayList(CipherSuite).init(allocator);
-        supported_cipher_suites.append(CipherSuite.tls_aes_256_gcm_sha384) catch {};
-        supported_cipher_suites.append(CipherSuite.tls_aes_128_gcm_sha256) catch {};
-        supported_cipher_suites.append(CipherSuite.tls_chacha20_poly1305_sha256) catch {};
+        var supported_cipher_suites = ArrayList(CipherSuite){ .allocator = allocator };
+        supported_cipher_suites.append(allocator, CipherSuite.tls_aes_256_gcm_sha384) catch {};
+        supported_cipher_suites.append(allocator, CipherSuite.tls_aes_128_gcm_sha256) catch {};
+        supported_cipher_suites.append(allocator, CipherSuite.tls_chacha20_poly1305_sha256) catch {};
         
-        var supported_groups = ArrayList(NamedGroup).init(allocator);
-        supported_groups.append(NamedGroup.x25519) catch {};
-        supported_groups.append(NamedGroup.secp256r1) catch {};
-        supported_groups.append(NamedGroup.secp384r1) catch {};
+        var supported_groups = ArrayList(NamedGroup){ .allocator = allocator };
+        supported_groups.append(allocator, NamedGroup.x25519) catch {};
+        supported_groups.append(allocator, NamedGroup.secp256r1) catch {};
+        supported_groups.append(allocator, NamedGroup.secp384r1) catch {};
         
         return Self{
             .allocator = allocator,
@@ -188,7 +188,7 @@ pub const AsyncTlsContext = struct {
             .cache_mutex = std.Thread.Mutex{},
             .supported_cipher_suites = supported_cipher_suites,
             .supported_groups = supported_groups,
-            .certificates = ArrayList(TlsCertificate).init(allocator),
+            .certificates = ArrayList(TlsCertificate){ .allocator = allocator },
             .private_key = [_]u8{0} ** 32,
             .verify_peer = true,
             .session_timeout_seconds = 3600,
@@ -226,7 +226,7 @@ pub const AsyncTlsContext = struct {
     pub fn loadCertificate(self: *Self, cert_data: []const u8) !void {
         var certificate = TlsCertificate.init(self.allocator);
         certificate.cert_data = try self.allocator.dupe(u8, cert_data);
-        try self.certificates.append(certificate);
+        try self.certificates.append(self.allocator, certificate);
     }
     
     fn buildClientHello(self: *Self, buffer: []u8, server_name: []const u8) !usize {
@@ -587,19 +587,19 @@ pub const AsyncTlsContext = struct {
         defer self.allocator.free(full_label);
         
         // Build HKDF-Expand-Label structure
-        var hkdf_label = ArrayList(u8).init(self.allocator);
+        var hkdf_label = ArrayList(u8){ .allocator = self.allocator };
         defer hkdf_label.deinit();
         
         // Length (2 bytes)
-        try hkdf_label.append(0);
-        try hkdf_label.append(32);
+        try hkdf_label.append(allocator, 0);
+        try hkdf_label.append(allocator, 32);
         
         // Label length + label
-        try hkdf_label.append(@truncate(full_label.len));
+        try hkdf_label.append(allocator, @truncate(full_label.len));
         try hkdf_label.appendSlice(full_label);
         
         // Context length + context
-        try hkdf_label.append(@truncate(context.len));
+        try hkdf_label.append(allocator, @truncate(context.len));
         try hkdf_label.appendSlice(context);
         
         var hmac = std.crypto.auth.hmac.HmacSha256.init(prk);

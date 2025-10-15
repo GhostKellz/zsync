@@ -414,7 +414,7 @@ const StacklessEventLoop = struct {
     
     fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .coroutines = std.ArrayList(StacklessCoroutine).init(allocator),
+            .coroutines = std.ArrayList(StacklessCoroutine){ .allocator = allocator },
             .ready_queue = std.fifo.LinearFifo(usize, .Dynamic).init(allocator),
             .allocator = allocator,
         };
@@ -431,7 +431,7 @@ const StacklessEventLoop = struct {
     fn spawn(self: *Self, func: *const fn (*anyopaque) void, ctx: *anyopaque, profiler: ?*StacklessProfiler) !usize {
         const coro = try StacklessCoroutine.init(self.allocator, func, ctx);
         const id = self.coroutines.items.len;
-        try self.coroutines.append(coro);
+        try self.coroutines.append(self.allocator, coro);
         try self.ready_queue.writeItem(id);
         
         if (profiler) |p| {
@@ -665,7 +665,7 @@ pub const StacklessIo = struct {
             .ptr = future_impl,
             .vtable = &stackless_future_vtable,
             .state = std.atomic.Value(Future.State).init(.pending),
-            .wakers = std.ArrayList(Future.Waker).init(self.allocator),
+            .wakers = std.ArrayList(Future.Waker){ .allocator = self.allocator },
         };
     }
 

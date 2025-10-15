@@ -30,7 +30,7 @@ pub const BufferPool = struct {
         return BufferPool{
             .allocator = allocator,
             .page_size = std.mem.page_size,
-            .free_buffers = std.ArrayList([]align(std.mem.page_size) u8).init(allocator),
+            .free_buffers = std.ArrayList([]align(std.mem.page_size) u8){ .allocator = allocator },
             .active_buffers = std.AutoHashMap(usize, BufferInfo).init(allocator),
             .mutex = std.Thread.Mutex{},
         };
@@ -94,7 +94,7 @@ pub const BufferPool = struct {
             if (info.ref_count == 0 and !info.pinned) {
                 const full_buffer = info.buffer;
                 _ = self.active_buffers.remove(ptr);
-                self.free_buffers.append(full_buffer) catch {
+                self.free_buffers.append(self.allocator, full_buffer) catch {
                     // If we can't add to free list, just deallocate
                     self.allocator.free(full_buffer);
                 };
@@ -124,7 +124,7 @@ pub const BufferPool = struct {
             if (info.ref_count == 0) {
                 const full_buffer = info.buffer;
                 _ = self.active_buffers.remove(ptr);
-                self.free_buffers.append(full_buffer) catch {
+                self.free_buffers.append(self.allocator, full_buffer) catch {
                     self.allocator.free(full_buffer);
                 };
             }

@@ -525,10 +525,10 @@ fn parsePKGBUILD(context: *PKGBUILDContext) !PKGBUILDData {
     // Simple PKGBUILD parsing (real implementation would be more sophisticated)
     var package_name: []const u8 = "unknown";
     var version: []const u8 = "unknown";
-    var dependencies = std.ArrayList([]const u8).init(context.file_ops.allocator);
-    var make_dependencies = std.ArrayList([]const u8).init(context.file_ops.allocator);
-    var sources = std.ArrayList([]const u8).init(context.file_ops.allocator);
-    var checksums = std.ArrayList([]const u8).init(context.file_ops.allocator);
+    var dependencies = std.ArrayList([]const u8){ .allocator = context.file_ops.allocator };
+    var make_dependencies = std.ArrayList([]const u8){ .allocator = context.file_ops.allocator };
+    var sources = std.ArrayList([]const u8){ .allocator = context.file_ops.allocator };
+    var checksums = std.ArrayList([]const u8){ .allocator = context.file_ops.allocator };
     
     var lines = std.mem.split(u8, content, "\n");
     while (lines.next()) |line| {

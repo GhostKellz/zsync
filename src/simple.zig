@@ -54,13 +54,13 @@ pub fn simpleChannelDemo() !void {
     std.debug.print("📬 Simple channel demo...\n", .{});
     
     // Create a simple queue to simulate channel
-    var queue = std.ArrayList([]const u8).init(allocator);
-    defer queue.deinit();
+    var queue = std.ArrayList([]const u8){ .allocator = allocator };
+    defer queue.deinit(allocator);
     
     // Add messages
-    try queue.append("Hello");
-    try queue.append("from");
-    try queue.append("Zsync!");
+    try queue.append(allocator, "Hello");
+    try queue.append(allocator, "from");
+    try queue.append(allocator, "Zsync!");
     
     // Process messages
     for (queue.items) |msg| {

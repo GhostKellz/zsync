@@ -57,7 +57,7 @@ pub const AsyncRegistry = struct {
         return .{
             .allocator = allocator,
             .functions = std.StringHashMap(FunctionInfo).init(allocator),
-            .wrappers = std.ArrayList(*const anyopaque).init(allocator),
+            .wrappers = std.ArrayList(*const anyopaque){ .allocator = allocator },
         };
     }
     
@@ -91,7 +91,7 @@ pub const AsyncRegistry = struct {
         };
         
         const wrapper_ptr = &Wrapper.call;
-        try self.wrappers.append(wrapper_ptr);
+        try self.wrappers.append(self.allocator, wrapper_ptr);
         
         const info = FunctionInfo{
             .name = name,

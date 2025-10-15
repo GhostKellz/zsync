@@ -148,7 +148,7 @@ pub const Mempool = struct {
             .mempool = self,
             .max_count = max_count,
             .allocator = allocator,
-            .transactions = std.ArrayList(Transaction).init(allocator),
+            .transactions = std.ArrayList(Transaction){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -290,10 +290,10 @@ fn addTxPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     };
     
     if (!nonce_entry.found_existing) {
-        nonce_entry.value_ptr.* = std.ArrayList(*Transaction).init(ctx.mempool.allocator);
+        nonce_entry.value_ptr.* = std.ArrayList(*Transaction){ .allocator = ctx.mempool.allocator };
     }
     
-    nonce_entry.value_ptr.append(tx_ptr) catch |err| {
+    nonce_entry.value_ptr.append(ctx.allocator, tx_ptr) catch |err| {
         _ = ctx.mempool.transactions.remove(ctx.transaction.hash);
         ctx.mempool.allocator.destroy(tx_ptr);
         return .{ .ready = err };
@@ -315,12 +315,12 @@ fn estimateGasPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     defer ctx.mempool.mutex.unlock();
     
     // Collect gas prices from priority queue
-    var gas_prices = std.ArrayList(u64).init(ctx.allocator);
+    var gas_prices = std.ArrayList(u64){ .allocator = ctx.allocator };
     defer gas_prices.deinit();
     
     var iter = ctx.mempool.priority_queue.iterator();
     while (iter.next()) |tx| {
-        gas_prices.append(tx.gas_price) catch |err| {
+        gas_prices.append(allocator, tx.gas_price) catch |err| {
             return .{ .ready = err };
         };
     }
@@ -360,7 +360,7 @@ fn getPendingPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
         if (count >= ctx.max_count) break;
         
         if (tx.status == .pending) {
-            ctx.transactions.append(tx.*) catch |err| {
+            ctx.transactions.append(ctx.allocator, tx.*) catch |err| {
                 return .{ .ready = err };
             };
             count += 1;
@@ -386,7 +386,7 @@ fn evictPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     const current_time = std.time.timestamp();
     const eviction_threshold = current_time - @as(i64, @intCast(ctx.mempool.config.eviction_interval_ms / 1000));
     
-    var to_remove = std.ArrayList([32]u8).init(ctx.allocator);
+    var to_remove = std.ArrayList([32]u8){ .allocator = ctx.allocator };
     defer to_remove.deinit();
     
     // Find transactions to evict
@@ -396,7 +396,7 @@ fn evictPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
         
         // Evict old pending transactions
         if (tx.status == .pending and tx.timestamp < eviction_threshold) {
-            to_remove.append(tx.hash) catch |err| {
+            to_remove.append(allocator, tx.hash) catch |err| {
                 return .{ .ready = err };
             };
         }
@@ -796,11 +796,11 @@ pub const GossipProtocol = struct {
     
     /// Select random peers for broadcasting
     fn selectPeersForBroadcast(self: *GossipProtocol, exclude_peer: ?[32]u8) std.ArrayList([32]u8) {
-        var selected = std.ArrayList([32]u8).init(self.allocator);
+        var selected = std.ArrayList([32]u8){ .allocator = self.allocator };
         var count: usize = 0;
         var rng = std.rand.DefaultPrng.init(@intCast(std.time.timestamp()));
         
-        var peer_ids = std.ArrayList([32]u8).init(self.allocator);
+        var peer_ids = std.ArrayList([32]u8){ .allocator = self.allocator };
         defer peer_ids.deinit();
         
         var iter = self.peers.iterator();
@@ -808,10 +808,10 @@ pub const GossipProtocol = struct {
             if (entry.value_ptr.connected) {
                 if (exclude_peer) |exclude| {
                     if (!std.mem.eql(u8, &entry.key_ptr.*, &exclude)) {
-                        peer_ids.append(entry.key_ptr.*) catch continue;
+                        peer_ids.append(allocator, entry.key_ptr.*) catch continue;
                     }
                 } else {
-                    peer_ids.append(entry.key_ptr.*) catch continue;
+                    peer_ids.append(allocator, entry.key_ptr.*) catch continue;
                 }
             }
         }
@@ -821,7 +821,7 @@ pub const GossipProtocol = struct {
         const select_count = @min(self.config.broadcast_fanout, peer_ids.items.len);
         
         for (peer_ids.items[0..select_count]) |peer_id| {
-            selected.append(peer_id) catch break;
+            selected.append(allocator, peer_id) catch break;
             count += 1;
             if (count >= self.config.broadcast_fanout) break;
         }
@@ -886,7 +886,7 @@ fn broadcastTxPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     defer ctx.gossip.mutex.unlock();
     
     // Serialize transaction for broadcast
-    var tx_data = std.ArrayList(u8).init(ctx.allocator);
+    var tx_data = std.ArrayList(u8){ .allocator = ctx.allocator };
     defer tx_data.deinit();
     
     // Simple serialization - in production would use proper format
@@ -1074,14 +1074,14 @@ fn heartbeatPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     }
     
     // Cleanup expired peers
-    var to_remove = std.ArrayList([32]u8).init(ctx.allocator);
+    var to_remove = std.ArrayList([32]u8){ .allocator = ctx.allocator };
     defer to_remove.deinit();
     
     iter = ctx.gossip.peers.iterator();
     while (iter.next()) |entry| {
         const peer = entry.value_ptr;
         if (current_time - peer.last_seen > @as(i64, @intCast(ctx.gossip.config.peer_timeout_ms / 1000))) {
-            to_remove.append(entry.key_ptr.*) catch continue;
+            to_remove.append(allocator, entry.key_ptr.*) catch continue;
         }
     }
     
@@ -1122,7 +1122,7 @@ pub const TransactionPropagationOptimizer = struct {
             .io = io,
             .tx_propagation_map = std.hash_map.HashMap([32]u8, PropagationMetrics, std.hash_map.AutoContext([32]u8), 80).init(allocator),
             .peer_performance_map = std.hash_map.HashMap([32]u8, PeerPerformance, std.hash_map.AutoContext([32]u8), 80).init(allocator),
-            .pending_batches = std.ArrayList(TransactionBatch).init(allocator),
+            .pending_batches = std.ArrayList(TransactionBatch){ .allocator = allocator },
             .routing_table = std.hash_map.HashMap([32]u8, RoutingInfo, std.hash_map.AutoContext([32]u8), 80).init(allocator),
             .config = config,
             .mutex = .{},
@@ -1207,8 +1207,8 @@ pub const TransactionPropagationOptimizer = struct {
     
     /// Select optimal peers for propagation
     pub fn selectOptimalPeers(self: *Self, count: usize) std.ArrayList([32]u8) {
-        var selected = std.ArrayList([32]u8).init(self.allocator);
-        var candidates = std.ArrayList(PeerCandidate).init(self.allocator);
+        var selected = std.ArrayList([32]u8){ .allocator = self.allocator };
+        var candidates = std.ArrayList(PeerCandidate){ .allocator = self.allocator };
         defer candidates.deinit();
         
         self.mutex.lock();
@@ -1220,7 +1220,7 @@ pub const TransactionPropagationOptimizer = struct {
             const performance = entry.value_ptr.*;
             const score = self.calculatePeerScore(performance);
             
-            candidates.append(PeerCandidate{
+            candidates.append(allocator, PeerCandidate{
                 .peer_id = performance.peer_id,
                 .score = score,
             }) catch continue;
@@ -1232,7 +1232,7 @@ pub const TransactionPropagationOptimizer = struct {
         // Select top peers
         const select_count = @min(count, candidates.items.len);
         for (candidates.items[0..select_count]) |candidate| {
-            selected.append(candidate.peer_id) catch break;
+            selected.append(allocator, candidate.peer_id) catch break;
         }
         
         return selected;
@@ -1428,7 +1428,7 @@ fn batchPropagatePoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult
     // Create transaction batch
     var batch = TransactionBatch{
         .id = ctx.batch_id,
-        .transactions = std.ArrayList(Transaction).init(ctx.allocator),
+        .transactions = std.ArrayList(Transaction){ .allocator = ctx.allocator },
         .created_at = std.time.timestamp(),
         .target_peers = ctx.optimizer.selectOptimalPeers(ctx.optimizer.config.max_concurrent_propagations),
         .priority = .normal,
@@ -1436,11 +1436,11 @@ fn batchPropagatePoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult
     
     // Add transactions to batch
     for (ctx.transactions) |tx| {
-        batch.transactions.append(tx) catch break;
+        batch.transactions.append(ctx.allocator, tx) catch break;
     }
     
     // Store batch for processing
-    ctx.optimizer.pending_batches.append(batch) catch {};
+    ctx.optimizer.pending_batches.append(ctx.allocator, batch) catch {};
     
     return .{ .ready = batch.transactions.items.len };
 }
@@ -1472,7 +1472,7 @@ pub const BlockPropagationCoordinator = struct {
             .allocator = allocator,
             .io = io,
             .block_propagation_map = std.hash_map.HashMap([32]u8, BlockPropagationMetrics, std.hash_map.AutoContext([32]u8), 80).init(allocator),
-            .pending_blocks = std.ArrayList(PendingBlock).init(allocator),
+            .pending_blocks = std.ArrayList(PendingBlock){ .allocator = allocator },
             .propagation_tree = std.hash_map.HashMap([32]u8, std.ArrayList([32]u8), std.hash_map.AutoContext([32]u8), 80).init(allocator),
             .config = config,
             .mutex = .{},
@@ -1498,7 +1498,7 @@ pub const BlockPropagationCoordinator = struct {
             .block_hash = block_hash,
             .block_data = try allocator.dupe(u8, block_data),
             .allocator = allocator,
-            .propagated_to = std.ArrayList([32]u8).init(allocator),
+            .propagated_to = std.ArrayList([32]u8){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -1517,13 +1517,13 @@ pub const BlockPropagationCoordinator = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        var tree = std.ArrayList([32]u8).init(self.allocator);
+        var tree = std.ArrayList([32]u8){ .allocator = self.allocator };
         
         // Build tree based on peer reliability and network topology
         // Simplified implementation - in practice would use more sophisticated algorithms
         for (available_peers) |peer| {
             if (!std.mem.eql(u8, &peer, &root_peer)) {
-                tree.append(peer) catch continue;
+                tree.append(allocator, peer) catch continue;
             }
         }
         
@@ -1621,7 +1621,7 @@ fn blockPropagatePoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult
     // Simulate successful propagation to multiple peers
     for (0..metrics.total_peers_reached) |i| {
         const peer_id = [_]u8{@intCast(i)} ** 32;
-        ctx.propagated_to.append(peer_id) catch break;
+        ctx.propagated_to.append(ctx.allocator, peer_id) catch break;
     }
     
     return .{ .ready = ctx.propagated_to.items.len };
@@ -1678,7 +1678,7 @@ pub const PeerDiscovery = struct {
             .allocator = allocator,
             .io = io,
             .dht = try DistributedHashTable.init(allocator, config.dht_config),
-            .bootstrap_nodes = std.ArrayList(BootstrapNode).init(allocator),
+            .bootstrap_nodes = std.ArrayList(BootstrapNode){ .allocator = allocator },
             .discovered_peers = std.hash_map.HashMap([32]u8, DiscoveredPeer, std.hash_map.AutoContext([32]u8), 80).init(allocator),
             .discovery_active = std.atomic.Value(bool).init(false),
             .discovery_workers = try allocator.alloc(std.Thread, config.worker_count),
@@ -1720,7 +1720,7 @@ pub const PeerDiscovery = struct {
             .discovery = self,
             .target_count = target_count,
             .allocator = allocator,
-            .discovered_peers = std.ArrayList(DiscoveredPeer).init(allocator),
+            .discovered_peers = std.ArrayList(DiscoveredPeer){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -1759,7 +1759,7 @@ pub const PeerDiscovery = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        try self.bootstrap_nodes.append(node);
+        try self.bootstrap_nodes.append(self.allocator, node);
     }
     
     /// DHT lookup for peers
@@ -1769,7 +1769,7 @@ pub const PeerDiscovery = struct {
             .discovery = self,
             .target_id = target_id,
             .allocator = allocator,
-            .found_peers = std.ArrayList([32]u8).init(allocator),
+            .found_peers = std.ArrayList([32]u8){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -1846,7 +1846,7 @@ pub const PeerDiscovery = struct {
         defer self.mutex.unlock();
         
         const current_time = std.time.timestamp();
-        var to_remove = std.ArrayList([32]u8).init(self.allocator);
+        var to_remove = std.ArrayList([32]u8){ .allocator = self.allocator };
         defer to_remove.deinit();
         
         var iter = self.discovered_peers.iterator();
@@ -1855,7 +1855,7 @@ pub const PeerDiscovery = struct {
             const age = current_time - peer.last_seen;
             
             if (age > self.config.peer_timeout_seconds) {
-                to_remove.append(entry.key_ptr.*) catch continue;
+                to_remove.append(allocator, entry.key_ptr.*) catch continue;
             }
         }
         
@@ -1952,13 +1952,13 @@ pub const DistributedHashTable = struct {
     }
     
     pub fn lookup(self: *Self, target_id: [32]u8) !std.ArrayList(DHTNode) {
-        var closest_nodes = std.ArrayList(DHTNode).init(self.allocator);
+        var closest_nodes = std.ArrayList(DHTNode){ .allocator = self.allocator };
         
         // Find closest nodes from routing table
         var iter = self.routing_table.iterator();
         while (iter.next()) |entry| {
             const node = entry.value_ptr.*;
-            try closest_nodes.append(node);
+            try closest_nodes.append(allocator, node);
         }
         
         // Sort by distance to target
@@ -2001,7 +2001,7 @@ pub const KBucket = struct {
     pub fn init(allocator: std.mem.Allocator, max_size: usize) KBucket {
         return KBucket{
             .allocator = allocator,
-            .nodes = std.ArrayList(DHTNode).init(allocator),
+            .nodes = std.ArrayList(DHTNode){ .allocator = allocator },
             .max_size = max_size,
         };
     }
@@ -2022,7 +2022,7 @@ pub const KBucket = struct {
         
         // Add new node if there's space
         if (self.nodes.items.len < self.max_size) {
-            try self.nodes.append(node);
+            try self.nodes.append(self.allocator, node);
         } else {
             // Replace least recently seen node
             var oldest_index: usize = 0;
@@ -2099,7 +2099,7 @@ fn discoverPeersPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult 
         
         const peer = entry.value_ptr.*;
         if (peer.connection_state == .connected) {
-            ctx.discovered_peers.append(peer) catch break;
+            ctx.discovered_peers.append(ctx.allocator, peer) catch break;
         }
     }
     
@@ -2142,7 +2142,7 @@ fn dhtLookupPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
     
     // Convert found nodes to peer IDs
     for (closest_nodes.items) |node| {
-        ctx.found_peers.append(node.id) catch break;
+        ctx.found_peers.append(ctx.allocator, node.id) catch break;
     }
     
     return .{ .ready = ctx.found_peers.items.len };
@@ -2182,7 +2182,7 @@ pub const InitialBlockchainDownload = struct {
             .download_active = std.atomic.Value(bool).init(false),
             .current_height = std.atomic.Value(u64).init(0),
             .target_height = std.atomic.Value(u64).init(0),
-            .peer_connections = std.ArrayList(SyncPeer).init(allocator),
+            .peer_connections = std.ArrayList(SyncPeer){ .allocator = allocator },
             .download_queues = std.hash_map.HashMap(u64, BlockDownloadRequest, std.hash_map.AutoContext(u64), 80).init(allocator),
             .downloaded_blocks = std.hash_map.HashMap(u64, DownloadedBlock, std.hash_map.AutoContext(u64), 80).init(allocator),
             .config = config,
@@ -2232,7 +2232,7 @@ pub const InitialBlockchainDownload = struct {
             .start_height = start_height,
             .block_count = count,
             .allocator = allocator,
-            .streamed_blocks = std.ArrayList(DownloadedBlock).init(allocator),
+            .streamed_blocks = std.ArrayList(DownloadedBlock){ .allocator = allocator },
         };
         
         return io_v2.Future{
@@ -2251,7 +2251,7 @@ pub const InitialBlockchainDownload = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        try self.peer_connections.append(peer);
+        try self.peer_connections.append(self.allocator, peer);
     }
     
     /// Get download progress
@@ -2366,7 +2366,7 @@ fn streamBlocksPoll(context: *anyopaque, io: io_v2.Io) io_v2.Future.PollResult {
             .validated = true,
         };
         
-        ctx.streamed_blocks.append(block) catch break;
+        ctx.streamed_blocks.append(ctx.allocator, block) catch break;
     }
     
     return .{ .ready = ctx.streamed_blocks.items.len };
@@ -2410,9 +2410,9 @@ pub const IncrementalSync = struct {
             .sync_active = std.atomic.Value(bool).init(false),
             .last_synced_height = std.atomic.Value(u64).init(0),
             .sync_checkpoint = std.atomic.Value(u64).init(0),
-            .pending_updates = std.ArrayList(SyncUpdate).init(allocator),
+            .pending_updates = std.ArrayList(SyncUpdate){ .allocator = allocator },
             .processed_updates = std.hash_map.HashMap(u64, ProcessedUpdate, std.hash_map.AutoContext(u64), 80).init(allocator),
-            .sync_peers = std.ArrayList(SyncPeer).init(allocator),
+            .sync_peers = std.ArrayList(SyncPeer){ .allocator = allocator },
             .config = config,
             .mutex = .{},
         };
@@ -2542,10 +2542,10 @@ pub const BridgeValidator = struct {
             .allocator = allocator,
             .io = io,
             .validator_id = validator_id,
-            .bridge_contracts = std.ArrayList(BridgeContract).init(allocator),
-            .pending_validations = std.ArrayList(ValidationRequest).init(allocator),
+            .bridge_contracts = std.ArrayList(BridgeContract){ .allocator = allocator },
+            .pending_validations = std.ArrayList(ValidationRequest){ .allocator = allocator },
             .completed_validations = std.hash_map.HashMap([32]u8, ValidationResult, std.hash_map.AutoContext([32]u8), 80).init(allocator),
-            .supported_chains = std.ArrayList(ChainInfo).init(allocator),
+            .supported_chains = std.ArrayList(ChainInfo){ .allocator = allocator },
             .chain_connections = std.hash_map.HashMap(u32, ChainConnection, std.hash_map.AutoContext(u32), 80).init(allocator),
             .config = config,
             .mutex = .{},
@@ -2592,7 +2592,7 @@ pub const BridgeValidator = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        try self.supported_chains.append(chain);
+        try self.supported_chains.append(self.allocator, chain);
         
         const connection = ChainConnection{
             .chain_id = chain.chain_id,
@@ -2690,9 +2690,9 @@ pub const CrossChainAssetValidator = struct {
         return Self{
             .allocator = allocator,
             .io = io,
-            .pending_transfers = std.ArrayList(PendingTransfer).init(allocator),
+            .pending_transfers = std.ArrayList(PendingTransfer){ .allocator = allocator },
             .completed_transfers = std.hash_map.HashMap([32]u8, CompletedTransfer, std.hash_map.AutoContext([32]u8), 80).init(allocator),
-            .validators = std.ArrayList(ValidatorInfo).init(allocator),
+            .validators = std.ArrayList(ValidatorInfo){ .allocator = allocator },
             .consensus_threshold = config.consensus_threshold,
             .config = config,
             .mutex = .{},
@@ -2793,11 +2793,11 @@ pub const ContractDeploymentPipeline = struct {
         return Self{
             .allocator = allocator,
             .io = io,
-            .pending_deployments = std.ArrayList(PendingDeployment).init(allocator),
+            .pending_deployments = std.ArrayList(PendingDeployment){ .allocator = allocator },
             .completed_deployments = std.hash_map.HashMap([32]u8, DeployedContract, std.hash_map.AutoContext([32]u8), 80).init(allocator),
-            .compilation_queue = std.ArrayList(CompilationTask).init(allocator),
-            .validation_queue = std.ArrayList(ValidationTask).init(allocator),
-            .deployment_queue = std.ArrayList(DeploymentTask).init(allocator),
+            .compilation_queue = std.ArrayList(CompilationTask){ .allocator = allocator },
+            .validation_queue = std.ArrayList(ValidationTask){ .allocator = allocator },
+            .deployment_queue = std.ArrayList(DeploymentTask){ .allocator = allocator },
             .config = config,
             .mutex = .{},
         };
@@ -2928,10 +2928,10 @@ pub const AsyncBytecodeExecutor = struct {
         var executor = Self{
             .allocator = allocator,
             .io = io,
-            .execution_contexts = std.ArrayList(ExecutionContext).init(allocator),
+            .execution_contexts = std.ArrayList(ExecutionContext){ .allocator = allocator },
             .completed_executions = std.hash_map.HashMap([32]u8, ExecutionResult, std.hash_map.AutoContext([32]u8), 80).init(allocator),
-            .vm_pool = std.ArrayList(VirtualMachine).init(allocator),
-            .available_vms = std.ArrayList(usize).init(allocator),
+            .vm_pool = std.ArrayList(VirtualMachine){ .allocator = allocator },
+            .available_vms = std.ArrayList(usize){ .allocator = allocator },
             .config = config,
             .mutex = .{},
         };
@@ -2943,11 +2943,11 @@ pub const AsyncBytecodeExecutor = struct {
                 .state = .idle,
                 .gas_limit = config.default_gas_limit,
                 .gas_used = 0,
-                .stack = std.ArrayList(u256).init(allocator),
-                .memory = std.ArrayList(u8).init(allocator),
+                .stack = std.ArrayList(u256){ .allocator = allocator },
+                .memory = std.ArrayList(u8){ .allocator = allocator },
             };
-            try executor.vm_pool.append(vm);
-            try executor.available_vms.append(i);
+            try executor.vm_pool.append(ctx.allocator, vm);
+            try executor.available_vms.append(ctx.allocator, i);
         }
         
         return executor;

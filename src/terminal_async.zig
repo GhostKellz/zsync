@@ -42,16 +42,16 @@ pub const AsyncPTY = struct {
             .allocator = allocator,
             .pty_fd = pty_fd,
             .cancel_token = cancel_token,
-            .input_buffer = std.ArrayList(u8).init(allocator),
-            .output_buffer = std.ArrayList(u8).init(allocator),
+            .input_buffer = std.ArrayList(u8){ .allocator = allocator },
+            .output_buffer = std.ArrayList(u8){ .allocator = allocator },
             .stats = PTYStats.init(),
         };
     }
     
     pub fn deinit(self: *Self) void {
         self.cancel_token.cancel();
-        self.input_buffer.deinit();
-        self.output_buffer.deinit();
+        self.input_buffer.deinit(self.allocator);
+        self.output_buffer.deinit(self.allocator);
         self.allocator.destroy(self.cancel_token);
     }
     
@@ -376,16 +376,16 @@ const DirtyRegionTracker = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .regions = std.ArrayList(DirtyRegion).init(allocator),
+            .regions = std.ArrayList(DirtyRegion){ .allocator = allocator },
         };
     }
     
     pub fn deinit(self: *Self) void {
-        self.regions.deinit();
+        self.regions.deinit(self.allocator);
     }
     
     pub fn addDirtyRegion(self: *Self, region: DirtyRegion) !void {
-        try self.regions.append(region);
+        try self.regions.append(self.allocator, region);
     }
     
     pub fn getRegions(self: *const Self) []const DirtyRegion {

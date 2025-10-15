@@ -451,7 +451,7 @@ pub fn TypedFuture(comptime T: type) type {
         
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .wakers = std.ArrayList(Waker).init(allocator),
+                .wakers = std.ArrayList(Waker){ .allocator = allocator },
                 .allocator = allocator,
             };
         }
@@ -521,7 +521,7 @@ pub fn TypedFuture(comptime T: type) type {
         
         /// Add a waker to be notified when the future completes
         pub fn addWaker(self: *Self, waker: Waker) !void {
-            try self.wakers.append(waker);
+            try self.wakers.append(self.allocator, waker);
         }
         
         /// Complete the future with a success value

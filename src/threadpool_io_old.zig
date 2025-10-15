@@ -249,7 +249,7 @@ const TaskQueue = struct {
     
     fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .tasks = std.ArrayList(Task).init(allocator),
+            .tasks = std.ArrayList(Task){ .allocator = allocator },
             .mutex = std.Thread.Mutex{},
             .condition = std.Thread.Condition{},
             .allocator = allocator,
@@ -264,7 +264,7 @@ const TaskQueue = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         
-        try self.tasks.append(task);
+        try self.tasks.append(self.allocator, task);
         self.condition.signal();
     }
     
@@ -548,7 +548,7 @@ const TaskQueue = union(QueueType) {
                 .lock_free = try lockfree.MPMCQueue(TaskRef).init(allocator, std.math.ceilPowerOfTwo(u32, max_size) catch max_size),
             },
             .work_stealing => blk: {
-                var local_deques = std.ArrayList(lockfree.WorkStealingDeque(TaskRef)).init(allocator);
+                var local_deques = std.ArrayList(lockfree.WorkStealingDeque(TaskRef)){ .allocator = allocator };
                 try local_deques.ensureTotalCapacity(num_threads);
                 for (0..num_threads) |_| {
                     try local_deques.append(try lockfree.WorkStealingDeque(TaskRef).init(allocator));
@@ -703,7 +703,7 @@ pub const ThreadPoolIo = struct {
         var self = Self{
             .allocator = allocator,
             .config = config,
-            .threads = std.ArrayList(WorkerThread).init(allocator),
+            .threads = std.ArrayList(WorkerThread){ .allocator = allocator },
             .task_queue = try TaskQueue.init(allocator, config.queue_type, config.max_queue_size, config.max_threads),
             .blocking_io_impl = blocking_io.BlockingIo.init(allocator),
         };
@@ -714,7 +714,7 @@ pub const ThreadPoolIo = struct {
             const worker = WorkerThread{
                 .thread = try std.Thread.spawn(.{}, workerThread, .{ &self, i }),
             };
-            try self.threads.append(worker);
+            try self.threads.append(self.allocator, worker);
         }
         self.active_threads.store(@intCast(config.num_threads), .release);
 
@@ -799,7 +799,7 @@ pub const ThreadPoolIo = struct {
         const worker = WorkerThread{
             .thread = try std.Thread.spawn(.{}, workerThread, .{ self, thread_id }),
         };
-        try self.threads.append(worker);
+        try self.threads.append(self.allocator, worker);
         _ = self.active_threads.fetchAdd(1, .acq_rel);
         
         std.debug.print("🔧 Scaled up thread pool to {} threads\n", .{self.active_threads.load(.acquire)});
@@ -936,7 +936,7 @@ pub const ThreadPoolIo = struct {
             .ptr = future_impl,
             .vtable = &threadpool_future_vtable,
             .state = std.atomic.Value(Future.State).init(.pending),
-            .wakers = std.ArrayList(Future.Waker).init(self.allocator),
+            .wakers = std.ArrayList(Future.Waker){ .allocator = self.allocator },
         };
     }
 

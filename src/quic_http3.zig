@@ -201,8 +201,8 @@ pub const QuicStream = struct {
             .id = id,
             .stream_type = stream_type,
             .connection = connection,
-            .send_buffer = std.ArrayList(u8).init(allocator),
-            .recv_buffer = std.ArrayList(u8).init(allocator),
+            .send_buffer = std.ArrayList(u8){ .allocator = allocator },
+            .recv_buffer = std.ArrayList(u8){ .allocator = allocator },
             .closed = false,
             .allocator = allocator,
         };
@@ -261,11 +261,11 @@ pub const QuicStream = struct {
         _ = io;
         
         // Create STREAM frame
-        var frame = std.ArrayList(u8).init(self.allocator);
+        var frame = std.ArrayList(u8){ .allocator = self.allocator };
         defer frame.deinit();
         
-        try frame.append(0x08); // STREAM frame type
-        try frame.append(@intCast(self.id)); // Stream ID (simplified)
+        try frame.append(allocator, 0x08); // STREAM frame type
+        try frame.append(allocator, @intCast(self.id)); // Stream ID (simplified)
         try frame.appendSlice(data);
         
         return try self.connection.socket.write(frame.items);
@@ -325,7 +325,7 @@ pub const Http3Response = struct {
         return Self{
             .status = 200,
             .headers = std.StringHashMap([]const u8).init(allocator),
-            .body = std.ArrayList(u8).init(allocator),
+            .body = std.ArrayList(u8){ .allocator = allocator },
             .allocator = allocator,
         };
     }
@@ -384,10 +384,10 @@ pub const Http3Client = struct {
     
     fn sendRequest(self: *Self, io: *io_v2.Io, stream: *QuicStream, req: Http3Request) !void {
         // Create HEADERS frame
-        var headers_frame = std.ArrayList(u8).init(self.allocator);
+        var headers_frame = std.ArrayList(u8){ .allocator = self.allocator };
         defer headers_frame.deinit();
         
-        try headers_frame.append(0x01); // HEADERS frame type
+        try headers_frame.append(allocator, 0x01); // HEADERS frame type
         
         // Add pseudo-headers
         const method_header = try std.fmt.allocPrint(self.allocator, ":method {s}\r\n", .{req.method});
@@ -410,10 +410,10 @@ pub const Http3Client = struct {
         
         // Send body if present
         if (req.body) |body| {
-            var data_frame = std.ArrayList(u8).init(self.allocator);
+            var data_frame = std.ArrayList(u8){ .allocator = self.allocator };
             defer data_frame.deinit();
             
-            try data_frame.append(0x00); // DATA frame type
+            try data_frame.append(allocator, 0x00); // DATA frame type
             try data_frame.appendSlice(body);
             
             _ = try stream.write(io, data_frame.items);

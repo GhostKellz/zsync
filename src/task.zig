@@ -110,7 +110,7 @@ pub const TaskQueue = struct {
         return Self{
             .allocator = allocator,
             .tasks = std.HashMap(u32, Task, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(allocator),
-            .ready_queue = std.ArrayList(u32).init(allocator),
+            .ready_queue = std.ArrayList(u32){ .allocator = allocator },
             .next_task_id = std.atomic.Value(u32).init(1),
             .max_tasks = max_tasks,
             .mutex = std.Thread.Mutex{},
@@ -121,9 +121,9 @@ pub const TaskQueue = struct {
     pub fn deinit(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         self.tasks.deinit();
-        self.ready_queue.deinit();
+        self.ready_queue.deinit(self.allocator);
     }
 
     /// Generate a new unique task ID
@@ -155,7 +155,7 @@ pub const TaskQueue = struct {
         
         const task = Task.init(task_id, .normal, frame_ptr, allocator);
         try self.tasks.put(task_id, task);
-        try self.ready_queue.append(task_id);
+        try self.ready_queue.append(self.allocator, task_id);
 
         return JoinHandle{
             .task_id = task_id,
@@ -215,7 +215,7 @@ pub const TaskQueue = struct {
         if (self.tasks.getPtr(task_id)) |task| {
             if (task.state == .suspended) {
                 task.state = .ready;
-                self.ready_queue.append(task_id) catch return; // Ignore error for now
+                self.ready_queue.append(self.allocator, task_id) catch return; // Ignore error for now
             }
         }
     }

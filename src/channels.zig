@@ -170,15 +170,16 @@ pub fn UnboundedChannel(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             return Self{
-                .items = std.ArrayList(T).init(allocator),
+                .items = .{},
                 .mutex = .{},
                 .not_empty = .{},
                 .closed = std.atomic.Value(bool).init(false),
+                .allocator = allocator,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            self.items.deinit();
+            self.items.deinit(self.allocator);
         }
 
         /// Send an item to the channel (never blocks)
@@ -190,7 +191,7 @@ pub fn UnboundedChannel(comptime T: type) type {
                 return error.ChannelClosed;
             }
 
-            try self.items.append(item);
+            try self.items.append(self.allocator, item);
             self.not_empty.signal();
         }
 

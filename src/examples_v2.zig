@@ -44,7 +44,7 @@ fn handleHttpClient(io: Zsync.Io, client: Zsync.TcpStream) !void {
 pub fn fileProcessingPipeline(io: Zsync.Io, input_files: []const []const u8) !void {
     std.debug.print("📁 Processing {} files concurrently...\n", .{input_files.len});
     
-    var futures = std.ArrayList(Zsync.Future).init(std.heap.page_allocator);
+    var futures = std.ArrayList(Zsync.Future){ .allocator = std.heap.page_allocator };
     defer {
         for (futures.items) |*future| {
             future.cancel(io, .{}) catch {};
@@ -92,7 +92,7 @@ pub fn databaseExample(io: Zsync.Io) !void {
     std.debug.print("🗄️  Database simulation with connection pool...\n", .{});
     
     // Simulate multiple database operations
-    var query_futures = std.ArrayList(Zsync.Future).init(std.heap.page_allocator);
+    var query_futures = std.ArrayList(Zsync.Future){ .allocator = std.heap.page_allocator };
     defer {
         for (query_futures.items) |*future| {
             future.cancel(io, .{}) catch {};
@@ -254,7 +254,7 @@ pub fn realWorldApp(io: Zsync.Io) !void {
     std.debug.print("====================================\n", .{});
     
     // Simulate a web application with multiple concurrent operations
-    var operations = std.ArrayList(Zsync.Future).init(std.heap.page_allocator);
+    var operations = std.ArrayList(Zsync.Future){ .allocator = std.heap.page_allocator };
     defer {
         for (operations.items) |*future| {
             future.cancel(io, .{}) catch {};

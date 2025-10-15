@@ -48,9 +48,9 @@ pub const DnsResponse = struct {
     
     pub fn init(allocator: Allocator) DnsResponse {
         return DnsResponse{
-            .records = ArrayList(DnsRecord).init(allocator),
-            .authority_records = ArrayList(DnsRecord).init(allocator),
-            .additional_records = ArrayList(DnsRecord).init(allocator),
+            .records = ArrayList(DnsRecord){ .allocator = allocator },
+            .authority_records = ArrayList(DnsRecord){ .allocator = allocator },
+            .additional_records = ArrayList(DnsRecord){ .allocator = allocator },
             .rcode = 0,
         };
     }
@@ -59,17 +59,17 @@ pub const DnsResponse = struct {
         for (self.records.items) |*record| {
             record.deinit(self.records.allocator);
         }
-        self.records.deinit();
-        
+        self.records.deinit(self.records.allocator);
+
         for (self.authority_records.items) |*record| {
             record.deinit(self.authority_records.allocator);
         }
-        self.authority_records.deinit();
-        
+        self.authority_records.deinit(self.authority_records.allocator);
+
         for (self.additional_records.items) |*record| {
             record.deinit(self.additional_records.allocator);
         }
-        self.additional_records.deinit();
+        self.additional_records.deinit(self.additional_records.allocator);
     }
 };
 
@@ -101,7 +101,7 @@ pub const AsyncDnsResolver = struct {
             .allocator = allocator,
             .cache = CacheMap.init(allocator),
             .cache_mutex = std.Thread.Mutex{},
-            .servers = ArrayList(net.Address).init(allocator),
+            .servers = ArrayList(net.Address){ .allocator = allocator },
             .timeout_ms = 5000,
             .max_cache_entries = 10000,
             .use_ipv6 = true,
@@ -111,18 +111,18 @@ pub const AsyncDnsResolver = struct {
     pub fn deinit(self: *Self) void {
         self.cache_mutex.lock();
         defer self.cache_mutex.unlock();
-        
+
         var iterator = self.cache.iterator();
         while (iterator.next()) |entry| {
             entry.value_ptr.response.deinit();
             self.allocator.free(entry.key_ptr.*);
         }
         self.cache.deinit();
-        self.servers.deinit();
+        self.servers.deinit(self.allocator);
     }
     
     pub fn addServer(self: *Self, address: net.Address) !void {
-        try self.servers.append(address);
+        try self.servers.append(self.allocator, address);
     }
     
     pub fn addDefaultServers(self: *Self) !void {
@@ -174,7 +174,7 @@ pub const AsyncDnsResolver = struct {
                         .ttl = record.ttl,
                         .data = self.allocator.dupe(u8, record.data) catch return null,
                     };
-                    cloned_response.records.append(cloned_record) catch return null;
+                    cloned_response.records.append(self.allocator, cloned_record) catch return null;
                 }
                 
                 cloned_response.rcode = entry.response.rcode;
@@ -216,7 +216,7 @@ pub const AsyncDnsResolver = struct {
                 .ttl = record.ttl,
                 .data = try self.allocator.dupe(u8, record.data),
             };
-            try cached_response.records.append(cloned_record);
+            try cached_response.records.append(self.allocator, cloned_record);
         }
         
         cached_response.rcode = response.rcode;
@@ -349,19 +349,19 @@ pub const AsyncDnsResolver = struct {
         // Parse answer records
         for (0..answer_count) |_| {
             const record = try self.parseDnsRecord(buffer, &offset);
-            try response.records.append(record);
+            try response.records.append(self.allocator, record);
         }
-        
+
         // Parse authority records
         for (0..authority_count) |_| {
             const record = try self.parseDnsRecord(buffer, &offset);
-            try response.authority_records.append(record);
+            try response.authority_records.append(self.allocator, record);
         }
-        
+
         // Parse additional records
         for (0..additional_count) |_| {
             const record = try self.parseDnsRecord(buffer, &offset);
-            try response.additional_records.append(record);
+            try response.additional_records.append(self.allocator, record);
         }
         
         return response;
@@ -419,8 +419,8 @@ pub const AsyncDnsResolver = struct {
     }
     
     fn parseDnsName(self: *Self, buffer: []const u8, offset: *usize) ![]u8 {
-        var name_parts = ArrayList([]const u8).init(self.allocator);
-        defer name_parts.deinit();
+        var name_parts = ArrayList([]const u8){ .allocator = self.allocator };
+        defer name_parts.deinit(self.allocator);
         
         var current_offset = offset.*;
         var jumped = false;
@@ -443,7 +443,7 @@ pub const AsyncDnsResolver = struct {
                 if (current_offset + len > buffer.len) return DnsError.InvalidResponse;
                 
                 const part = buffer[current_offset..current_offset + len];
-                try name_parts.append(part);
+                try name_parts.append(self.allocator, part);
                 current_offset += len;
             }
         }

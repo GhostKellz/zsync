@@ -149,12 +149,12 @@ pub const BenchmarkSuite = struct {
         return Self{
             .allocator = allocator,
             .memory_tracker = MemoryTracker.init(allocator),
-            .results = std.ArrayList(BenchmarkResult).init(allocator),
+            .results = std.ArrayList(BenchmarkResult){ .allocator = allocator },
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.results.deinit();
+        self.results.deinit(self.allocator);
     }
 
     /// Run all benchmarks
@@ -194,7 +194,7 @@ pub const BenchmarkSuite = struct {
         }
         
         const result = self.calculateResult("Task Spawning", times, self.memory_tracker.getPeakUsage());
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     /// Benchmark channel throughput
@@ -226,7 +226,7 @@ pub const BenchmarkSuite = struct {
         }
         
         const result = self.calculateResult("Channel Throughput", times, self.memory_tracker.getPeakUsage());
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     /// Benchmark timer accuracy
@@ -264,7 +264,7 @@ pub const BenchmarkSuite = struct {
         }
         
         const result = self.calculateResult("Timer Accuracy", times, self.memory_tracker.getPeakUsage());
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     /// Benchmark scheduler performance
@@ -298,7 +298,7 @@ pub const BenchmarkSuite = struct {
         }
         
         const result = self.calculateResult("Scheduler Performance", times, self.memory_tracker.getPeakUsage());
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     /// Benchmark memory usage
@@ -325,7 +325,7 @@ pub const BenchmarkSuite = struct {
         }
         
         const result = self.calculateResult("Memory Usage", times, self.memory_tracker.getPeakUsage());
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     /// Benchmark multi-thread performance
@@ -358,7 +358,7 @@ pub const BenchmarkSuite = struct {
         }
         
         const result = self.calculateResult("Multi-thread Performance", times, self.memory_tracker.getPeakUsage());
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     /// Calculate benchmark result statistics
@@ -420,11 +420,11 @@ fn simpleTask() void {
 
 /// Memory-intensive task for benchmarking
 fn memoryIntensiveTask() void {
-    var list = std.ArrayList(u32).init(std.heap.page_allocator);
-    defer list.deinit();
+    var list = std.ArrayList(u32){ .allocator = std.heap.page_allocator };
+    defer list.deinit(std.heap.page_allocator);
     
     for (0..1000) |i| {
-        list.append(@intCast(i)) catch break;
+        list.append(std.heap.page_allocator, @intCast(i)) catch break;
     }
 }
 

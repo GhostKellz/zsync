@@ -306,7 +306,7 @@ pub const LspServer = struct {
 
     /// Write message to stdout
     fn writeMessage(self: *Self, message: std.json.Value) !void {
-        var string = std.ArrayList(u8).init(self.allocator);
+        var string = std.ArrayList(u8){ .allocator = self.allocator };
         defer string.deinit();
 
         try std.json.stringify(message, .{}, string.writer());

@@ -24,7 +24,7 @@ pub const MicrotaskQueue = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .tasks = std.ArrayList(Microtask).init(allocator),
+            .tasks = std.ArrayList(Microtask){ .allocator = allocator },
             .flushing = std.atomic.Value(bool).init(false),
             .mutex = .{},
         };
@@ -39,7 +39,7 @@ pub const MicrotaskQueue = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        try self.tasks.append(Microtask{
+        try self.tasks.append(self.allocator, Microtask{
             .callback = callback,
             .context = context,
         });

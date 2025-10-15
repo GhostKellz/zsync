@@ -98,7 +98,7 @@ pub const CancelToken = struct {
     
     pub fn addChild(self: *CancelToken, child: *CancelToken) !void {
         child.parent = self;
-        try self.children.append(child);
+        try self.children.append(self.allocator, child);
     }
 };
 

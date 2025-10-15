@@ -165,15 +165,15 @@ pub const AdvancedTcpStream = struct {
     pub fn init(stream: io_interface.TcpStream, allocator: std.mem.Allocator) Self {
         return Self{
             .stream = stream,
-            .read_buffer = std.ArrayList(u8).init(allocator),
-            .write_buffer = std.ArrayList(u8).init(allocator),
+            .read_buffer = std.ArrayList(u8){ .allocator = allocator },
+            .write_buffer = std.ArrayList(u8){ .allocator = allocator },
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.read_buffer.deinit();
-        self.write_buffer.deinit();
+        self.read_buffer.deinit(self.allocator);
+        self.write_buffer.deinit(self.allocator);
     }
 
     /// Get a writer interface for this stream
@@ -330,7 +330,7 @@ pub const ConnectionPool = struct {
     
     pub fn init(allocator: std.mem.Allocator, max_connections: u32) Self {
         return Self{
-            .connections = std.ArrayList(Connection).init(allocator),
+            .connections = std.ArrayList(Connection){ .allocator = allocator },
             .available = std.fifo.LinearFifo(usize, .Dynamic).init(allocator),
             .allocator = allocator,
             .max_connections = max_connections,
@@ -338,7 +338,7 @@ pub const ConnectionPool = struct {
     }
     
     pub fn deinit(self: *Self) void {
-        self.connections.deinit();
+        self.connections.deinit(self.allocator);
         self.available.deinit();
     }
     
@@ -358,7 +358,7 @@ pub const ConnectionPool = struct {
                 .created_at = std.time.milliTimestamp(),
             };
             
-            try self.connections.append(connection);
+            try self.connections.append(self.allocator, connection);
             return stream;
         }
         

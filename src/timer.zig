@@ -46,7 +46,7 @@ pub const TimerWheel = struct {
         return Self{
             .allocator = allocator,
             .timers = std.HashMap(u64, TimerEntry, std.hash_map.AutoContext(u64), std.hash_map.default_max_load_percentage).init(allocator),
-            .sorted_timers = std.ArrayList(u64).init(allocator),
+            .sorted_timers = std.ArrayList(u64){ .allocator = allocator },
             .next_timer_id = std.atomic.Value(u64).init(1),
             .start_time = getCurrentTimeMs(),
             .mutex = std.Thread.Mutex{},
