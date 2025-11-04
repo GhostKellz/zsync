@@ -277,13 +277,13 @@ pub const Runtime = struct {
             logInfo("🚀 Zsync v0.4.0 Runtime starting with {s} execution model", .{model_name});
         }
         
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch unreachable;
         
         // Execute main task with colorblind async
         const io = self.getIo();
         try self.executeTask(task_fn, args, io);
         
-        const execution_time = std.time.nanoTimestamp() - start_time;
+        const execution_time = std.time.Instant.now() catch unreachable - start_time;
         
         if (self.config.enable_debugging) {
             logInfo("✅ Runtime completed in {d}ms", .{@divTrunc(execution_time, std.time.ns_per_ms)});

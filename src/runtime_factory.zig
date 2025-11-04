@@ -216,16 +216,16 @@ pub const AsyncRuntime = union(enum) {
                 if (builtin.os.tag == .linux) {
                     try runtime.poll(timeout_ms);
                 } else {
-                    std.Thread.sleep(timeout_ms * 1000);
+                    std.posix.nanosleep(0, timeout_ms * 1000);
                 }
             },
             .blocking => {
                 // Blocking I/O doesn't need polling
-                std.Thread.sleep(timeout_ms * 1000); // Convert to nanoseconds
+                std.posix.nanosleep(0, timeout_ms * 1000); // Convert to nanoseconds
             },
             inline else => {
                 // Fallback: just sleep
-                std.Thread.sleep(timeout_ms * 1000);
+                std.posix.nanosleep(0, timeout_ms * 1000);
             },
         }
     }

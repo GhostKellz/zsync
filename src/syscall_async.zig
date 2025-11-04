@@ -212,7 +212,7 @@ pub const AsyncSyscallExecutor = struct {
     }
     
     fn executeBatch(self: *Self, batch: *SyscallBatch) !void {
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch unreachable;
         
         for (batch.requests.items) |*request| {
             const result = try self.executeSyscall(request);
@@ -233,13 +233,13 @@ pub const AsyncSyscallExecutor = struct {
             self.stats.updateStats(result);
         }
         
-        const batch_duration = std.time.nanoTimestamp() - start_time;
+        const batch_duration = std.time.Instant.now() catch unreachable - start_time;
         self.stats.recordBatchExecution(batch.requests.items.len, batch_duration);
     }
     
     fn executeSyscall(self: *Self, request: *SyscallRequest) !SyscallResult {
         _ = self;
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch unreachable;
         
         const result = switch (builtin.os.tag) {
             .linux => blk: {
@@ -257,7 +257,7 @@ pub const AsyncSyscallExecutor = struct {
             else => return SyscallError.InvalidSyscall,
         };
         
-        const duration = std.time.nanoTimestamp() - start_time;
+        const duration = std.time.Instant.now() catch unreachable - start_time;
         const errno = if (result < 0) @as(i32, @intCast(-result)) else 0;
         
         return SyscallResult{

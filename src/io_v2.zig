@@ -544,17 +544,17 @@ pub const Future = struct {
         
         pub fn init(timeout_ms: u64, soft: bool) Timeout {
             return Timeout{
-                .deadline_ns = @intCast(std.time.nanoTimestamp() + @as(i128, timeout_ms * std.time.ns_per_ms)),
+                .deadline_ns = @intCast(std.time.Instant.now() catch unreachable + @as(i128, timeout_ms * std.time.ns_per_ms)),
                 .soft_timeout = soft,
             };
         }
         
         pub fn isExpired(self: *const Timeout) bool {
-            return std.time.nanoTimestamp() > self.deadline_ns;
+            return std.time.Instant.now() catch unreachable > self.deadline_ns;
         }
         
         pub fn timeUntilExpiry(self: *const Timeout) i64 {
-            return @as(i64, @intCast(self.deadline_ns)) - std.time.nanoTimestamp();
+            return @as(i64, @intCast(self.deadline_ns)) - std.time.Instant.now() catch unreachable;
         }
     };
     
@@ -760,7 +760,7 @@ pub const Future = struct {
         
         // Graceful cancellation with timeout
         if (options.grace_period_ms) |grace_ms| {
-            const grace_deadline = std.time.nanoTimestamp() + (grace_ms * std.time.ns_per_ms);
+            const grace_deadline = std.time.Instant.now() catch unreachable + (grace_ms * std.time.ns_per_ms);
             
             // Try graceful cancellation first
             self.vtable.cancel_fn(self.ptr, io, options) catch {
@@ -768,7 +768,7 @@ pub const Future = struct {
             };
             
             // Wait for graceful completion up to the deadline
-            while (std.time.nanoTimestamp() < grace_deadline) {
+            while (std.time.Instant.now() catch unreachable < grace_deadline) {
                 if (self.state.load(.acquire) == .completed) {
                     return; // Gracefully completed
                 }

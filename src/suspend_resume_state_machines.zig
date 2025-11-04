@@ -229,8 +229,8 @@ pub const StateMachineManager = struct {
                 .id = id,
                 .suspend_reason = reason,
                 .resume_data = owned_data,
-                .created_at = std.time.nanoTimestamp(),
-                .timeout_at = if (timeout_ms) |ms| std.time.nanoTimestamp() + (ms * std.time.ns_per_ms) else null,
+                .created_at = std.time.Instant.now() catch unreachable,
+                .timeout_at = if (timeout_ms) |ms| std.time.Instant.now() catch unreachable + (ms * std.time.ns_per_ms) else null,
                 .waker = null,
             };
             
@@ -262,7 +262,7 @@ pub const StateMachineManager = struct {
         /// Check for expired suspend points
         pub fn getExpiredSuspendPoints(self: *const @This(), allocator: std.mem.Allocator) ![]SuspendPointId {
             var expired = std.ArrayList(SuspendPointId){ .allocator = allocator };
-            const now = std.time.nanoTimestamp();
+            const now = std.time.Instant.now() catch unreachable;
             
             var iterator = self.active_suspend_points.iterator();
             while (iterator.next()) |entry| {
@@ -341,7 +341,7 @@ pub const StateMachineManager = struct {
                 .coroutine_id = coroutine_id,
                 .suspend_point_id = suspend_point_id,
                 .priority = priority,
-                .scheduled_at = std.time.nanoTimestamp(),
+                .scheduled_at = std.time.Instant.now() catch unreachable,
             };
             
             try self.ready_queue.add(item);

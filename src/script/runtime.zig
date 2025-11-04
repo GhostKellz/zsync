@@ -268,7 +268,7 @@ pub const ScriptTimer = struct {
     /// Start timer
     pub fn start(self: *Self) !void {
         while (self.active.load(.acquire)) {
-            std.Thread.sleep(self.interval_ms * std.time.ns_per_ms);
+            std.posix.nanosleep(0, self.interval_ms * std.time.ns_per_ms);
 
             try self.callback();
 

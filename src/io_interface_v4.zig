@@ -167,7 +167,7 @@ pub const Future = struct {
                 .pending => {
                     // Yield based on execution mode
                     switch (io_mode) {
-                        .blocking => std.Thread.sleep(100_000), // 100μs cooperative yield
+                        .blocking => std.posix.nanosleep(0, 100_000), // 100μs cooperative yield
                         .evented => yield(), // Platform-specific yield
                         .auto => autoYield(),
                     }
@@ -508,7 +508,7 @@ pub const Combinators = struct {
                 const self: *@This() = @ptrCast(@alignCast(context));
                 
                 // Check timeout first
-                if (std.time.nanoTimestamp() > self.deadline_ns) {
+                if (std.time.Instant.now() catch unreachable > self.deadline_ns) {
                     self.future.cancel();
                     return .{ .err = IoError.TimedOut };
                 }
@@ -531,7 +531,7 @@ pub const Combinators = struct {
         const context = try allocator.create(TimeoutContext);
         context.* = TimeoutContext{
             .future = future,
-            .deadline_ns = @intCast(std.time.nanoTimestamp() + @as(i128, timeout_ms * std.time.ns_per_ms)),
+            .deadline_ns = @intCast(std.time.Instant.now() catch unreachable + @as(i128, timeout_ms * std.time.ns_per_ms)),
             .allocator = allocator,
         };
         

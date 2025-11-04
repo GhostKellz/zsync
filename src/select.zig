@@ -73,7 +73,7 @@ pub fn selectTimeout(
         }
 
         // Small sleep to avoid busy-waiting
-        std.Thread.sleep(1 * std.time.ns_per_ms);
+        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
     }
 
     // Timeout - cancel all futures

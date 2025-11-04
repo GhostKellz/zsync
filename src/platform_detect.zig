@@ -108,7 +108,7 @@ fn parseOsRelease() ?LinuxDistro {
     defer file.close();
     
     var buf: [4096]u8 = undefined;
-    const bytes_read = file.readAll(&buf) catch return null;
+    const bytes_read = file.preadAll(&buf, 0) catch return null;
     const content = buf[0..bytes_read];
     
     var lines = std.mem.tokenizeScalar(u8, content, '\n');
@@ -198,7 +198,7 @@ fn getTotalMemory() u64 {
     defer file.close();
     
     var buf: [4096]u8 = undefined;
-    const bytes_read = file.readAll(&buf) catch return 0;
+    const bytes_read = file.preadAll(&buf, 0) catch return 0;
     const content = buf[0..bytes_read];
     
     var lines = std.mem.tokenizeScalar(u8, content, '\n');

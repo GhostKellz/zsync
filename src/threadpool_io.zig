@@ -181,7 +181,7 @@ const Worker = struct {
                 }
             } else {
                 // No tasks available, yield briefly
-                std.Thread.sleep(1000_000); // 1ms
+                std.posix.nanosleep(0, 1000_000); // 1ms
             }
         }
     }

@@ -151,7 +151,7 @@ pub const AsyncContext = struct {
     pub fn sleep(self: *Self, ms: u64) !void {
         _ = self;
         // In WASM, this would integrate with setTimeout
-        std.Thread.sleep(ms * std.time.ns_per_ms);
+        std.posix.nanosleep(0, ms * std.time.ns_per_ms);
     }
 };
 

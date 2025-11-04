@@ -313,7 +313,7 @@ pub const DoqServer = struct {
         // TODO: Parse queries and call resolver
 
         while (self.running.load(.acquire)) {
-            std.Thread.sleep(100 * std.time.ns_per_ms);
+            std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
         }
     }
 

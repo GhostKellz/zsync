@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - The Tokio of Zig
+//! Zsync v0.7.0 - The Tokio of Zig
 //! Colorblind Async Runtime with True Function Color Elimination
 //! Following Zig's latest async paradigm for maximum performance and ergonomics
 
@@ -18,6 +18,18 @@ pub const executor_mod = @import("executor.zig");
 pub const sync_mod = @import("sync.zig");
 pub const sleep_mod = @import("sleep.zig");
 pub const select_mod = @import("select.zig");
+
+// v0.7.0 Structured Concurrency
+pub const nursery_mod = @import("nursery.zig");
+
+// v0.7.0 Buffer Pool and Zero-Copy
+pub const buffer_pool_mod = @import("buffer_pool.zig");
+
+// v0.7.0 Async Streams
+pub const streams_mod = @import("streams.zig");
+
+// v0.7.0 Async Filesystem
+pub const async_fs_mod = @import("async_fs.zig");
 
 // v0.6.0 Diagnostics and HTTP
 pub const diagnostics = @import("diagnostics.zig");
@@ -112,6 +124,28 @@ pub const Barrier = sync_mod.Barrier;
 pub const Latch = sync_mod.Latch;
 pub const Channel = channels.Channel;
 pub const UnboundedChannel = channels.UnboundedChannel;
+
+// v0.7.0 Structured Concurrency
+pub const Nursery = nursery_mod.Nursery;
+pub const withNursery = nursery_mod.withNursery;
+
+// v0.7.0 Buffer Pool
+pub const BufferPool = buffer_pool_mod.BufferPool;
+pub const BufferPoolConfig = buffer_pool_mod.BufferPoolConfig;
+pub const PooledBuffer = buffer_pool_mod.PooledBuffer;
+pub const sendfile = buffer_pool_mod.sendfile;
+pub const splice = buffer_pool_mod.splice;
+pub const copyFileZeroCopy = buffer_pool_mod.copyFileZeroCopy;
+
+// v0.7.0 Streams
+pub const Stream = streams_mod.Stream;
+pub const fromSlice = streams_mod.fromSlice;
+pub const range = streams_mod.range;
+
+// v0.7.0 Async Filesystem
+pub const AsyncFile = async_fs_mod.AsyncFile;
+pub const AsyncDir = async_fs_mod.AsyncDir;
+pub const AsyncFs = async_fs_mod.AsyncFs;
 
 // Task spawning
 pub const spawnTask = spawn_mod.spawn;
@@ -609,9 +643,9 @@ pub const Sender = channel.Sender;
 pub const Receiver = channel.Receiver;
 
 // Version information
-pub const VERSION = "0.6.0";
+pub const VERSION = "0.7.0";
 pub const VERSION_MAJOR = 0;
-pub const VERSION_MINOR = 6;
+pub const VERSION_MINOR = 7;
 pub const VERSION_PATCH = 0;
 
 /// Print Zsync version and capabilities
@@ -737,9 +771,9 @@ test "Version information" {
     const testing = std.testing;
 
     try testing.expect(VERSION_MAJOR == 0);
-    try testing.expect(VERSION_MINOR == 6);
+    try testing.expect(VERSION_MINOR == 7);
     try testing.expect(VERSION_PATCH == 0);
-    try testing.expect(std.mem.eql(u8, VERSION, "0.6.0"));
+    try testing.expect(std.mem.eql(u8, VERSION, "0.7.0"));
 }
 
 /// Legacy compatibility function

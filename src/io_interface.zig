@@ -173,7 +173,7 @@ pub const Future = struct {
                 .pending => {
                     // Yield based on execution mode
                     switch (io_mode) {
-                        .blocking => std.Thread.sleep(100_000), // 100μs cooperative yield
+                        .blocking => std.posix.nanosleep(0, 100_000), // 100μs cooperative yield
                         .evented => yield(), // Platform-specific yield
                         .auto => autoYield(),
                     }
@@ -267,10 +267,10 @@ pub const Io = struct {
         
         // Network operations
         accept: *const fn (context: *anyopaque, listener_fd: std.posix.fd_t) IoError!Future,
-        connect: if (builtin.target.cpu.arch == .wasm32) 
+        connect: if (builtin.target.cpu.arch == .wasm32)
             *const fn (context: *anyopaque, fd: std.posix.fd_t, address: []const u8) IoError!Future
         else
-            *const fn (context: *anyopaque, fd: std.posix.fd_t, address: std.net.Address) IoError!Future,
+            *const fn (context: *anyopaque, fd: std.posix.fd_t, address: *const std.posix.sockaddr) IoError!Future,
         
         // Resource management
         close: *const fn (context: *anyopaque, fd: std.posix.fd_t) IoError!Future,
@@ -509,46 +509,51 @@ pub const Combinators = struct {
     pub fn timeout(allocator: std.mem.Allocator, future: Future, timeout_ms: u64) !Future {
         const TimeoutContext = struct {
             future: Future,
-            deadline_ns: u64,
+            start_time: std.time.Instant,
+            timeout_ns: u64,
             allocator: std.mem.Allocator,
-            
+
             fn poll(context: *anyopaque) Future.PollResult {
                 const self: *@This() = @ptrCast(@alignCast(context));
-                
+
                 // Check timeout first
-                if (std.time.nanoTimestamp() > self.deadline_ns) {
+                const now = std.time.Instant.now() catch unreachable;
+                const elapsed = now.since(self.start_time);
+                if (elapsed >= self.timeout_ns) {
                     self.future.cancel();
                     return .{ .err = IoError.TimedOut };
                 }
-                
+
                 return self.future.poll();
             }
-            
+
             fn cancel(context: *anyopaque) void {
                 const self: *@This() = @ptrCast(@alignCast(context));
                 self.future.cancel();
             }
-            
+
             fn destroy(context: *anyopaque, alloc: std.mem.Allocator) void {
                 const self: *@This() = @ptrCast(@alignCast(context));
                 self.future.destroy(alloc);
                 alloc.destroy(self);
             }
         };
-        
+
         const context = try allocator.create(TimeoutContext);
+        const now = std.time.Instant.now() catch unreachable;
         context.* = TimeoutContext{
             .future = future,
-            .deadline_ns = @intCast(std.time.nanoTimestamp() + @as(i128, timeout_ms * std.time.ns_per_ms)),
+            .start_time = now,
+            .timeout_ns = timeout_ms * std.time.ns_per_ms,
             .allocator = allocator,
         };
-        
+
         const vtable = Future.FutureVTable{
             .poll = TimeoutContext.poll,
             .cancel = TimeoutContext.cancel,
             .destroy = TimeoutContext.destroy,
         };
-        
+
         return Future.init(&vtable, context);
     }
 };
@@ -556,10 +561,10 @@ pub const Combinators = struct {
 // Platform-specific yield implementations
 fn yield() void {
     switch (builtin.os.tag) {
-        .linux => std.Thread.sleep(1000), // Simple yield
-        .windows => std.Thread.sleep(1000), // Windows yield not easily accessible
-        .macos => std.Thread.sleep(1000), // macOS doesn't have direct yield
-        else => std.Thread.sleep(1000),
+        .linux => std.posix.nanosleep(0, 1000), // Simple yield
+        .windows => std.posix.nanosleep(0, 1000), // Windows yield not easily accessible
+        .macos => std.posix.nanosleep(0, 1000), // macOS doesn't have direct yield
+        else => std.posix.nanosleep(0, 1000),
     }
 }
 
@@ -568,7 +573,7 @@ fn autoYield() void {
     if (std.Thread.getCpuCount() catch 1 > 1) {
         yield(); // Multi-core: proper yield
     } else {
-        std.Thread.sleep(10_000); // Single-core: longer sleep
+        std.posix.nanosleep(0, 10_000); // Single-core: longer sleep
     }
 }
 

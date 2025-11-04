@@ -80,7 +80,7 @@ pub const FileWatcher = struct {
         // TODO: Implement with inotify
         // For now, just poll
         while (self.running.load(.acquire)) {
-            std.Thread.sleep(self.debounce_ms * std.time.ns_per_ms);
+            std.posix.nanosleep(0, self.debounce_ms * std.time.ns_per_ms);
             // Poll for changes
         }
     }
@@ -92,7 +92,7 @@ pub const FileWatcher = struct {
         // TODO: Implement with FSEvents
         // For now, just poll
         while (self.running.load(.acquire)) {
-            std.Thread.sleep(self.debounce_ms * std.time.ns_per_ms);
+            std.posix.nanosleep(0, self.debounce_ms * std.time.ns_per_ms);
         }
     }
 
@@ -103,7 +103,7 @@ pub const FileWatcher = struct {
         // TODO: Implement with ReadDirectoryChangesW
         // For now, just poll
         while (self.running.load(.acquire)) {
-            std.Thread.sleep(self.debounce_ms * std.time.ns_per_ms);
+            std.posix.nanosleep(0, self.debounce_ms * std.time.ns_per_ms);
         }
     }
 };
@@ -170,7 +170,7 @@ pub const PollingWatcher = struct {
                 }
             }
 
-            std.Thread.sleep(self.poll_interval_ms * std.time.ns_per_ms);
+            std.posix.nanosleep(0, self.poll_interval_ms * std.time.ns_per_ms);
         }
     }
 

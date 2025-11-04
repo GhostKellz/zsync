@@ -225,7 +225,7 @@ fn benchmarkPerformance(allocator: std.mem.Allocator) !void {
     const BenchmarkTask = struct {
         fn task(io: Zsync.Io) !void {
             const iterations = 10000;
-            const start_time = std.time.nanoTimestamp();
+            const start_time = std.time.Instant.now() catch unreachable;
             
             for (0..iterations) |i| {
                 _ = i;
@@ -234,7 +234,7 @@ fn benchmarkPerformance(allocator: std.mem.Allocator) !void {
                 try future.await();
             }
             
-            const end_time = std.time.nanoTimestamp();
+            const end_time = std.time.Instant.now() catch unreachable;
             const duration_ms = (end_time - start_time) / std.time.ns_per_ms;
             const ops_per_sec = (iterations * 1000) / @max(1, duration_ms);
             

@@ -505,7 +505,7 @@ pub const ZeroCopyNetworkInterface = struct {
                     .data_offset = 0,
                     .data_length = @intCast(data.len),
                     .packet_type = .ethernet,
-                    .timestamp = @intCast(std.time.nanoTimestamp()),
+                    .timestamp = @intCast(std.time.Instant.now() catch unreachable),
                     .metadata = PacketMetadata{},
                 };
                 

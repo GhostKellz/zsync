@@ -169,7 +169,7 @@ pub const Http3Server = struct {
             // TODO: Parse HTTP/3 frames
             // TODO: Call handler
 
-            std.Thread.sleep(100 * std.time.ns_per_ms);
+            std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
         }
     }
 

@@ -122,11 +122,11 @@ pub fn build(b: *std.Build) void {
     const api_test_cmd = b.addRunArtifact(api_test_exe);
     api_test_step.dependOn(&api_test_cmd.step);
 
-    // Performance benchmarks for v0.5.0
+    // Performance benchmarks for v0.7.0
     const bench_exe = b.addExecutable(.{
         .name = "zsync-bench",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/benchmarks_v4.zig"),
+            .root_source_file = b.path("benchmarks/linux_bench.zig"),
             .target = target,
             .optimize = .ReleaseFast,
             .imports = &.{
@@ -135,8 +135,10 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    b.installArtifact(bench_exe);
+
     const bench_cmd = b.addRunArtifact(bench_exe);
-    const bench_step = b.step("bench", "Run v0.5.0 performance benchmarks");
+    const bench_step = b.step("bench", "Run v0.7.0 Linux performance benchmarks");
     bench_step.dependOn(&bench_cmd.step);
 
     // Cross-platform builds for v0.5.0

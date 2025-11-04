@@ -13,18 +13,18 @@ pub fn yieldNow() !void {
 /// Sleep for the specified number of milliseconds
 pub fn sleep(ms: u64) void {
     const ns = ms * std.time.ns_per_ms;
-    std.Thread.sleep(ns);
+    std.posix.nanosleep(0, ns);
 }
 
 /// Sleep for the specified number of microseconds
 pub fn sleepMicros(us: u64) void {
     const ns = us * std.time.ns_per_us;
-    std.Thread.sleep(ns);
+    std.posix.nanosleep(0, ns);
 }
 
 /// Sleep for the specified number of nanoseconds
 pub fn sleepNanos(ns: u64) void {
-    std.Thread.sleep(ns);
+    std.posix.nanosleep(0, ns);
 }
 
 // Tests

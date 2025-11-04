@@ -170,7 +170,7 @@ pub fn UnboundedChannel(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             return Self{
-                .items = .{},
+                .items = std.ArrayList(T){},  // Proper ArrayList initialization
                 .mutex = .{},
                 .not_empty = .{},
                 .closed = std.atomic.Value(bool).init(false),

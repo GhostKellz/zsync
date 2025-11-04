@@ -153,9 +153,9 @@ pub const BenchmarkSuite = struct {
         std.time.sleep(self.config.cooldown_ms * std.time.ns_per_ms);
         
         // Run actual benchmark
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch unreachable;
         const result = try benchmark_fn(self);
-        const end_time = std.time.nanoTimestamp();
+        const end_time = std.time.Instant.now() catch unreachable;
         
         var final_result = result;
         final_result.name = name;
@@ -319,11 +319,11 @@ pub const BenchmarkSuite = struct {
             var blocking_io = Zsync.BlockingIo.init(allocator);
             defer blocking_io.deinit();
             
-            const start_time = std.time.nanoTimestamp();
+            const start_time = std.time.Instant.now() catch unreachable;
             for (0..100) |_| {
                 try Zsync.io_v2.saveData(allocator, blocking_io.io(), test_data);
             }
-            const end_time = std.time.nanoTimestamp();
+            const end_time = std.time.Instant.now() catch unreachable;
             
             const duration_s = @as(f64, @floatFromInt(end_time - start_time)) / 1e9;
             const ops_per_sec = 100.0 / duration_s;
@@ -336,11 +336,11 @@ pub const BenchmarkSuite = struct {
             var threadpool_io = try Zsync.ThreadPoolIo.init(allocator, .{ .num_threads = 4 });
             defer threadpool_io.deinit();
             
-            const start_time = std.time.nanoTimestamp();
+            const start_time = std.time.Instant.now() catch unreachable;
             for (0..100) |_| {
                 try Zsync.io_v2.saveData(allocator, threadpool_io.io(), test_data);
             }
-            const end_time = std.time.nanoTimestamp();
+            const end_time = std.time.Instant.now() catch unreachable;
             
             const duration_s = @as(f64, @floatFromInt(end_time - start_time)) / 1e9;
             const ops_per_sec = 100.0 / duration_s;
@@ -353,11 +353,11 @@ pub const BenchmarkSuite = struct {
             var stackless_io = Zsync.StacklessIo.init(allocator, .{});
             defer stackless_io.deinit();
             
-            const start_time = std.time.nanoTimestamp();
+            const start_time = std.time.Instant.now() catch unreachable;
             for (0..100) |_| {
                 try Zsync.io_v2.saveData(allocator, stackless_io.io(), test_data);
             }
-            const end_time = std.time.nanoTimestamp();
+            const end_time = std.time.Instant.now() catch unreachable;
             
             const duration_s = @as(f64, @floatFromInt(end_time - start_time)) / 1e9;
             const ops_per_sec = 100.0 / duration_s;
@@ -481,14 +481,14 @@ pub const BenchmarkSuite = struct {
 fn benchmarkTaskCreation(suite: *BenchmarkSuite) !BenchmarkResult {
     _ = suite;
     
-    const start_time = std.time.nanoTimestamp();
+    const start_time = std.time.Instant.now() catch unreachable;
     
     // Simulate task creation benchmark
     for (0..10000) |_| {
         // Task creation simulation
     }
     
-    const end_time = std.time.nanoTimestamp();
+    const end_time = std.time.Instant.now() catch unreachable;
     const duration_s = @as(f64, @floatFromInt(end_time - start_time)) / 1e9;
     
     return BenchmarkResult{

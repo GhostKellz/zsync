@@ -408,7 +408,7 @@ pub const BlockingIo = struct {
     }
     
     /// Connect to address (simplified implementation)
-    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: if (builtin.target.cpu.arch == .wasm32) []const u8 else std.net.Address) IoError!Future {
+    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: if (builtin.target.cpu.arch == .wasm32) []const u8 else *const std.posix.sockaddr) IoError!Future {
         _ = context;
         _ = fd;
         _ = address;

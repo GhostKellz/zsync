@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - The Tokio of Zig
+//! Zsync v0.7.0 - The Tokio of Zig
 //! Production-ready colorblind async runtime with comprehensive platform support
 //! True colorblind async: same code works across all execution models
 
@@ -46,8 +46,8 @@ pub const ExecutionModel = enum {
             .dragonfly => .thread_pool, // kqueue available
             .wasi => .blocking,        // WASM - no threads yet
             .haiku => .thread_pool,     // Native threading
-            .solaris => .thread_pool,   // Event ports available
-            .illumos => .thread_pool,   // Event ports available
+            // Note: .solaris removed in Zig 0.16, use .illumos or .solaris_illumos
+            .illumos => .thread_pool,   // Event ports available (covers Solaris)
             .plan9 => .blocking,        // Simple model
             .fuchsia => .thread_pool,   // Async I/O available
             else => .blocking,          // Safe fallback
@@ -64,15 +64,17 @@ pub const ExecutionModel = enum {
             .arch, .fedora, .gentoo, .nixos => {
                 // Cutting-edge distributions with latest kernels
                 if (settings.prefer_io_uring and caps.has_io_uring) {
-                    return .thread_pool; // Will be .green_threads when io_uring is ready
+                    return .green_threads; // Use io_uring for maximum performance
                 }
                 return .thread_pool;
             },
             .debian, .ubuntu => {
                 // Conservative, stability-focused distributions
                 if (caps.kernel_version.major >= 5 and caps.kernel_version.minor >= 15) {
-                    // Only use io_uring on very recent kernels for Debian/Ubuntu
-                    return .thread_pool;
+                    // Use io_uring on recent stable kernels (5.15+)
+                    if (settings.prefer_io_uring and caps.has_io_uring) {
+                        return .green_threads;
+                    }
                 }
                 return .thread_pool;
             },
@@ -517,7 +519,8 @@ pub const Runtime = struct {
             logInfo("🚀 Zsync v0.6.0 - The Tokio of Zig - starting with {s} execution model", .{model_name});
         }
         
-        const start_time = std.time.nanoTimestamp();
+        // Note: Zig 0.16 uses Instant.now() instead of nanoTimestamp()
+        const start_instant = std.time.Instant.now() catch unreachable;
         
         // Execute main task with colorblind async
         const io = self.getIo();
@@ -529,12 +532,14 @@ pub const Runtime = struct {
         self.shutdown();
 
         // Give workers a brief moment to receive shutdown signal and exit
-        std.Thread.sleep(5 * std.time.ns_per_ms);
+        std.posix.nanosleep(0, 5 * std.time.ns_per_ms);
 
-        const execution_time = std.time.nanoTimestamp() - start_time;
+        // Calculate execution time using Instant API
+        const end_instant = std.time.Instant.now() catch unreachable;
+        const execution_time_ns = end_instant.since(start_instant);
 
         if (self.config.enable_debugging) {
-            logInfo("✅ Runtime completed in {d}ms", .{@divTrunc(execution_time, std.time.ns_per_ms)});
+            logInfo("✅ Runtime completed in {d}ms", .{execution_time_ns / std.time.ns_per_ms});
             self.printMetrics();
         }
     }
@@ -569,13 +574,110 @@ pub const Runtime = struct {
         return result;
     }
     
-    /// Spawn a new task (for future use with multiple tasks)
+    /// Spawn a new task for concurrent execution
     pub fn spawn(self: *Self, comptime task_fn: anytype, args: anytype) !Future {
-        _ = self;
-        _ = task_fn;
-        _ = args;
-        // TODO: Implement task spawning for concurrent execution
-        return error.NotImplemented;
+        self.metrics.incrementFutures();
+
+        // Create task context
+        const TaskContext = struct {
+            runtime: *Self,
+            state: std.atomic.Value(Future.State),
+            result: ?anyerror,
+            mutex: std.Thread.Mutex,
+
+            fn poll(ctx: *anyopaque) Future.PollResult {
+                const task_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                const state = task_ctx.state.load(.acquire);
+
+                return switch (state) {
+                    .pending => .pending,
+                    .ready => .ready,
+                    .cancelled => .cancelled,
+                    .error_state => if (task_ctx.result) |err| .{ .err = @as(io_interface.IoError, @errorCast(err)) } else .{ .err = io_interface.IoError.Unexpected },
+                };
+            }
+
+            fn cancel(ctx: *anyopaque) void {
+                const task_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                task_ctx.state.store(.cancelled, .release);
+            }
+
+            fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
+                const task_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                allocator.destroy(task_ctx);
+            }
+
+            const vtable = Future.FutureVTable{
+                .poll = poll,
+                .cancel = cancel,
+                .destroy = destroy,
+            };
+        };
+
+        const task_ctx = try self.allocator.create(TaskContext);
+        task_ctx.* = .{
+            .runtime = self,
+            .state = std.atomic.Value(Future.State).init(.pending),
+            .result = null,
+            .mutex = .{},
+        };
+
+        // Execute task based on execution model
+        switch (self.execution_model) {
+            .blocking => {
+                // Execute synchronously in blocking mode
+                @call(.auto, task_fn, args) catch |err| {
+                    task_ctx.result = err;
+                    task_ctx.state.store(.error_state, .release);
+                    return Future.init(&TaskContext.vtable, task_ctx);
+                };
+                task_ctx.state.store(.ready, .release);
+            },
+            .thread_pool => {
+                // Submit to thread pool for async execution
+                const ThreadTask = struct {
+                    fn run(ctx: *TaskContext, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
+                        @call(.auto, func, task_args) catch |err| {
+                            ctx.result = err;
+                            ctx.state.store(.error_state, .release);
+                            return;
+                        };
+                        ctx.state.store(.ready, .release);
+                    }
+                };
+
+                // Create a thread to run the task
+                const thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, task_fn, args });
+                thread.detach();
+            },
+            .green_threads => {
+                // Use green thread scheduler for cooperative multitasking
+                // For now, spawn a lightweight thread until green thread scheduler is fully integrated
+                const ThreadTask = struct {
+                    fn run(ctx: *TaskContext, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
+                        @call(.auto, func, task_args) catch |err| {
+                            ctx.result = err;
+                            ctx.state.store(.error_state, .release);
+                            return;
+                        };
+                        ctx.state.store(.ready, .release);
+                    }
+                };
+                const thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, task_fn, args });
+                thread.detach();
+            },
+            else => {
+                // For stackless, auto - fall back to blocking for now
+                @call(.auto, task_fn, args) catch |err| {
+                    task_ctx.result = err;
+                    task_ctx.state.store(.error_state, .release);
+                    return Future.init(&TaskContext.vtable, task_ctx);
+                };
+                task_ctx.state.store(.ready, .release);
+            },
+        }
+
+        return Future.init(&TaskContext.vtable, task_ctx);
     }
     
     /// Create a timeout future

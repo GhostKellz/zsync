@@ -190,12 +190,12 @@ pub fn benchmarkSuite() !void {
         var blocking_io = Zsync.BlockingIo.init(allocator, 4096);
         defer blocking_io.deinit();
         
-        const start = std.time.nanoTimestamp();
+        const start = std.time.Instant.now() catch unreachable;
         var io = blocking_io.io();
         var future = try io.async_write(test_data);
         defer future.destroy(allocator);
         try future.await();
-        const end = std.time.nanoTimestamp();
+        const end = std.time.Instant.now() catch unreachable;
         
         std.debug.print("⏱️  BlockingIo: {}μs\n", .{@divFloor(end - start, 1000)});
     }
@@ -206,7 +206,7 @@ pub fn benchmarkSuite() !void {
         var threadpool_io = try Zsync.ThreadPoolIo.init(allocator, .{ .num_threads = 4 });
         defer threadpool_io.deinit();
         
-        const start = std.time.nanoTimestamp();
+        const start = std.time.Instant.now() catch unreachable;
         var io = threadpool_io.io();
         var future = try io.async_write(test_data);
         defer future.destroy(allocator);
@@ -215,7 +215,7 @@ pub fn benchmarkSuite() !void {
         std.time.sleep(5 * 1000_000); // 5ms
         future.cancel(); // Avoid hanging
         
-        const end = std.time.nanoTimestamp();
+        const end = std.time.Instant.now() catch unreachable;
         
         std.debug.print("⏱️  ThreadPoolIo: {}μs\n", .{@divFloor(end - start, 1000)});
     }
@@ -226,7 +226,7 @@ pub fn benchmarkSuite() !void {
         var greenthreads_io = try Zsync.GreenThreadsIo.init(allocator, .{});
         defer greenthreads_io.deinit();
         
-        const start = std.time.nanoTimestamp();
+        const start = std.time.Instant.now() catch unreachable;
         var io = greenthreads_io.io();
         var future = try io.async_write(test_data);
         defer future.destroy(allocator);
@@ -235,7 +235,7 @@ pub fn benchmarkSuite() !void {
         std.time.sleep(5 * 1000_000); // 5ms
         future.cancel(); // Avoid hanging
         
-        const end = std.time.nanoTimestamp();
+        const end = std.time.Instant.now() catch unreachable;
         
         std.debug.print("⏱️  GreenThreadsIo: {}μs\n", .{@divFloor(end - start, 1000)});
     }

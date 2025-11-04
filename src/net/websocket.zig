@@ -230,7 +230,7 @@ pub const WebSocketServer = struct {
             // TODO: Create WebSocketConnection
             // TODO: Call on_connect handler
 
-            std.Thread.sleep(100 * std.time.ns_per_ms);
+            std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
         }
     }
 

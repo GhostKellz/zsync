@@ -256,7 +256,7 @@ pub const GrpcServer = struct {
         // TODO: Handle streaming
 
         while (self.running.load(.acquire)) {
-            std.Thread.sleep(100 * std.time.ns_per_ms);
+            std.posix.nanosleep(0, 100 * std.time.ns_per_ms);
         }
     }
 

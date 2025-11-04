@@ -40,8 +40,8 @@ pub const FrameBufferManager = struct {
                     .data = data,
                     .size = aligned_size,
                     .frame_id = frame_id,
-                    .generation = std.time.nanoTimestamp(),
-                    .last_used = std.time.nanoTimestamp(),
+                    .generation = std.time.Instant.now() catch unreachable,
+                    .last_used = std.time.Instant.now() catch unreachable,
                     .is_active = false,
                 };
             }
@@ -52,12 +52,12 @@ pub const FrameBufferManager = struct {
             
             pub fn reset(self: *FrameBuffer) void {
                 @memset(self.data, 0);
-                self.last_used = std.time.nanoTimestamp();
+                self.last_used = std.time.Instant.now() catch unreachable;
                 self.is_active = false;
             }
             
             pub fn isStale(self: FrameBuffer, max_age_ns: u64) bool {
-                return (std.time.nanoTimestamp() - self.last_used) > max_age_ns;
+                return (std.time.Instant.now() catch unreachable - self.last_used) > max_age_ns;
             }
         };
         
@@ -96,7 +96,7 @@ pub const FrameBufferManager = struct {
                     var mutable_frame = acquired_frame;
                     mutable_frame.frame_id = frame_id;
                     mutable_frame.is_active = true;
-                    mutable_frame.last_used = std.time.nanoTimestamp();
+                    mutable_frame.last_used = std.time.Instant.now() catch unreachable;
                     
                     try self.active_frames.put(frame_id, mutable_frame);
                     _ = self.recycle_count.fetchAdd(1, .monotonic);

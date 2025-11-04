@@ -48,7 +48,7 @@ pub const SubmissionEntry = struct {
     }
 
     /// Prepare an accept operation
-    pub fn prepAccept(self: *Self, fd: i32, addr: *std.net.Address, addr_len: *u32) void {
+    pub fn prepAccept(self: *Self, fd: i32, addr: *std.posix.sockaddr, addr_len: *u32) void {
         self.sqe.* = std.mem.zeroes(linux.io_uring_sqe);
         self.sqe.opcode = linux.IORING_OP.ACCEPT;
         self.sqe.fd = fd;
@@ -550,7 +550,7 @@ pub const IoUring = struct {
     }
     
     /// Setup an accept operation
-    pub fn prepAccept(sqe: *IoUringSqe, fd: i32, addr: ?*std.net.Address, user_data: u64) void {
+    pub fn prepAccept(sqe: *IoUringSqe, fd: i32, addr: ?*std.posix.sockaddr, user_data: u64) void {
         sqe.* = IoUringSqe{
             .opcode = IORING_OP_ACCEPT,
             .flags = 0,
@@ -558,7 +558,7 @@ pub const IoUring = struct {
             .fd = fd,
             .off_addr2 = .{ .off = 0 },
             .addr_splice_off_in = .{ .addr = if (addr) |a| @intFromPtr(a) else 0 },
-            .len = if (addr != null) @sizeOf(std.net.Address) else 0,
+            .len = if (addr != null) @sizeOf(std.posix.sockaddr) else 0,
             .op_flags = .{ .accept_flags = 0 },
             .user_data = user_data,
             .buf_index_personality = .{ .buf_index = 0 },
@@ -569,7 +569,7 @@ pub const IoUring = struct {
     }
     
     /// Setup a connect operation
-    pub fn prepConnect(sqe: *IoUringSqe, fd: i32, addr: *const std.net.Address, user_data: u64) void {
+    pub fn prepConnect(sqe: *IoUringSqe, fd: i32, addr: *const std.posix.sockaddr, user_data: u64) void {
         sqe.* = IoUringSqe{
             .opcode = IORING_OP_CONNECT,
             .flags = 0,
@@ -577,7 +577,7 @@ pub const IoUring = struct {
             .fd = fd,
             .off_addr2 = .{ .off = 0 },
             .addr_splice_off_in = .{ .addr = @intFromPtr(addr) },
-            .len = @sizeOf(std.net.Address),
+            .len = @sizeOf(std.posix.sockaddr),
             .op_flags = .{ .rw_flags = 0 },
             .user_data = user_data,
             .buf_index_personality = .{ .buf_index = 0 },
@@ -614,7 +614,7 @@ pub const Operation = struct {
     buffer: []u8 = &[_]u8{},
     data: []const u8 = &[_]u8{},
     offset: u64 = 0,
-    addr: ?*std.net.Address = null,
+    addr: ?*std.posix.sockaddr = null,  // Mutable pointer for accept
 };
 
 /// Future-like structure for async operations

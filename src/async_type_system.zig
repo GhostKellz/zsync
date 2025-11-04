@@ -440,12 +440,12 @@ pub fn TypedFuture(comptime T: type) type {
             
             pub fn init(timeout_ms: u64) Timeout {
                 return Timeout{
-                    .deadline_ns = std.time.nanoTimestamp() + (timeout_ms * std.time.ns_per_ms),
+                    .deadline_ns = std.time.Instant.now() catch unreachable + (timeout_ms * std.time.ns_per_ms),
                 };
             }
             
             pub fn isExpired(self: *const Timeout) bool {
-                return std.time.nanoTimestamp() > self.deadline_ns;
+                return std.time.Instant.now() catch unreachable > self.deadline_ns;
             }
         };
         

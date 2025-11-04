@@ -566,7 +566,7 @@ pub const GreenThreadsIo = struct {
         return adapter.toFuture();
     }
     
-    fn connect(context: *anyopaque, sockfd: std.posix.fd_t, addr: std.net.Address) IoError!Future {
+    fn connect(context: *anyopaque, sockfd: std.posix.fd_t, addr: *const std.posix.sockaddr) IoError!Future {
         const self: *Self = @ptrCast(@alignCast(context));
         _ = addr;
         

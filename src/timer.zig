@@ -220,8 +220,8 @@ pub const TimerWheel = struct {
 /// Sleep for the specified duration
 pub fn sleep(duration_ms: u64) void {
     // This would integrate with the runtime's timer wheel
-    // For now, we'll implement a simple version using thread sleep
-    std.Thread.sleep(duration_ms * std.time.ns_per_ms);
+    // For now, we'll implement a simple version using nanosleep
+    std.posix.nanosleep(0, duration_ms * std.time.ns_per_ms);
 }
 
 /// Create an interval timer that fires repeatedly
@@ -244,7 +244,7 @@ pub fn delay(duration_ms: u64) void {
 
 /// Get current time in nanoseconds
 pub fn nanoTime() u64 {
-    return @intCast(std.time.nanoTimestamp());
+    return @intCast(std.time.Instant.now() catch unreachable);
 }
 
 /// Get current time in microseconds
@@ -337,7 +337,7 @@ test "timer cancellation" {
 test "time measurement" {
     const TestFunction = struct {
         fn slowFunction() u32 {
-            std.Thread.sleep(1 * std.time.ns_per_ms); // Sleep for 1ms
+            std.posix.nanosleep(0, 1 * std.time.ns_per_ms); // Sleep for 1ms
             return 42;
         }
     };

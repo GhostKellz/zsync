@@ -248,7 +248,7 @@ pub fn runPerformanceBenchmark() !void {
     // Benchmark context switching overhead
     if (std.builtin.cpu.arch == .x86_64) {
         const iterations = 1000;
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch unreachable;
         
         var i: usize = 0;
         while (i < iterations) : (i += 1) {
@@ -259,7 +259,7 @@ pub fn runPerformanceBenchmark() !void {
             arch.makeContext(&ctx, stack, testContextFunction, @ptrCast(&@as(u32, 1)));
         }
         
-        const end_time = std.time.nanoTimestamp();
+        const end_time = std.time.Instant.now() catch unreachable;
         const avg_ns = @divFloor(end_time - start_time, iterations);
         
         std.debug.print("🏃 Context creation average: {} ns\n", .{avg_ns});
@@ -274,7 +274,7 @@ pub fn runPerformanceBenchmark() !void {
         try async_registry.register("compute", asyncComputeTask);
         
         const iterations = 100;
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch unreachable;
         
         var i: usize = 0;
         while (i < iterations) : (i += 1) {
@@ -284,7 +284,7 @@ pub fn runPerformanceBenchmark() !void {
             _ = try handle.await(i32);
         }
         
-        const end_time = std.time.nanoTimestamp();
+        const end_time = std.time.Instant.now() catch unreachable;
         const avg_ns = @divFloor(end_time - start_time, iterations);
         
         std.debug.print("🚀 Async function dispatch average: {} ns\n", .{avg_ns});

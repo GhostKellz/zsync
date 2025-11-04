@@ -47,11 +47,11 @@ pub const BenchmarkTimer = struct {
     const Self = @This();
 
     pub fn start() Self {
-        return Self{ .start_time = std.time.nanoTimestamp() };
+        return Self{ .start_time = std.time.Instant.now() catch unreachable };
     }
 
     pub fn elapsed(self: *const Self) u64 {
-        return @intCast(std.time.nanoTimestamp() - @as(i128, @intCast(self.start_time)));
+        return @intCast(std.time.Instant.now() catch unreachable - @as(i128, @intCast(self.start_time)));
     }
 };
 
