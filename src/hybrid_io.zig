@@ -83,7 +83,7 @@ pub const HybridMetrics = struct {
     pub fn recordSwitch(self: *Self, to_model: ExecutionModel) void {
         _ = self.total_switches.fetchAdd(1, .acq_rel);
         self.current_model.store(@intFromEnum(to_model), .release);
-        self.last_switch_time.store(@intCast(std.time.milliTimestamp()), .release);
+        self.last_switch_time.store(@intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }), .release);
         
         switch (to_model) {
             .stackless => _ = self.switches_to_stackless.fetchAdd(1, .acq_rel),
@@ -99,7 +99,7 @@ pub const HybridMetrics = struct {
     }
     
     pub fn canSwitch(self: *Self, cooldown_ms: u64) bool {
-        const current_time = @as(u64, @intCast(std.time.milliTimestamp()));
+        const current_time = @as(u64, @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
         const last_switch = self.last_switch_time.load(.acquire);
         return (current_time - last_switch) >= cooldown_ms;
     }

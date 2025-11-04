@@ -107,7 +107,10 @@ pub const ContainerInfo = struct {
             .command = try allocator.dupe([]const u8, command),
             .status = .created,
             .pid = null,
-            .created_at = std.time.milliTimestamp(),
+            .created_at = blk: {
+                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
+            },
             .started_at = null,
             .finished_at = null,
             .exit_code = null,
@@ -428,7 +431,8 @@ pub const AsyncContainerRuntime = struct {
         }
         
         fn processOperation(self: *ContainerWorker, operation: ContainerOperation) OperationResult {
-            const start_time = std.time.milliTimestamp();
+            const ts_start_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const start_time: i64 = @intCast(@divTrunc((@as(i128, ts_start_time.sec) * std.time.ns_per_s + ts_start_time.nsec), std.time.ns_per_ms));
             
             // Check timeout
             if (start_time - operation.submitted_at > operation.timeout_ms) {
@@ -499,7 +503,7 @@ pub const AsyncContainerRuntime = struct {
                 const pid = std.os.linux.getpid();
                 container.pid = pid;
                 container.status = .running;
-                container.started_at = std.time.milliTimestamp();
+                container.started_at = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); };
                 
                 return OperationResult.init(true, "Container started successfully");
             }
@@ -525,7 +529,7 @@ pub const AsyncContainerRuntime = struct {
                 }
                 
                 container.status = .stopped;
-                container.finished_at = std.time.milliTimestamp();
+                container.finished_at = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); };
                 container.exit_code = 0;
                 
                 return OperationResult.init(true, "Container stopped successfully");
@@ -745,7 +749,10 @@ pub const AsyncContainerRuntime = struct {
             .operation_type = operation_type,
             .container_id = container_id,
             .callback = callback,
-            .submitted_at = std.time.milliTimestamp(),
+            .submitted_at = blk: {
+                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
+            },
             .timeout_ms = timeout_ms,
         };
         

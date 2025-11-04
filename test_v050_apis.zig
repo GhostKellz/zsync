@@ -16,11 +16,13 @@ pub fn main() !void {
     zsync.yieldNow();
     std.debug.print("   Cooperative yielding works!\n\n", .{});
     
-    // Test 2: sleep() - should work now  
+    // Test 2: sleep() - should work now
     std.debug.print("✅ Testing zsync.sleep()...\n", .{});
-    const sleep_start = std.time.milliTimestamp();
+    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const sleep_start: i64 = @intCast(@divTrunc((@as(i128, ts_start.sec) * std.time.ns_per_s + ts_start.nsec), std.time.ns_per_ms));
     zsync.sleep(10); // 10ms sleep
-    const sleep_end = std.time.milliTimestamp();
+    const ts_end = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const sleep_end: i64 = @intCast(@divTrunc((@as(i128, ts_end.sec) * std.time.ns_per_s + ts_end.nsec), std.time.ns_per_ms));
     std.debug.print("   Sleep for 10ms took {}ms\n\n", .{sleep_end - sleep_start});
     
     // Test 3: bounded() channels - should work now

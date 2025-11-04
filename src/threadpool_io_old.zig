@@ -761,7 +761,8 @@ pub const ThreadPoolIo = struct {
     
     /// Check queue load and scale thread pool if necessary
     fn checkAndScale(self: *Self) void {
-        const now = std.time.milliTimestamp();
+        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
         const last_check = self.last_scale_check.load(.acquire);
         
         // Only check scaling every 100ms to avoid thrashing
@@ -844,11 +845,11 @@ pub const ThreadPoolIo = struct {
             
             if (task == null) {
                 // No task available
-                if (idle_start == null) idle_start = std.time.milliTimestamp();
+                if (idle_start == null) idle_start = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); };
                 
                 // Check if this thread should terminate due to idle timeout
                 if (self.config.enable_dynamic_scaling and idle_start != null) {
-                    const idle_time = std.time.milliTimestamp() - idle_start.?;
+                    const idle_time = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); } - idle_start.?;
                     if (idle_time > self.config.thread_idle_timeout_ms and self.active_threads.load(.acquire) > self.config.min_threads) {
                         worker.should_terminate.store(true, .release);
                         return;
@@ -864,7 +865,7 @@ pub const ThreadPoolIo = struct {
             
             // Reset idle timer since we got work
             idle_start = null;
-            worker.last_active.store(std.time.milliTimestamp(), .release);
+            worker.last_active.store(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }, .release);
             
             // Track execution time for statistics
             const start_time = std.time.Instant.now() catch unreachable;

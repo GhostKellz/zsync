@@ -269,8 +269,10 @@ pub const AsyncScheduler = struct {
         
         // Store frame in pool for lifecycle management
         try self.frame_pool.append(self.allocator, frame);
-        
-        const task = ScheduledTask.init(frame.*, priority, @as(u64, @intCast(std.time.milliTimestamp())));
+
+        const ts_task = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const timestamp: u64 = @intCast(@divTrunc((@as(i128, ts_task.sec) * std.time.ns_per_s + ts_task.nsec), std.time.ns_per_ms));
+        const task = ScheduledTask.init(frame.*, priority, timestamp);
         try self.ready_queue.push(task);
 
         // In a full async implementation, this would start the async function
@@ -328,9 +330,11 @@ pub const AsyncScheduler = struct {
 
         if (self.suspended_frames.get(frame_id)) |frame| {
             frame.state = .ready;
-            
+
             // Move from suspended to ready queue
-            const task = ScheduledTask.init(frame.*, .normal, @as(u64, @intCast(std.time.milliTimestamp())));
+            const ts_resume = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+            const timestamp_resume: u64 = @intCast(@divTrunc((@as(i128, ts_resume.sec) * std.time.ns_per_s + ts_resume.nsec), std.time.ns_per_ms));
+            const task = ScheduledTask.init(frame.*, .normal, timestamp_resume);
             self.ready_queue.push(task) catch return; // Ignore error for now
 
             _ = self.suspended_frames.remove(frame_id);

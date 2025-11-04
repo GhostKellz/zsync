@@ -355,7 +355,10 @@ pub const ConnectionPool = struct {
             const connection = Connection{
                 .stream = stream,
                 .in_use = true,
-                .created_at = std.time.milliTimestamp(),
+                .created_at = blk: {
+                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
+            },
             };
             
             try self.connections.append(self.allocator, connection);

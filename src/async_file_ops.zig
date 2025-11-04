@@ -478,7 +478,7 @@ fn performFileWrite(context: *WriteContext) !void {
         const temp_path = try std.fmt.allocPrint(
             context.file_ops.allocator,
             "{s}.tmp.{d}",
-            .{ context.path, std.time.milliTimestamp() }
+            .{ context.path, blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); } }
         );
         defer context.file_ops.allocator.free(temp_path);
         

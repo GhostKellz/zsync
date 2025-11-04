@@ -50,14 +50,14 @@ pub const Sleep = struct {
     pub fn init(duration_ms: u64) Self {
         return Self{
             .duration_ms = duration_ms,
-            .start_time = @intCast(std.time.milliTimestamp()),
+            .start_time = @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }),
         };
     }
 
     pub fn poll(self: *Self) bool {
         if (self.completed) return true;
         
-        const now = @as(u64, @intCast(std.time.milliTimestamp()));
+        const now = @as(u64, @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
         if (now - self.start_time >= self.duration_ms) {
             self.completed = true;
             return true;

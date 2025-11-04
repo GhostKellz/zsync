@@ -113,7 +113,8 @@ pub const Context = struct {
 
     pub fn hasDeadlineExceeded(self: *const Self) bool {
         if (self.deadline) |dl| {
-            const now = std.time.milliTimestamp();
+            const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
             return now > dl;
         }
         return false;

@@ -523,7 +523,8 @@ pub const Http3Benchmarks = struct {
         const allocator = gpa.allocator();
         
         const config = QuicConfig{};
-        const start_time = std.time.milliTimestamp();
+        const ts_start_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const start_time: i64 = @intCast(@divTrunc((@as(i128, ts_start_time.sec) * std.time.ns_per_s + ts_start_time.nsec), std.time.ns_per_ms));
         
         for (0..iterations) |_| {
             const connection = try QuicConnection.init(allocator, config);
@@ -533,7 +534,8 @@ pub const Http3Benchmarks = struct {
             try connection.connect(io, remote_addr);
         }
         
-        const end_time = std.time.milliTimestamp();
+        const ts_end_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const end_time: i64 = @intCast(@divTrunc((@as(i128, ts_end_time.sec) * std.time.ns_per_s + ts_end_time.nsec), std.time.ns_per_ms));
         const duration = end_time - start_time;
         
         std.log.info("QUIC connection benchmark: {d} connections in {d}ms ({d:.2} conn/sec)", .{
@@ -555,7 +557,8 @@ pub const Http3Benchmarks = struct {
         const remote_addr = try std.net.Address.parseIp("127.0.0.1", 443);
         try client.connect(io, remote_addr);
         
-        const start_time = std.time.milliTimestamp();
+        const ts_start_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const start_time: i64 = @intCast(@divTrunc((@as(i128, ts_start_time.sec) * std.time.ns_per_s + ts_start_time.nsec), std.time.ns_per_ms));
         
         for (0..iterations) |_| {
             var req = Http3Request.init(allocator, "GET", "/test");
@@ -565,7 +568,8 @@ pub const Http3Benchmarks = struct {
             defer response.deinit();
         }
         
-        const end_time = std.time.milliTimestamp();
+        const ts_end_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const end_time: i64 = @intCast(@divTrunc((@as(i128, ts_end_time.sec) * std.time.ns_per_s + ts_end_time.nsec), std.time.ns_per_ms));
         const duration = end_time - start_time;
         
         std.log.info("HTTP/3 request benchmark: {d} requests in {d}ms ({d:.2} req/sec)", .{

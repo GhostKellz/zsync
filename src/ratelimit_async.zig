@@ -263,7 +263,7 @@ pub const SlidingWindow = struct {
     }
     
     fn getCurrentSlot(self: *SlidingWindow) usize {
-        const now = @as(u64, @intCast(time.milliTimestamp()));
+        const now = @as(u64, @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
         const slot_index = (now / self.slot_duration_ms) % self.slots.len;
         
         const old_slot = self.current_slot.swap(slot_index, .acq_rel);

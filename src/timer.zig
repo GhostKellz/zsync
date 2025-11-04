@@ -64,7 +64,8 @@ pub const TimerWheel = struct {
 
     /// Get current time in milliseconds since runtime start
     fn getCurrentTimeMs() u64 {
-        return @intCast(std.time.milliTimestamp());
+        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        return @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
     }
 
     /// Get runtime-relative time
@@ -254,7 +255,8 @@ pub fn microTime() u64 {
 
 /// Get current time in milliseconds
 pub fn milliTime() u64 {
-    return @intCast(std.time.milliTimestamp());
+    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    return @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 }
 
 /// Measure execution time of a function

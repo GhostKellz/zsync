@@ -52,10 +52,14 @@ pub fn selectTimeout(
         return error.NoFutures;
     }
 
-    const start = std.time.milliTimestamp();
+    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const start: i64 = @intCast(@divTrunc((@as(i128, ts_start.sec) * std.time.ns_per_s + ts_start.nsec), std.time.ns_per_ms));
     const deadline = start + @as(i64, @intCast(timeout_ms));
 
-    while (std.time.milliTimestamp() < deadline) {
+    while (true) {
+        const ts_now = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const now: i64 = @intCast(@divTrunc((@as(i128, ts_now.sec) * std.time.ns_per_s + ts_now.nsec), std.time.ns_per_ms));
+        if (now >= deadline) break;
         for (futures) |fut| {
             const poll_result = fut.poll();
             if (poll_result == .ready) {

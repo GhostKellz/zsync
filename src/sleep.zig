@@ -35,9 +35,12 @@ test "yieldNow basic" {
 }
 
 test "sleep milliseconds" {
-    const start = std.time.milliTimestamp();
+    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const start: i64 = @intCast(@divTrunc((@as(i128, ts_start.sec) * std.time.ns_per_s + ts_start.nsec), std.time.ns_per_ms));
     sleep(10);
-    const elapsed = std.time.milliTimestamp() - start;
+    const ts_end = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const end: i64 = @intCast(@divTrunc((@as(i128, ts_end.sec) * std.time.ns_per_s + ts_end.nsec), std.time.ns_per_ms));
+    const elapsed = end - start;
 
     // Should sleep at least 10ms (allow some tolerance)
     try std.testing.expect(elapsed >= 9);

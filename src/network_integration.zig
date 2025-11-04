@@ -208,7 +208,8 @@ pub const NetworkPool = struct {
         self: *Self,
         request: NetworkRequest,
     ) !NetworkResponse {
-        const start_time = std.time.milliTimestamp();
+        const ts_start_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const start_time: i64 = @intCast(@divTrunc((@as(i128, ts_start_time.sec) * std.time.ns_per_s + ts_start_time.nsec), std.time.ns_per_ms));
         self.stats.total_requests.fetchAdd(1, .monotonic);
         self.stats.active_connections.fetchAdd(1, .monotonic);
         defer self.stats.active_connections.fetchSub(1, .monotonic);
@@ -227,7 +228,8 @@ pub const NetworkPool = struct {
         };
         
         // Update stats
-        const end_time = std.time.milliTimestamp();
+        const ts_end_time = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const end_time: i64 = @intCast(@divTrunc((@as(i128, ts_end_time.sec) * std.time.ns_per_s + ts_end_time.nsec), std.time.ns_per_ms));
         const latency = @as(u64, @intCast(end_time - start_time));
         self.stats.successful_requests.fetchAdd(1, .monotonic);
         self.updateAverageLatency(latency);

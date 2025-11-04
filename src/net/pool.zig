@@ -90,7 +90,9 @@ pub fn ConnectionPool(comptime T: type) type {
                     }
 
                     conn.in_use = true;
-                    conn.last_used = std.time.milliTimestamp();
+                    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                    const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
+                    conn.last_used = millis;
                     return conn.connection;
                 }
             }
@@ -98,7 +100,8 @@ pub fn ConnectionPool(comptime T: type) type {
             // Create new connection if below max
             if (self.connections.items.len < self.config.max_connections) {
                 const conn = try self.factory(self.allocator);
-                const now = std.time.milliTimestamp();
+                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 
                 try self.connections.append(self.allocator, PooledConnection{
                     .connection = conn,
@@ -122,7 +125,9 @@ pub fn ConnectionPool(comptime T: type) type {
             for (self.connections.items) |*conn| {
                 if (conn.connection == connection) {
                     conn.in_use = false;
-                    conn.last_used = std.time.milliTimestamp();
+                    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                    const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
+                    conn.last_used = millis;
                     self.available.release();
                     return;
                 }
@@ -131,7 +136,8 @@ pub fn ConnectionPool(comptime T: type) type {
 
         /// Ensure minimum number of connections exist
         fn ensureMinConnections(self: *Self) !void {
-            const now = std.time.milliTimestamp();
+            const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+            const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 
             while (self.connections.items.len < self.config.min_connections) {
                 const conn = try self.factory(self.allocator);
@@ -150,7 +156,8 @@ pub fn ConnectionPool(comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            const now = std.time.milliTimestamp();
+            const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+            const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
             const timeout = @as(i64, @intCast(self.config.idle_timeout_ms));
 
             var i: usize = 0;
