@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Runtime Diagnostics
+//! zsync- Runtime Diagnostics
 //! System capability detection and runtime statistics
 
 const std = @import("std");
@@ -14,7 +14,7 @@ pub const RuntimeDiagnostics = struct {
 
         std.debug.print("\n", .{});
         std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
-        std.debug.print("  Zsync v0.6.0 Runtime Diagnostics\n", .{});
+        std.debug.print("  zsync Runtime Diagnostics\n", .{});
         std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
         std.debug.print("\n", .{});
 

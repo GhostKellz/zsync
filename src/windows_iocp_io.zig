@@ -1,4 +1,4 @@
-//! Zsync v0.5.2 - Windows IOCP I/O Implementation
+//! zsync- Windows IOCP I/O Implementation
 //! High-performance Windows I/O using IOCP (I/O Completion Ports)
 
 const std = @import("std");

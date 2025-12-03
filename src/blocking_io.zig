@@ -1,4 +1,4 @@
-//! Zsync v0.4.0 - Modern Blocking I/O Implementation
+//! zsync- Modern Blocking I/O Implementation
 //! Zero-overhead blocking I/O with colorblind async support
 //! Perfect for CPU-bound workloads and simple use cases
 
@@ -509,7 +509,7 @@ test "BlockingIo basic operations" {
     
     // Test write operation
     var io_mut = io;
-    var write_future = try io_mut.write("Hello, Zsync v0.4.0!");
+    var write_future = try io_mut.write("Hello, zsync!");
     defer write_future.destroy(allocator);
     
     try testing.expect(write_future.poll() == .ready);

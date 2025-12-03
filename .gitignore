@@ -1,7 +1,40 @@
+# Build artifacts
 .zig-cache/
 zig-out/
 *.o
+*.a
+*.so
+*.dylib
+
+# Binaries
 *.exe
-CLAUDE.md
-TODO.md 
+*.pdb
+
+# Local reference (untracked)
 archive/
+
+# Internal docs
+CLAUDE.md
+TODO.md
+
+# Test artifacts
+test_*
+!tests/
+*.log
+*.prof
+*.trace
+
+# Versioned junk (never commit these)
+*_v[0-9]*.zig
+*v[0-9][0-9][0-9]*.zig
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,4 +1,4 @@
-//! Zsync v0.7.0 - Async Streams API
+//! zsync - Async Streams API
 //! Tokio-style async iteration with combinators
 
 const std = @import("std");

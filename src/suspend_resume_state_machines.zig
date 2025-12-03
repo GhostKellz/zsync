@@ -1,4 +1,4 @@
-//! Suspend/Resume State Machines for Zsync v0.2.0
+//! Suspend/Resume State Machines for zsync
 //! Implements sophisticated state management for stackless coroutines with tail call optimization
 
 const std = @import("std");

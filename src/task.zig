@@ -1,5 +1,5 @@
 //! Task management system for Zsync
-//! ⚠️  DEPRECATED: This module is deprecated in Zsync v0.1
+//! ⚠️  DEPRECATED: This module is deprecated in zsync
 //! Use io.async() with the new colorblind async interface instead
 
 const std = @import("std");

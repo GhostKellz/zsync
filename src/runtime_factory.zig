@@ -1,4 +1,4 @@
-//! Zsync v0.5.2 - Platform-Specific Runtime Factory
+//! zsync- Platform-Specific Runtime Factory
 //! Creates optimized runtime instances based on platform capabilities
 
 const std = @import("std");

@@ -1,4 +1,4 @@
-//! Zsync v0.7.0 - Structured Concurrency Nursery
+//! zsync - Structured Concurrency Nursery
 //! Safe task spawning with guaranteed cleanup (inspired by Trio/Tokio JoinSet)
 
 const std = @import("std");

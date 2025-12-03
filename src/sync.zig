@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Synchronization Primitives
+//! zsync- Synchronization Primitives
 //! Async-aware synchronization primitives for concurrent programming
 
 const std = @import("std");

@@ -1,4 +1,4 @@
-//! Zsync v0.5.3 - Enhanced Linux io_uring Implementation
+//! zsync- Enhanced Linux io_uring Implementation
 //! Advanced features: SQPOLL, buffer rings, FAST_POLL, operation linking, registered files/buffers
 
 const std = @import("std");

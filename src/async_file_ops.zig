@@ -1,4 +1,4 @@
-//! Zsync v0.3.2 - Async File I/O Operations
+//! zsync- Async File I/O Operations
 //! Non-blocking file operations for cache warming, PKGBUILD processing, and concurrent file handling
 
 const std = @import("std");

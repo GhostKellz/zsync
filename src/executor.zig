@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Task Executor
+//! zsync- Task Executor
 //! Executor for managing and coordinating multiple async tasks
 
 const std = @import("std");

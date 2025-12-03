@@ -1,4 +1,4 @@
-//! Zsync v0.1 - Lock-Free Task Queue Implementation
+//! zsync - Lock-Free Task Queue Implementation
 //! Based on Michael & Scott algorithm for lock-free queue
 //! Provides high-performance concurrent access for thread pools
 

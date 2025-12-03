@@ -1,10 +1,10 @@
-//! Zsync v0.3.2 - Advanced Future Combinators
+//! zsync- Advanced Future Combinators
 //! Implements Future.all(), Future.race(), timeout, and cancellation primitives
 
 const std = @import("std");
 const io_v2 = @import("io_v2.zig");
 
-/// Enhanced Future with v0.3.2 combinators
+/// Enhanced Future with v0.7 combinators
 pub fn FutureCombinators(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -432,7 +432,7 @@ pub const CancelToken = struct {
     }
 };
 
-/// Enhanced Future type with v0.3.2 features
+/// Enhanced Future type with v0.7 features
 pub const Future = io_v2.Future;
 
 // Export combinator functions at module level for convenience

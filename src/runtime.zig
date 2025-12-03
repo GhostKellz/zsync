@@ -1,4 +1,4 @@
-//! Zsync v0.7.0 - The Tokio of Zig
+//! zsync - The Tokio of Zig
 //! Production-ready colorblind async runtime with comprehensive platform support
 //! True colorblind async: same code works across all execution models
 
@@ -262,7 +262,7 @@ pub const RuntimeError = error{
     SystemResourceExhausted,
     ConfigurationError,
     PlatformUnsupported,
-    // v0.6.0 New specific errors
+    // v0.7 New specific errors
     ThreadPoolExhausted,
     TaskQueueFull,
     FutureAlreadyAwaited,
@@ -351,7 +351,7 @@ pub const RuntimeMetrics = struct {
 var global_runtime: ?*Runtime = null;
 var global_runtime_mutex = std.Thread.Mutex{};
 
-/// Zsync v0.6.0 - The Tokio of Zig - Production-Ready Async Runtime
+/// zsync - The Tokio of Zig - Production-Ready Async Runtime
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     config: Config,
@@ -516,7 +516,7 @@ pub const Runtime = struct {
         
         const model_name = @tagName(self.execution_model);
         if (self.config.enable_debugging) {
-            logInfo("🚀 Zsync v0.6.0 - The Tokio of Zig - starting with {s} execution model", .{model_name});
+            logInfo("🚀 zsync - The Tokio of Zig - starting with {s} execution model", .{model_name});
         }
         
         // Note: Zig 0.16 uses Instant.now() instead of nanoTimestamp()
@@ -888,7 +888,7 @@ test "Runtime basic operations" {
 test "Colorblind async example" {
     const TestTask = struct {
         fn task(io: Io) !void {
-            const data = "Hello, Zsync v0.6.0 - The Tokio of Zig!";
+            const data = "Hello, zsync - The Tokio of Zig!";
             var io_mut = io;
             var future = try io_mut.write(data);
             defer future.destroy(io.getAllocator());

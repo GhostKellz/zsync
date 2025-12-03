@@ -1,5 +1,5 @@
 //! Advanced task scheduler with proper async frame management
-//! Supports Zig's async/await with frame pooling and scheduling
+//! Uses zsync runtime patterns (Zig 0.16 removed language-level async)
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -36,21 +36,20 @@ pub const AsyncFrame = struct {
         };
     }
 
-    /// Resume an async frame (actual implementation)
+    /// Resume an async frame
+    /// Note: Zig 0.16 removed language-level async (anyframe/resume)
+    /// This now uses state management for zsync runtime coordination
     pub fn resumeFrame(self: *Self) void {
         if (self.state == .suspended) {
-            self.state = .running;
-            // Cast back to proper frame type and resume
-            const frame_ptr: anyframe = @ptrCast(@alignCast(self.frame_ptr));
-            resume frame_ptr;
+            self.state = .ready;
+            // Frame will be picked up by scheduler tick()
         }
     }
 
-    /// Suspend the current async frame
+    /// Mark frame as suspended
     pub fn suspendFrame(self: *Self) void {
         if (self.state == .running) {
             self.state = .suspended;
-            // Frame suspension happens via @suspend()
         }
     }
 

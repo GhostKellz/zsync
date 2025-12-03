@@ -1,4 +1,4 @@
-//! Performance Benchmarking System for Zsync v0.2.0
+//! Performance Benchmarking System for zsync
 //! Comprehensive benchmarks against other async runtimes
 
 const std = @import("std");
@@ -98,7 +98,7 @@ pub const BenchmarkSuite = struct {
     
     /// Run all benchmarks and compare against baselines
     pub fn runAllBenchmarks(self: *Self) !void {
-        std.debug.print("🚀 Zsync v0.2.0 Performance Benchmark Suite\n");
+        std.debug.print("🚀 zsync Performance Benchmark Suite\n");
         std.debug.print("=" ** 60 ++ "\n\n");
         
         // Basic operations benchmarks
@@ -471,7 +471,7 @@ pub const BenchmarkSuite = struct {
         std.debug.print("   Average speedup: {d:.2}x\n", .{avg_speedup});
         std.debug.print("   Average memory efficiency: {d:.2}x\n", .{avg_memory_efficiency});
         std.debug.print("   Platform: {s} {s}\n", .{ @tagName(builtin.target.os.tag), @tagName(builtin.target.cpu.arch) });
-        std.debug.print("\n🚀 Zsync v0.2.0 delivers production-ready performance!\n");
+        std.debug.print("\n🚀 zsync delivers production-ready performance!\n");
         std.debug.print("=" ** 60 ++ "\n");
     }
 };

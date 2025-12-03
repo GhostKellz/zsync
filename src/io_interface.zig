@@ -1,4 +1,4 @@
-//! Zsync v0.4.0 - Colorblind Async I/O Interface
+//! zsync- Colorblind Async I/O Interface
 //! Implements Zig's new async paradigm with true function colorblind design
 //! Compatible with all execution models: blocking, thread pool, green threads, stackless
 

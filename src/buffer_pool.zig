@@ -1,4 +1,4 @@
-//! Zsync v0.7.0 - Buffer Pool with Zero-Copy Optimization
+//! zsync - Buffer Pool with Zero-Copy Optimization
 //! Efficient buffer management with sendfile/splice support
 
 const std = @import("std");

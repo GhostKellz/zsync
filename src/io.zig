@@ -178,16 +178,15 @@ pub const TcpListener = struct {
 
             const client_fd = std.posix.accept(self.fd, &client_addr, &client_addr_len, std.posix.SOCK.CLOEXEC) catch |err| switch (err) {
                 error.WouldBlock => {
-                    // Register for read readiness
-                    try self.reactor.register(.{
-                        .fd = self.fd,
-                        .events = .{ .readable = true },
-                    });
+                    // Get runtime for waker creation
+                    const runtime_instance = runtime.Runtime.global() orelse return error.NoRuntime;
+                    const waker = runtime_instance.event_loop_instance.scheduler_instance.createWaker(0);
 
-                    // Suspend until readable
-                    suspend {
-                        // In a real implementation, we'd register a waker
-                    }
+                    // Register for read readiness
+                    try runtime_instance.registerIo(self.fd, .{ .readable = true }, &waker);
+
+                    // Yield execution until ready
+                    scheduler.yield();
                     continue;
                 },
                 else => return err,
@@ -257,16 +256,15 @@ pub const UdpSocket = struct {
         while (true) {
             const bytes_sent = std.posix.sendto(self.fd, data, 0, &address.any, address.getOsSockLen()) catch |err| switch (err) {
                 error.WouldBlock => {
-                    // Register for write readiness
-                    try self.reactor.register(.{
-                        .fd = self.fd,
-                        .events = .{ .writable = true },
-                    });
+                    // Get runtime for waker creation
+                    const runtime_instance = runtime.Runtime.global() orelse return error.NoRuntime;
+                    const waker = runtime_instance.event_loop_instance.scheduler_instance.createWaker(0);
 
-                    // Suspend until writable
-                    suspend {
-                        // In a real implementation, we'd register a waker
-                    }
+                    // Register for write readiness
+                    try runtime_instance.registerIo(self.fd, .{ .writable = true }, &waker);
+
+                    // Yield execution until ready
+                    scheduler.yield();
                     continue;
                 },
                 else => return err,
@@ -284,16 +282,15 @@ pub const UdpSocket = struct {
 
             const bytes_received = std.posix.recvfrom(self.fd, buffer, 0, &src_addr, &src_addr_len) catch |err| switch (err) {
                 error.WouldBlock => {
-                    // Register for read readiness
-                    try self.reactor.register(.{
-                        .fd = self.fd,
-                        .events = .{ .readable = true },
-                    });
+                    // Get runtime for waker creation
+                    const runtime_instance = runtime.Runtime.global() orelse return error.NoRuntime;
+                    const waker = runtime_instance.event_loop_instance.scheduler_instance.createWaker(0);
 
-                    // Suspend until readable
-                    suspend {
-                        // In a real implementation, we'd register a waker
-                    }
+                    // Register for read readiness
+                    try runtime_instance.registerIo(self.fd, .{ .readable = true }, &waker);
+
+                    // Yield execution until ready
+                    scheduler.yield();
                     continue;
                 },
                 else => return err,

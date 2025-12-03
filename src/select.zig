@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Select Combinator
+//! zsync- Select Combinator
 //! Race multiple futures and return the first to complete
 
 const std = @import("std");

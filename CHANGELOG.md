@@ -2,6 +2,37 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [v0.7.3] - 2025-12-03 ✨ **Cleanup & Zig 0.16 Readiness**
+
+### Highlights
+- Massive repo cleanup (removed legacy binaries, demos, and duplicate docs).
+- Alignment with Zig 0.16 removal of language-level async (scheduler, IO, time APIs updated).
+- New `docs/` suite: architecture, getting started, API reference, migration guide, and example index.
+- Local developer tooling under `dev/` with CI, Zig compatibility scanner, and memcheck helpers.
+
+### Added
+- `docs/MIGRATION.md` consolidating the previous `src/migration_guide.zig` content.
+- `archive/CODE_REVIEW.md` for maintainers (ongoing review log).
+- Example set (`examples/basic.zig`, `channels.zig`, `timers.zig`, `sync.zig`) plus README.
+- Performance benchmark guidance in `docs/PERFORMANCE.md` with representative numbers.
+
+### Changed
+- `build.zig` trimmed to existing targets (tests, benches, cross builds) with v0.7.3 branding.
+- Channels now document `trySend`/`tryRecv` fast paths.
+- `dev/ci.sh` enforces `zig fmt --check` and surfaces deprecated API scans.
+- `src/root.zig` and runtime modules updated to remove stale v0.5.0 references.
+
+### Removed
+- Duplicate docs (`docs/API.md`, `docs/api-reference.md`, `docs/getting-started.md`).
+- Legacy migration/test artifacts (`src/migration_guide.zig`, `tests/test_v0xx_*`).
+- Obsolete benchmark and demo binaries.
+
+### Verification
+- CI: 6 checks passing locally (`./dev/ci.sh`).
+- `zig build`, `zig build test`, `zig build bench` all succeed on Zig 0.16-dev.
+
+---
+
 ## [v0.6.1] - 2025-10-15 🔧 **CRITICAL HOTFIX - Zig 0.16 API Compliance**
 
 ### Fixed

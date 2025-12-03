@@ -1,4 +1,4 @@
-//! Zsync v0.1 - Hybrid Execution Models
+//! zsync - Hybrid Execution Models
 //! Dynamically switch between stackful and stackless execution based on runtime conditions
 //! This pushes Zsync ahead of the curve for future Zig async paradigms
 

@@ -1,4 +1,4 @@
-//! Frame Buffer Management System for Stackless Coroutines - Zsync v0.2.0
+//! Frame Buffer Management System for Stackless Coroutines - zsync
 //! Implements WASM-compatible stackless execution with efficient frame management
 
 const std = @import("std");

@@ -160,7 +160,7 @@ pub const AsyncDnsResolver = struct {
         self.cache_mutex.lock();
         defer self.cache_mutex.unlock();
         
-        const now = std.time.timestamp();
+        const now = @as(i64, std.posix.clock_gettime(.REALTIME).sec);
         
         if (self.cache.get(cache_key)) |entry| {
             if (!entry.isExpired(now)) {
@@ -201,7 +201,7 @@ pub const AsyncDnsResolver = struct {
             try self.evictOldestEntry();
         }
         
-        const now = std.time.timestamp();
+        const now = @as(i64, std.posix.clock_gettime(.REALTIME).sec);
         const expires_at = now + @as(i64, ttl);
         
         const owned_key = try self.allocator.dupe(u8, cache_key);

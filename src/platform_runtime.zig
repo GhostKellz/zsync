@@ -1,4 +1,4 @@
-//! Zsync v0.5.2 - Cross-Platform Async Runtime Selection
+//! zsync- Cross-Platform Async Runtime Selection
 //! Automatic platform detection and optimal backend selection
 
 const std = @import("std");
@@ -308,7 +308,7 @@ pub const PlatformRuntime = struct {
     
     /// Print detailed platform information
     pub fn printPlatformInfo(self: *const Self) void {
-        std.debug.print("\n🚀 Zsync v0.5.2 - Platform Runtime Information\n", .{});
+        std.debug.print("\n🚀 zsync - Platform Runtime Information\n", .{});
         std.debug.print("=" ** 50 ++ "\n", .{});
         std.debug.print("Platform: {s}\n", .{@tagName(builtin.os.tag)});
         std.debug.print("Architecture: {s}\n", .{@tagName(builtin.cpu.arch)});

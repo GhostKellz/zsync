@@ -1,4 +1,4 @@
-//! Zsync v0.4.0 - Modern ThreadPoolIo Implementation
+//! zsync- Modern ThreadPoolIo Implementation
 //! Uses a pool of OS threads to execute blocking I/O operations
 //! Provides parallelism for I/O-bound workloads with full cancellation support
 

@@ -1,9 +1,9 @@
-//! Zsync v0.1 - Deprecation Warnings System
+//! zsync - Deprecation Warnings System
 //! Provides compile-time and runtime warnings for deprecated patterns
 
 const std = @import("std");
 
-/// Emit a compile-time deprecation warning (disabled for v0.1.x stability)
+/// Emit a compile-time deprecation warning (disabled for current stability)
 pub fn compileTimeDeprecation(comptime message: []const u8) void {
     // Disabled to avoid compile errors during development
     _ = message;
@@ -73,7 +73,7 @@ pub fn deprecatedWrapper(comptime func: anytype, comptime reason: []const u8) @T
     }.wrapper;
 }
 
-// Common deprecation patterns for Zsync v1.x -> v0.1 migration
+// Common deprecation patterns for Zsync v1.x -> current migration
 
 /// Deprecated async/await syntax warning
 pub fn warnAsyncAwaitUsage() void {

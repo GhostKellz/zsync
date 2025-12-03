@@ -1,11 +1,11 @@
-//! Zsync v0.4.0 - Simple Demo
+//! zsync- Simple Demo
 //! Showcasing the core functionality without complex features
 
 const std = @import("std");
 const Zsync = @import("zsync");
 
 pub fn main() !void {
-    std.debug.print("🚀 Zsync v0.4.0 - The Tokio of Zig\n\n", .{});
+    std.debug.print("🚀 zsync - The Tokio of Zig\n\n", .{});
     
     // Simple demo task
     const DemoTask = struct {
@@ -14,7 +14,7 @@ pub fn main() !void {
             
             // This code works in ANY execution model!
             var io_mut = io;
-            var future = try io_mut.write("Hello from Zsync v0.4.0!\n");
+            var future = try io_mut.write("Hello from zsync!\n");
             defer future.destroy(std.heap.page_allocator);
             
             try future.await();

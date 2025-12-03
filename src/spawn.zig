@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Task Spawning API
+//! zsync- Task Spawning API
 //! Spawn and manage async tasks on the runtime
 
 const std = @import("std");

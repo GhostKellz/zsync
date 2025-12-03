@@ -28,6 +28,8 @@ const TimerEntry = struct {
     callback: *const fn () void,
     user_data: ?*anyopaque = null,
     cancelled: bool = false,
+    is_interval: bool = false,
+    interval_ms: u64 = 0,
 };
 
 /// Timer wheel implementation for efficient timer management
@@ -46,7 +48,7 @@ pub const TimerWheel = struct {
         return Self{
             .allocator = allocator,
             .timers = std.HashMap(u64, TimerEntry, std.hash_map.AutoContext(u64), std.hash_map.default_max_load_percentage).init(allocator),
-            .sorted_timers = std.ArrayList(u64){ .allocator = allocator },
+            .sorted_timers = .{},
             .next_timer_id = std.atomic.Value(u64).init(1),
             .start_time = getCurrentTimeMs(),
             .mutex = std.Thread.Mutex{},
@@ -57,9 +59,9 @@ pub const TimerWheel = struct {
     pub fn deinit(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         self.timers.deinit();
-        self.sorted_timers.deinit();
+        self.sorted_timers.deinit(self.allocator);
     }
 
     /// Get current time in milliseconds since runtime start
@@ -99,10 +101,44 @@ pub const TimerWheel = struct {
         };
 
         try self.timers.put(timer_id, entry);
-        
+
         // Insert timer ID in sorted order
         const insert_pos = self.findInsertPosition(expiry_time);
-        try self.sorted_timers.insert(insert_pos, timer_id);
+        try self.sorted_timers.insert(self.allocator, insert_pos, timer_id);
+
+        return TimerHandle{
+            .id = timer_id,
+            .wheel = self,
+        };
+    }
+
+    /// Schedule a repeating interval timer
+    pub fn scheduleInterval(self: *Self, period_ms: u64, callback: *const fn () void) !TimerHandle {
+        return self.scheduleIntervalWithData(period_ms, callback, null);
+    }
+
+    /// Schedule a repeating interval timer with user data
+    pub fn scheduleIntervalWithData(self: *Self, period_ms: u64, callback: *const fn () void, user_data: ?*anyopaque) !TimerHandle {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const timer_id = self.nextTimerId();
+        const expiry_time = getCurrentTimeMs() + period_ms;
+
+        const entry = TimerEntry{
+            .id = timer_id,
+            .expiry_time = expiry_time,
+            .callback = callback,
+            .user_data = user_data,
+            .is_interval = true,
+            .interval_ms = period_ms,
+        };
+
+        try self.timers.put(timer_id, entry);
+
+        // Insert timer ID in sorted order
+        const insert_pos = self.findInsertPosition(expiry_time);
+        try self.sorted_timers.insert(self.allocator, insert_pos, timer_id);
 
         return TimerHandle{
             .id = timer_id,
@@ -146,21 +182,32 @@ pub const TimerWheel = struct {
         // Process timers from the front of the sorted list
         while (self.sorted_timers.items.len > 0) {
             const timer_id = self.sorted_timers.items[0];
-            
-            if (self.timers.get(timer_id)) |timer| {
-                if (timer.expiry_time <= current_time and !timer.cancelled) {
-                    // Execute the timer callback
-                    timer.callback();
-                    processed += 1;
-                }
-                
+
+            if (self.timers.getPtr(timer_id)) |timer| {
                 if (timer.expiry_time > current_time) {
                     // No more expired timers
                     break;
                 }
+
+                if (!timer.cancelled) {
+                    // Execute the timer callback
+                    timer.callback();
+                    processed += 1;
+
+                    // Reschedule if this is an interval timer
+                    if (timer.is_interval) {
+                        timer.expiry_time = current_time + timer.interval_ms;
+
+                        // Remove from current position and reinsert in sorted order
+                        _ = self.sorted_timers.orderedRemove(0);
+                        const insert_pos = self.findInsertPosition(timer.expiry_time);
+                        self.sorted_timers.insert(self.allocator, insert_pos, timer_id) catch {};
+                        continue;
+                    }
+                }
             }
 
-            // Remove the processed timer
+            // Remove the processed or cancelled timer
             _ = self.sorted_timers.orderedRemove(0);
             _ = self.timers.remove(timer_id);
         }
@@ -225,13 +272,72 @@ pub fn sleep(duration_ms: u64) void {
     std.posix.nanosleep(0, duration_ms * std.time.ns_per_ms);
 }
 
+/// Global timer wheel for standalone timer functions
+var global_wheel: ?*TimerWheel = null;
+var global_wheel_mutex: std.Thread.Mutex = .{};
+
+/// Initialize global timer wheel (call once at startup)
+pub fn initGlobalTimerWheel(allocator: std.mem.Allocator) !void {
+    global_wheel_mutex.lock();
+    defer global_wheel_mutex.unlock();
+
+    if (global_wheel == null) {
+        const wheel = try allocator.create(TimerWheel);
+        wheel.* = try TimerWheel.init(allocator);
+        global_wheel = wheel;
+    }
+}
+
+/// Deinitialize global timer wheel
+pub fn deinitGlobalTimerWheel(allocator: std.mem.Allocator) void {
+    global_wheel_mutex.lock();
+    defer global_wheel_mutex.unlock();
+
+    if (global_wheel) |wheel| {
+        wheel.deinit();
+        allocator.destroy(wheel);
+        global_wheel = null;
+    }
+}
+
+/// Get the global timer wheel (creates one if needed with page allocator)
+fn getGlobalWheel() !*TimerWheel {
+    global_wheel_mutex.lock();
+    defer global_wheel_mutex.unlock();
+
+    if (global_wheel) |wheel| {
+        return wheel;
+    }
+
+    // Auto-create with page allocator
+    const wheel = try std.heap.page_allocator.create(TimerWheel);
+    wheel.* = try TimerWheel.init(std.heap.page_allocator);
+    global_wheel = wheel;
+    return wheel;
+}
+
 /// Create an interval timer that fires repeatedly
 pub fn interval(period_ms: u64, callback: *const fn () void) !TimerHandle {
-    // This would be implemented as a repeating timer
-    // For now, just schedule a single timeout
-    _ = period_ms;
-    _ = callback;
-    return error.NotImplemented;
+    const wheel = try getGlobalWheel();
+    return wheel.scheduleInterval(period_ms, callback);
+}
+
+/// Create a one-shot timeout timer
+pub fn timeout(delay_ms: u64, callback: *const fn () void) !TimerHandle {
+    const wheel = try getGlobalWheel();
+    return wheel.scheduleTimeout(delay_ms, callback);
+}
+
+/// Process all expired global timers (call this in your event loop)
+pub fn processGlobalTimers() u32 {
+    global_wheel_mutex.lock();
+    const wheel = global_wheel;
+    global_wheel_mutex.unlock();
+
+    if (wheel) |w| {
+        return w.processExpired();
+    }
+    return 0;
 }
 
 /// Delay execution by yielding to the runtime
@@ -243,20 +349,22 @@ pub fn delay(duration_ms: u64) void {
 
 // High-precision timing utilities
 
-/// Get current time in nanoseconds
+/// Get current time in nanoseconds (monotonic)
 pub fn nanoTime() u64 {
-    return @intCast(std.time.Instant.now() catch unreachable);
+    const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    return @intCast(@as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec)));
 }
 
-/// Get current time in microseconds
+/// Get current time in microseconds (monotonic)
 pub fn microTime() u64 {
-    return @intCast(std.time.microTimestamp());
+    const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    return @intCast(@divTrunc(@as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec)), std.time.ns_per_us));
 }
 
-/// Get current time in milliseconds
+/// Get current time in milliseconds (wall clock)
 pub fn milliTime() u64 {
     const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
-    return @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
+    return @intCast(@divTrunc(@as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec)), std.time.ns_per_ms));
 }
 
 /// Measure execution time of a function

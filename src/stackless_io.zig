@@ -1,4 +1,4 @@
-//! Zsync v0.1 - StacklessIo Implementation
+//! zsync - StacklessIo Implementation
 //! Uses stackless coroutines from proposal #23446
 //! Compatible with WASM and other platforms without stack swapping
 

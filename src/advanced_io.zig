@@ -1,4 +1,4 @@
-//! Zsync v0.1 - Advanced I/O Features
+//! zsync - Advanced I/O Features
 //! Implements semantic I/O operations like sendFile and vectorized writes
 //! Based on the new Writer interface from zig-new-async.md
 

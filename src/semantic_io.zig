@@ -1,4 +1,4 @@
-//! Semantic I/O Operations for Zsync v0.2.0
+//! Semantic I/O Operations for zsync
 //! Implements sendFile, drain, and splat parameters as described in Zig's new async I/O design
 
 const std = @import("std");

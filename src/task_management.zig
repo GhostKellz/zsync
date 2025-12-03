@@ -1,4 +1,4 @@
-//! Zsync v0.3.2 - Enhanced Task Management with Cancellation
+//! zsync- Enhanced Task Management with Cancellation
 //! Provides timeout support, task batching, and graceful cancellation
 
 const std = @import("std");

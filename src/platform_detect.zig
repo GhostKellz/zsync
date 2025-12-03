@@ -1,4 +1,4 @@
-//! Platform Detection Module for Zsync v0.6.0
+//! Platform Detection Module for zsync
 //! Detects distributions, package managers, and system capabilities
 
 const std = @import("std");

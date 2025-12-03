@@ -1,4 +1,4 @@
-//! Enhanced Error Handling and Resource Management for zsync v0.2.0
+//! Enhanced Error Handling and Resource Management for zsync
 //! Provides comprehensive error propagation, recovery, and resource cleanup
 
 const std = @import("std");

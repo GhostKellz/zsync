@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Thread Pool Execution Model
+//! zsync- Thread Pool Execution Model
 //! High-performance thread pool with auto-shutdown and work-stealing
 //! Implements the Io interface for seamless colorblind async
 
@@ -748,13 +748,7 @@ pub fn createDefaultThreadPool(allocator: std.mem.Allocator) !ThreadPoolIo {
 }
 
 // Tests
-// TODO: Fix worker thread shutdown
-test "ThreadPoolIo basic operations - skipped" {
-    // Skipping test due to worker thread shutdown issue
-    return error.SkipZigTest;
-}
-
-test "ThreadPoolIo basic operations - old" {
+test "ThreadPoolIo basic operations" {
     const testing = std.testing;
     const allocator = testing.allocator;
 

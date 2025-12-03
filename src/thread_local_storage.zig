@@ -1,4 +1,4 @@
-//! Zsync v0.1 - Thread-Local Storage Management
+//! zsync - Thread-Local Storage Management
 //! Provides efficient per-thread storage with automatic cleanup
 
 const std = @import("std");

@@ -1,4 +1,4 @@
-//! Zsync v0.4.0 - Green Threads with io_uring
+//! zsync- Green Threads with io_uring
 //! High-performance cooperative multitasking using io_uring for Linux
 
 const std = @import("std");

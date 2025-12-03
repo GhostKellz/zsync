@@ -1,4 +1,4 @@
-//! Zsync v0.7.0 - Async Filesystem Operations
+//! zsync - Async Filesystem Operations
 //! Non-blocking file I/O
 
 const std = @import("std");

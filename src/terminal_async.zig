@@ -1,4 +1,4 @@
-//! Zsync v0.3.2 - Terminal Emulator Async Support
+//! zsync- Terminal Emulator Async Support
 //! Async PTY I/O and concurrent rendering pipeline for terminal emulators like ghostty
 
 const std = @import("std");
@@ -30,7 +30,7 @@ pub const AsyncPTY = struct {
                 .bytes_written = std.atomic.Value(u64).init(0),
                 .read_operations = std.atomic.Value(u64).init(0),
                 .write_operations = std.atomic.Value(u64).init(0),
-                .last_activity = std.atomic.Value(i64).init(std.time.timestamp()),
+                .last_activity = std.atomic.Value(i64).init(@as(i64, std.posix.clock_gettime(.REALTIME).sec)),
             };
         }
     };
@@ -84,7 +84,7 @@ pub const AsyncPTY = struct {
     /// Write data to PTY asynchronously
     pub fn writeAsync(self: *Self, data: []const u8) !void {
         try self.input_buffer.appendSlice(data);
-        self.stats.last_activity.store(std.time.timestamp(), .monotonic);
+        self.stats.last_activity.store(@as(i64, std.posix.clock_gettime(.REALTIME).sec), .monotonic);
     }
     
     /// Read available data from PTY buffer
@@ -484,7 +484,7 @@ fn ptyReaderWorker(pty: *AsyncPTY) !void {
         try pty.output_buffer.appendSlice(buffer[0..bytes_read]);
         pty.stats.bytes_read.fetchAdd(bytes_read, .monotonic);
         pty.stats.read_operations.fetchAdd(1, .monotonic);
-        pty.stats.last_activity.store(std.time.timestamp(), .monotonic);
+        pty.stats.last_activity.store(@as(i64, std.posix.clock_gettime(.REALTIME).sec), .monotonic);
     }
 }
 
@@ -503,7 +503,7 @@ fn ptyWriterWorker(pty: *AsyncPTY) !void {
         
         pty.stats.bytes_written.fetchAdd(bytes_written, .monotonic);
         pty.stats.write_operations.fetchAdd(1, .monotonic);
-        pty.stats.last_activity.store(std.time.timestamp(), .monotonic);
+        pty.stats.last_activity.store(@as(i64, std.posix.clock_gettime(.REALTIME).sec), .monotonic);
     }
 }
 

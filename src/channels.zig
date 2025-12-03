@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Channel API
+//! zsync- Channel API
 //! Bounded and unbounded channels for async communication
 
 const std = @import("std");
@@ -165,12 +165,13 @@ pub fn UnboundedChannel(comptime T: type) type {
         mutex: std.Thread.Mutex,
         not_empty: std.Thread.Condition,
         closed: std.atomic.Value(bool),
+        allocator: std.mem.Allocator,
 
         const Self = @This();
 
-        pub fn init(allocator: std.mem.Allocator) !Self {
+        pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .items = std.ArrayList(T){},  // Proper ArrayList initialization
+                .items = .{},
                 .mutex = .{},
                 .not_empty = .{},
                 .closed = std.atomic.Value(bool).init(false),

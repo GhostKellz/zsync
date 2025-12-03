@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Sleep and Yield Primitives
+//! zsync- Sleep and Yield Primitives
 //! Async sleep and cooperative yielding
 
 const std = @import("std");

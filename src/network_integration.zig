@@ -1,4 +1,4 @@
-//! Zsync v0.3.2 - Network Integration Layer
+//! zsync- Network Integration Layer
 //! Coordinates external HTTP/QUIC clients with zsync's async scheduler
 //! Perfect for Reaper (AUR helper) and ghostnet integration
 

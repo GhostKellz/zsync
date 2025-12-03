@@ -1,0 +1,48 @@
+=== Zsync v0.7.3 Linux Benchmarks ===
+Platform: Linux
+Architecture: x86_64
+
+Running Task Spawn (Blocking)...
+
+Task Spawn (Blocking):
+  Iterations: 10000
+  Total time: 0ms
+  Average: 16ns
+  Throughput: 58841527 ops/sec
+Running Task Spawn (Thread Pool)...
+
+Task Spawn (Thread Pool):
+  Iterations: 1000
+  Total time: 68ms
+  Average: 68783ns
+  Throughput: 14538 ops/sec
+Running Channel Send/Recv...
+
+Channel Send/Recv:
+  Iterations: 100000
+  Total time: 0ms
+  Average: 9ns
+  Throughput: 110505907 ops/sec
+Running Buffer Pool Acquire/Release...
+
+Buffer Pool Acquire/Release:
+  Iterations: 100000
+  Total time: 0ms
+  Average: 9ns
+  Throughput: 108807061 ops/sec
+Running Nursery Create/Spawn/Wait...
+
+Nursery Create/Spawn/Wait:
+  Iterations: 1000
+  Total time: 167ms
+  Average: 167222ns
+  Throughput: 5980 ops/sec
+Running Stream Map+Filter+Count (10K items)...
+
+Stream Map+Filter+Count (10K items):
+  Iterations: 100
+  Total time: 5ms
+  Average: 55272ns
+  Throughput: 18092 ops/sec
+
+=== Benchmark Complete ===

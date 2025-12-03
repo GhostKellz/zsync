@@ -8,7 +8,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("🚀 Zsync v0.5.2 - Cross-Platform Async Runtime\n", .{});
+    std.debug.print("🚀 zsync - Cross-Platform Async Runtime\n", .{});
     std.debug.print("=" ** 60 ++ "\n", .{});
     
     // Create platform-optimized runtime factory
@@ -35,7 +35,7 @@ pub fn main() !void {
     // Demonstrate async I/O
     std.debug.print("\n📡 Testing Async Operations...\n", .{});
     
-    const test_message = "Hello from Zsync v0.5.2 cross-platform runtime!";
+    const test_message = "Hello from zsync cross-platform runtime!";
     var write_future = io.write(test_message) catch |err| switch (err) {
         error.NotSupported => {
             std.debug.print("ℹ️  Async I/O not fully implemented for this platform yet\n", .{});
@@ -83,5 +83,5 @@ pub fn main() !void {
     try root.helloWorld(allocator);
     
     std.debug.print("\n🎉 Cross-platform runtime test completed successfully!\n", .{});
-    std.debug.print("✨ Zsync v0.5.2 is ready for {s} production use!\n", .{async_runtime.getBackendName()});
+    std.debug.print("✨ zsync is ready for {s} production use!\n", .{async_runtime.getBackendName()});
 }

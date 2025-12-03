@@ -1,4 +1,4 @@
-//! Zsync v0.5.3 - Enhanced Green Threads with Advanced io_uring
+//! zsync- Enhanced Green Threads with Advanced io_uring
 //! High-performance cooperative multitasking with SQPOLL, buffer rings, and advanced features
 
 const std = @import("std");

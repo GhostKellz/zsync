@@ -1,4 +1,4 @@
-//! Comprehensive Testing Framework for Zsync v0.2.0
+//! Comprehensive Testing Framework for zsync
 //! Provides testing utilities, edge case validation, and stress testing
 
 const std = @import("std");
@@ -116,7 +116,7 @@ pub const TestSuite = struct {
     
     /// Run all tests across all Io implementations
     pub fn runAllTests(self: *Self) !TestResults {
-        std.debug.print("🧪 Zsync v0.1 Comprehensive Test Suite\n");
+        std.debug.print("🧪 zsync Comprehensive Test Suite\n");
         std.debug.print("=====================================\n\n");
         
         // Test 1: BlockingIo
@@ -473,7 +473,7 @@ pub const TestSuite = struct {
     // Core functionality tests
     fn runCoreTests(_: *Self, io: Zsync.Io) !void {
         // Test file operations
-        const test_data = "Zsync v0.1 core test data";
+        const test_data = "zsync core test data";
         const file = try Zsync.Dir.cwd().createFile(io, "core_test.txt", .{});
         defer file.close(io) catch {};
         

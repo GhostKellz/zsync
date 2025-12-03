@@ -1,32 +1,30 @@
-//! Zsync Thread Pool Stub for WASM/WASI  
-//! Provides compatible API but no actual threading functionality
+//! Thread Pool Stub for WASM
+//! WASM doesn't support native threads, so this provides a no-op implementation
 
 const std = @import("std");
 const io_interface = @import("io_interface.zig");
 
-/// Stubbed ThreadPoolIo for WASM compatibility
+/// Stub ThreadPoolIo for WASM - no actual threading
 pub const ThreadPoolIo = struct {
     allocator: std.mem.Allocator,
-    
-    pub fn init(allocator: std.mem.Allocator, thread_count: u32, buffer_size: u32) !ThreadPoolIo {
-        _ = thread_count;
-        _ = buffer_size;
-        return ThreadPoolIo{ .allocator = allocator };
-    }
-    
-    pub fn deinit(self: *ThreadPoolIo) void {
-        _ = self;
-    }
-    
-    pub fn io(self: *ThreadPoolIo) io_interface.Io {
-        // Return a blocking I/O implementation as fallback
-        var blocking = @import("blocking_io.zig").BlockingIo.init(self.allocator, 4096);
-        return blocking.io();
-    }
-};
+    thread_count: u32,
 
-/// Stub error types
-pub const ThreadPoolError = error{
-    ThreadingNotAvailable,
-    InitializationFailed,
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, thread_count: u32, _: u32) !Self {
+        return Self{
+            .allocator = allocator,
+            .thread_count = thread_count,
+        };
+    }
+
+    pub fn deinit(_: *Self) void {}
+
+    pub fn io(_: *Self) io_interface.Io {
+        // Return a blocking I/O interface for WASM
+        return io_interface.Io{
+            .vtable = undefined,
+            .userdata = undefined,
+        };
+    }
 };

@@ -1,4 +1,4 @@
-//! Zsync v0.5.2 - Conditional Platform Imports
+//! zsync- Conditional Platform Imports
 //! Prevents platform-specific code from being compiled on wrong targets
 
 const std = @import("std");

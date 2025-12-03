@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Generic Future Type
+//! zsync- Generic Future Type
 //! Future for async operations with any result type
 
 const std = @import("std");

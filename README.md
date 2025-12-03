@@ -170,8 +170,18 @@ Contributions are welcome! Please ensure:
 
 MIT License - See [LICENSE](LICENSE) for details.
 
+## Documentation
+
+- [Getting Started](docs/GETTING_STARTED.md) - Installation and first steps
+- [API Reference](docs/API_REFERENCE.md) - Complete API documentation
+- [Examples](docs/EXAMPLES.md) - Code examples and patterns
+- [Architecture](docs/architecture.md) - Design and internals
+- [Performance](docs/PERFORMANCE.md) - Benchmarks and optimization
+- [Migration Guide](docs/MIGRATION.md) - Upgrading between versions
+- [WASM Features](docs/wasm/RIPPLE_WASM_FEATURES.md) - WebAssembly support
+
 ## Links
 
 - [Repository](https://github.com/ghostkellz/zsync)
-- [Documentation](https://github.com/ghostkellz/zsync/wiki)
 - [Issues](https://github.com/ghostkellz/zsync/issues)
+- [CI Status](ACTIONS_STATUS.md) - Self-hosted runner infrastructure

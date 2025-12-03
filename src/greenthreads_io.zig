@@ -1,4 +1,4 @@
-//! Zsync v0.4.0 - Modern GreenThreadsIo Implementation  
+//! zsync- Modern GreenThreadsIo Implementation  
 //! Green threads with cooperative task switching and platform-specific async I/O
 //! Uses io_uring on Linux for maximum performance
 
