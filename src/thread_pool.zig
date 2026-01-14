@@ -6,6 +6,23 @@ const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 
+/// Generate a random usize using OS entropy
+fn randomUsize() usize {
+    var buf: [@sizeOf(usize)]u8 = undefined;
+    if (builtin.os.tag == .linux) {
+        var filled: usize = 0;
+        while (filled < buf.len) {
+            const rc = std.os.linux.getrandom(buf[filled..].ptr, buf.len - filled, 0);
+            if (std.os.linux.errno(rc) == .SUCCESS) {
+                filled += rc;
+            }
+        }
+    } else {
+        @memset(&buf, 0x42); // Fallback
+    }
+    return std.mem.readInt(usize, &buf, .little);
+}
+
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
 const IoError = io_interface.IoError;
@@ -196,7 +213,7 @@ const Worker = struct {
         switch (item.task) {
             .read => |*read_task| {
                 // Simulate async read with actual file I/O
-                const bytes_read = std.crypto.random.int(usize) % read_task.buffer.len;
+                const bytes_read = randomUsize() % read_task.buffer.len;
                 @memset(read_task.buffer[0..bytes_read], 'T'); // 'T' for ThreadPool
                 read_task.result = bytes_read;
             },
@@ -211,7 +228,7 @@ const Worker = struct {
                 for (readv_task.buffers) |*buffer| {
                     const available = buffer.available();
                     if (available.len > 0) {
-                        const bytes_read = std.crypto.random.int(usize) % @min(available.len, 256);
+                        const bytes_read = randomUsize() % @min(available.len, 256);
                         @memset(available[0..bytes_read], 'V'); // 'V' for Vectorized
                         buffer.advance(bytes_read);
                         total_bytes += bytes_read;

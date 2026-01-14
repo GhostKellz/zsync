@@ -347,7 +347,7 @@ pub const IoUring = struct {
         const sq_mmap = std.posix.mmap(
             null,
             sq_size,
-            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{ .TYPE = .SHARED },
             ring_fd,
             IORING_OFF_SQ_RING,
@@ -363,7 +363,7 @@ pub const IoUring = struct {
             std.posix.mmap(
                 null,
                 cq_size,
-                std.posix.PROT.READ | std.posix.PROT.WRITE,
+                .{ .READ = true, .WRITE = true },
                 .{ .TYPE = .SHARED },
                 ring_fd,
                 IORING_OFF_CQ_RING,
@@ -377,7 +377,7 @@ pub const IoUring = struct {
         const sqe_mmap = std.posix.mmap(
             null,
             sqe_size,
-            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{ .TYPE = .SHARED },
             ring_fd,
             IORING_OFF_SQES,

@@ -4,6 +4,28 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// Check if a file exists at the given absolute path
+fn fileExists(path: []const u8) bool {
+    if (builtin.os.tag == .linux) {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        if (path.len >= path_buf.len) return false;
+        @memcpy(path_buf[0..path.len], path);
+        path_buf[path.len] = 0;
+        const path_z: [*:0]const u8 = @ptrCast(&path_buf);
+        const rc = std.os.linux.access(path_z, std.os.linux.F_OK);
+        return std.os.linux.errno(rc) == .SUCCESS;
+    }
+    return false;
+}
+
+/// Read file contents into buffer, returns bytes read or 0 on error
+fn readFileContents(path: []const u8, buf: []u8) usize {
+    const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch return 0;
+    defer std.posix.close(fd);
+    const bytes_read = std.posix.read(fd, buf) catch return 0;
+    return bytes_read;
+}
+
 /// Linux distribution information
 pub const LinuxDistro = enum {
     arch,
@@ -61,54 +83,33 @@ pub fn detectLinuxDistro() LinuxDistro {
     }
     
     // Try legacy detection methods
-    if (std.fs.accessAbsolute("/etc/arch-release", .{})) |_| {
-        return .arch;
-    } else |_| {}
-    
-    if (std.fs.accessAbsolute("/etc/debian_version", .{})) |_| {
-        return .debian;
-    } else |_| {}
-    
-    if (std.fs.accessAbsolute("/etc/fedora-release", .{})) |_| {
-        return .fedora;
-    } else |_| {}
-    
-    if (std.fs.accessAbsolute("/etc/redhat-release", .{})) |_| {
+    if (fileExists("/etc/arch-release")) return .arch;
+    if (fileExists("/etc/debian_version")) return .debian;
+    if (fileExists("/etc/fedora-release")) return .fedora;
+
+    if (fileExists("/etc/redhat-release")) {
         // Could be RHEL, CentOS, or Fedora
-        const content = std.fs.cwd().readFileAlloc(
-            "/etc/redhat-release",
-            std.heap.page_allocator,
-            std.Io.Limit.limited(1024)
-        ) catch return .unknown;
-        defer std.heap.page_allocator.free(content);
-        
+        var buf: [1024]u8 = undefined;
+        const bytes_read = readFileContents("/etc/redhat-release", &buf);
+        const content = buf[0..bytes_read];
+
         if (std.mem.indexOf(u8, content, "Fedora") != null) return .fedora;
         if (std.mem.indexOf(u8, content, "CentOS") != null) return .centos;
         if (std.mem.indexOf(u8, content, "Red Hat") != null) return .rhel;
-    } else |_| {}
-    
-    if (std.fs.accessAbsolute("/etc/gentoo-release", .{})) |_| {
-        return .gentoo;
-    } else |_| {}
-    
-    if (std.fs.accessAbsolute("/etc/alpine-release", .{})) |_| {
-        return .alpine;
-    } else |_| {}
-    
-    if (std.fs.accessAbsolute("/etc/void-release", .{})) |_| {
-        return .void;
-    } else |_| {}
+    }
+
+    if (fileExists("/etc/gentoo-release")) return .gentoo;
+    if (fileExists("/etc/alpine-release")) return .alpine;
+    if (fileExists("/etc/void-release")) return .void;
     
     return .unknown;
 }
 
 /// Parse /etc/os-release for distribution information
 fn parseOsRelease() ?LinuxDistro {
-    const file = std.fs.openFileAbsolute("/etc/os-release", .{}) catch return null;
-    defer file.close();
-    
     var buf: [4096]u8 = undefined;
-    const bytes_read = file.preadAll(&buf, 0) catch return null;
+    const bytes_read = readFileContents("/etc/os-release", &buf);
+    if (bytes_read == 0) return null;
     const content = buf[0..bytes_read];
     
     var lines = std.mem.tokenizeScalar(u8, content, '\n');
@@ -184,21 +185,16 @@ pub fn detectSystemCapabilities() SystemCapabilities {
 /// Check if systemd is available
 fn checkSystemd() bool {
     if (builtin.os.tag != .linux) return false;
-    
-    // Check for systemd by looking for systemctl
-    std.fs.accessAbsolute("/usr/bin/systemctl", .{}) catch return false;
-    return true;
+    return fileExists("/usr/bin/systemctl");
 }
 
 /// Get total system memory
 fn getTotalMemory() u64 {
     if (builtin.os.tag != .linux) return 0;
-    
-    const file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return 0;
-    defer file.close();
-    
+
     var buf: [4096]u8 = undefined;
-    const bytes_read = file.preadAll(&buf, 0) catch return 0;
+    const bytes_read = readFileContents("/proc/meminfo", &buf);
+    if (bytes_read == 0) return 0;
     const content = buf[0..bytes_read];
     
     var lines = std.mem.tokenizeScalar(u8, content, '\n');
@@ -385,45 +381,37 @@ pub const PackageManagerPaths = struct {
 /// Detect installed package manager
 pub fn detectPackageManager() PackageManager {
     // Check for Homebrew (macOS/Linux)
-    if (std.fs.accessAbsolute("/opt/homebrew/bin/brew", .{}) catch false or
-        std.fs.accessAbsolute("/usr/local/bin/brew", .{}) catch false or
-        std.fs.accessAbsolute("/home/linuxbrew/.linuxbrew/bin/brew", .{}) catch false)
+    if (fileExists("/opt/homebrew/bin/brew") or
+        fileExists("/usr/local/bin/brew") or
+        fileExists("/home/linuxbrew/.linuxbrew/bin/brew"))
     {
         return .homebrew;
     }
 
     // Check for apt (Debian/Ubuntu)
-    if (std.fs.accessAbsolute("/usr/bin/apt", .{}) catch false or
-        std.fs.accessAbsolute("/usr/bin/apt-get", .{}) catch false)
-    {
+    if (fileExists("/usr/bin/apt") or fileExists("/usr/bin/apt-get")) {
         return .apt;
     }
 
     // Check for pacman (Arch Linux)
-    if (std.fs.accessAbsolute("/usr/bin/pacman", .{}) catch false) {
-        return .pacman;
-    }
+    if (fileExists("/usr/bin/pacman")) return .pacman;
 
     // Check for dnf (Fedora 22+)
-    if (std.fs.accessAbsolute("/usr/bin/dnf", .{}) catch false) {
-        return .dnf;
-    }
+    if (fileExists("/usr/bin/dnf")) return .dnf;
 
     // Check for yum (RHEL/CentOS/older Fedora)
-    if (std.fs.accessAbsolute("/usr/bin/yum", .{}) catch false) {
-        return .yum;
-    }
+    if (fileExists("/usr/bin/yum")) return .yum;
 
     // Check for nix
-    if (std.fs.accessAbsolute("/nix/var/nix/profiles/default/bin/nix", .{}) catch false or
-        std.fs.accessAbsolute("/run/current-system/sw/bin/nix", .{}) catch false)
+    if (fileExists("/nix/var/nix/profiles/default/bin/nix") or
+        fileExists("/run/current-system/sw/bin/nix"))
     {
         return .nix;
     }
 
     // Check for guix
-    if (std.fs.accessAbsolute("/usr/bin/guix", .{}) catch false or
-        std.fs.accessAbsolute("/var/guix/profiles/per-user/root/current-guix/bin/guix", .{}) catch false)
+    if (fileExists("/usr/bin/guix") or
+        fileExists("/var/guix/profiles/per-user/root/current-guix/bin/guix"))
     {
         return .guix;
     }
@@ -431,18 +419,17 @@ pub fn detectPackageManager() PackageManager {
     // Windows package managers
     if (builtin.os.tag == .windows) {
         // Check for Chocolatey
-        if (std.fs.accessAbsolute("C:\\ProgramData\\chocolatey\\bin\\choco.exe", .{}) catch false) {
+        if (fileExists("C:\\ProgramData\\chocolatey\\bin\\choco.exe")) {
             return .chocolatey;
         }
 
         // Check for Scoop (in user profile)
-        // Note: This is a simplified check
         if (std.posix.getenv("SCOOP")) |_| {
             return .scoop;
         }
 
         // Check for winget
-        if (std.fs.accessAbsolute("C:\\Program Files\\WindowsApps", .{}) catch false) {
+        if (fileExists("C:\\Program Files\\WindowsApps")) {
             return .winget;
         }
     }

@@ -5,6 +5,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
+
+/// Sleep for specified seconds and nanoseconds using syscall
+fn nanosleepNs(sec: isize, nsec: isize) void {
+    if (builtin.os.tag == .linux) {
+        const ts = std.os.linux.timespec{ .sec = sec, .nsec = nsec };
+        _ = std.os.linux.nanosleep(&ts, null);
+    }
+}
 const blocking_io = @import("blocking_io.zig");
 
 // Conditional thread pool import - not available on WASM
@@ -532,7 +540,7 @@ pub const Runtime = struct {
         self.shutdown();
 
         // Give workers a brief moment to receive shutdown signal and exit
-        std.posix.nanosleep(0, 5 * std.time.ns_per_ms);
+        nanosleepNs(0, 5 * std.time.ns_per_ms);
 
         // Calculate execution time using Instant API
         const end_instant = std.time.Instant.now() catch unreachable;

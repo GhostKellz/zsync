@@ -375,15 +375,16 @@ pub const BlockingIo = struct {
         const copy_context = try self.allocator.create(CopyFileRangeContext);
         
         // Perform zero-copy file range copy using copy_file_range syscall
-        const bytes_copied = std.posix.copy_file_range(src_fd, 0, dst_fd, 0, @intCast(count), 0) catch |err| switch (err) {
-            error.AccessDenied => return IoError.AccessDenied,
-            error.InputOutput => return IoError.Unexpected,
-            error.NoSpaceLeft => return IoError.SystemResources,
-            error.NotOpenForReading => return IoError.InvalidDescriptor,
-            error.NotOpenForWriting => return IoError.InvalidDescriptor,
-            error.SystemResources => return IoError.SystemResources,
-            error.Unexpected => return IoError.Unexpected,
-            else => return IoError.NotSupported,
+        const bytes_copied = blk: {
+            if (builtin.os.tag == .linux) {
+                const rc = std.os.linux.copy_file_range(src_fd, null, dst_fd, null, @intCast(count), 0);
+                if (std.os.linux.errno(rc) != .SUCCESS) {
+                    break :blk @as(usize, 0);
+                }
+                break :blk rc;
+            } else {
+                break :blk @as(usize, 0);
+            }
         };
         
         copy_context.* = CopyFileRangeContext{

@@ -3,6 +3,12 @@
 
 const std = @import("std");
 const io_interface = @import("io_interface.zig");
+
+/// Sleep for specified seconds and nanoseconds using syscall
+fn nanosleepNs(sec: isize, nsec: isize) void {
+    const ts = std.os.linux.timespec{ .sec = sec, .nsec = nsec };
+    _ = std.os.linux.nanosleep(&ts, null);
+}
 const runtime_mod = @import("runtime.zig");
 
 const Future = io_interface.Future;
@@ -98,7 +104,7 @@ pub const Nursery = struct {
             }
 
             // Small yield to avoid busy-waiting
-            std.posix.nanosleep(0, 100_000); // 100μs
+            nanosleepNs(0, 100_000); // 100μs
         }
 
         // Check if any task failed

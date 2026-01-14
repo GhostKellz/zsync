@@ -2,6 +2,15 @@
 //! Provides high-resolution timers and delay functionality
 
 const std = @import("std");
+const builtin = @import("builtin");
+
+/// Sleep for specified seconds and nanoseconds using syscall
+fn nanosleepNs(sec: isize, nsec: isize) void {
+    if (builtin.os.tag == .linux) {
+        const ts = std.os.linux.timespec{ .sec = sec, .nsec = nsec };
+        _ = std.os.linux.nanosleep(&ts, null);
+    }
+}
 
 /// Timer handle for managing scheduled timeouts
 pub const TimerHandle = struct {
@@ -447,7 +456,7 @@ test "timer cancellation" {
 test "time measurement" {
     const TestFunction = struct {
         fn slowFunction() u32 {
-            std.posix.nanosleep(0, 1 * std.time.ns_per_ms); // Sleep for 1ms
+            nanosleepNs(0, 1 * std.time.ns_per_ms); // Sleep for 1ms
             return 42;
         }
     };

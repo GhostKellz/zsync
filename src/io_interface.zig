@@ -5,6 +5,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// Sleep for specified seconds and nanoseconds using syscall
+fn nanosleepNs(sec: isize, nsec: isize) void {
+    if (builtin.os.tag == .linux) {
+        const ts = std.os.linux.timespec{ .sec = sec, .nsec = nsec };
+        _ = std.os.linux.nanosleep(&ts, null);
+    }
+}
+
 /// Execution mode selection for colorblind async
 pub const IoMode = enum {
     blocking,   // Direct syscalls, C-equivalent performance
@@ -173,7 +181,7 @@ pub const Future = struct {
                 .pending => {
                     // Yield based on execution mode
                     switch (io_mode) {
-                        .blocking => std.posix.nanosleep(0, 100_000), // 100μs cooperative yield
+                        .blocking => nanosleepNs(0, 100_000), // 100μs cooperative yield
                         .evented => yield(), // Platform-specific yield
                         .auto => autoYield(),
                     }
@@ -560,12 +568,7 @@ pub const Combinators = struct {
 
 // Platform-specific yield implementations
 fn yield() void {
-    switch (builtin.os.tag) {
-        .linux => std.posix.nanosleep(0, 1000), // Simple yield
-        .windows => std.posix.nanosleep(0, 1000), // Windows yield not easily accessible
-        .macos => std.posix.nanosleep(0, 1000), // macOS doesn't have direct yield
-        else => std.posix.nanosleep(0, 1000),
-    }
+    nanosleepNs(0, 1000); // Simple yield
 }
 
 fn autoYield() void {
@@ -573,7 +576,7 @@ fn autoYield() void {
     if (std.Thread.getCpuCount() catch 1 > 1) {
         yield(); // Multi-core: proper yield
     } else {
-        std.posix.nanosleep(0, 10_000); // Single-core: longer sleep
+        nanosleepNs(0, 10_000); // Single-core: longer sleep
     }
 }
 
