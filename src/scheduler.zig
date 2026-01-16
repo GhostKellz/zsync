@@ -208,6 +208,7 @@ pub const AsyncScheduler = struct {
     next_frame_id: std.atomic.Value(u32),
     running: std.atomic.Value(bool),
     mutex: std.Thread.Mutex,
+    is_shutdown: bool,
 
     const Self = @This();
 
@@ -220,6 +221,7 @@ pub const AsyncScheduler = struct {
             .next_frame_id = std.atomic.Value(u32).init(1),
             .running = std.atomic.Value(bool).init(false),
             .mutex = std.Thread.Mutex{},
+            .is_shutdown = false,
         };
     }
 
@@ -227,15 +229,19 @@ pub const AsyncScheduler = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        // Guard against double-free
+        if (self.is_shutdown) return;
+        self.is_shutdown = true;
+
         self.ready_queue.deinit();
-        
+
         // Clean up suspended frames first
         var suspended_iter = self.suspended_frames.iterator();
         while (suspended_iter.next()) |entry| {
             entry.value_ptr.*.state = .cancelled;
         }
         self.suspended_frames.deinit();
-        
+
         // Clean up frame pool with proper resource management
         for (self.frame_pool.items) |frame| {
             // Ensure frame is properly cancelled before destruction

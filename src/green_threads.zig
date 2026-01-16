@@ -107,19 +107,25 @@ pub const GreenThreadsIo = struct {
         blocked_queue: std.ArrayList(*GreenThread),
         current_thread: ?*GreenThread,
         allocator: std.mem.Allocator,
-        
+        is_shutdown: bool,
+
         const SchedulerSelf = @This();
-        
+
         pub fn init(allocator: std.mem.Allocator) SchedulerSelf {
             return SchedulerSelf{
                 .ready_queue = std.ArrayList(*GreenThread){},
                 .blocked_queue = std.ArrayList(*GreenThread){},
                 .current_thread = null,
                 .allocator = allocator,
+                .is_shutdown = false,
             };
         }
-        
+
         pub fn deinit(self: *SchedulerSelf) void {
+            // Guard against double-free: only cleanup once
+            if (self.is_shutdown) return;
+            self.is_shutdown = true;
+
             // Clean up threads
             for (self.ready_queue.items) |thread| {
                 thread.deinit();
@@ -127,7 +133,7 @@ pub const GreenThreadsIo = struct {
             for (self.blocked_queue.items) |thread| {
                 thread.deinit();
             }
-            
+
             self.ready_queue.deinit(self.allocator);
             self.blocked_queue.deinit(self.allocator);
         }

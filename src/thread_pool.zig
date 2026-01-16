@@ -265,6 +265,7 @@ pub const ThreadPoolIo = struct {
     thread_count: u32,
     buffer_size: usize,
     metrics: Metrics,
+    is_shutdown: bool,
 
     const Self = @This();
     
@@ -292,6 +293,7 @@ pub const ThreadPoolIo = struct {
             .thread_count = actual_threads,
             .buffer_size = buffer_size,
             .metrics = Metrics{},
+            .is_shutdown = false,
         };
 
         // Spawn worker threads
@@ -304,6 +306,10 @@ pub const ThreadPoolIo = struct {
     
     /// Cleanup thread pool
     pub fn deinit(self: *Self) void {
+        // Guard against double-free
+        if (self.is_shutdown) return;
+        self.is_shutdown = true;
+
         // Signal shutdown
         self.queue.requestShutdown();
 

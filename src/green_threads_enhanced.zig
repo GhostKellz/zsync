@@ -125,14 +125,17 @@ pub const EnhancedGreenThreadsIo = struct {
     // Current execution
     current_thread: ?u32,
     main_context: arch.Context,
-    
+
     // Performance tracking
     metrics: Metrics,
-    
+
     // Advanced scheduling
     scheduler: WorkStealingScheduler,
     numa_topology: ?NumaTopology,
-    
+
+    // Shutdown guard
+    is_shutdown: bool,
+
     const Self = @This();
     
     const Metrics = struct {
@@ -159,59 +162,89 @@ pub const EnhancedGreenThreadsIo = struct {
         local_queues: []std.atomic.Queue(u32),
         global_queue: std.atomic.Queue(u32),
         num_workers: u32,
-        
+        allocator: std.mem.Allocator,
+        is_shutdown: bool,
+
         pub fn init(allocator: std.mem.Allocator, num_workers: u32) !WorkStealingScheduler {
             const local_queues = try allocator.alloc(std.atomic.Queue(u32), num_workers);
             for (local_queues) |*queue| {
                 queue.* = std.atomic.Queue(u32).init();
             }
-            
+
             return WorkStealingScheduler{
                 .local_queues = local_queues,
                 .global_queue = std.atomic.Queue(u32).init(),
                 .num_workers = num_workers,
+                .allocator = allocator,
+                .is_shutdown = false,
             };
         }
-        
+
         pub fn deinit(self: *WorkStealingScheduler, allocator: std.mem.Allocator) void {
+            if (self.is_shutdown) return;
+            self.is_shutdown = true;
+
+            // Drain and free all nodes from local queues
+            for (self.local_queues) |*queue| {
+                while (queue.get()) |node| {
+                    self.allocator.destroy(node);
+                }
+            }
+            // Drain and free all nodes from global queue
+            while (self.global_queue.get()) |node| {
+                self.allocator.destroy(node);
+            }
+
             allocator.free(self.local_queues);
         }
-        
+
         pub fn schedule(self: *WorkStealingScheduler, thread_id: u32, worker_id: u32) void {
+            if (self.is_shutdown) return;
+
+            // Heap-allocate the node to avoid use-after-free
+            const node = self.allocator.create(std.atomic.Queue(u32).Node) catch return;
+            node.* = .{ .data = thread_id, .next = null };
+
             // Try local queue first
             if (worker_id < self.local_queues.len) {
-                const node = std.atomic.Queue(u32).Node{ .data = thread_id, .next = null };
-                self.local_queues[worker_id].put(&node);
+                self.local_queues[worker_id].put(node);
             } else {
                 // Fall back to global queue
-                const node = std.atomic.Queue(u32).Node{ .data = thread_id, .next = null };
-                self.global_queue.put(&node);
+                self.global_queue.put(node);
             }
         }
-        
+
         pub fn steal(self: *WorkStealingScheduler, worker_id: u32) ?u32 {
+            if (self.is_shutdown) return null;
+
             // Try local queue first
             if (worker_id < self.local_queues.len) {
                 if (self.local_queues[worker_id].get()) |node| {
-                    return node.data;
+                    const data = node.data;
+                    self.allocator.destroy(node);
+                    return data;
                 }
             }
-            
+
             // Try stealing from other workers
             var i: u32 = 0;
             while (i < self.num_workers) : (i += 1) {
                 if (i != worker_id) {
                     if (self.local_queues[i].get()) |node| {
-                        return node.data;
+                        const data = node.data;
+                        self.allocator.destroy(node);
+                        return data;
                     }
                 }
             }
-            
+
             // Try global queue
             if (self.global_queue.get()) |node| {
-                return node.data;
+                const data = node.data;
+                self.allocator.destroy(node);
+                return data;
             }
-            
+
             return null;
         }
     };
@@ -293,6 +326,7 @@ pub const EnhancedGreenThreadsIo = struct {
             .metrics = Metrics.init(),
             .scheduler = scheduler,
             .numa_topology = numa_topology,
+            .is_shutdown = false,
         };
         
         // Set up CPU affinity for the main thread if enabled
@@ -304,21 +338,25 @@ pub const EnhancedGreenThreadsIo = struct {
     }
     
     pub fn deinit(self: *Self) void {
+        // Guard against double-free
+        if (self.is_shutdown) return;
+        self.is_shutdown = true;
+
         // Clean up all green threads
         for (self.threads.items) |*thread| {
             thread.deinit(self.allocator);
         }
         self.threads.deinit();
         self.io_wait_queue.deinit();
-        
+
         // Clean up scheduler
         self.scheduler.deinit(self.allocator);
-        
+
         // Clean up NUMA topology
         if (self.numa_topology) |*topology| {
             topology.deinit(self.allocator);
         }
-        
+
         // Clean up io_uring
         self.io_uring.deinit();
     }
