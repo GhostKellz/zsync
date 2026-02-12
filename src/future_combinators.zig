@@ -2,6 +2,7 @@
 //! Implements Future.all(), Future.race(), timeout, and cancellation primitives
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const io_v2 = @import("io_v2.zig");
 
 /// Enhanced Future with v0.7 combinators
@@ -140,7 +141,7 @@ fn AllContext(comptime T: type) type {
         errors: []?anyerror,
         completion_count: std.atomic.Value(usize),
         completed: std.atomic.Value(bool),
-        result_mutex: std.Thread.Mutex,
+        result_mutex: compat.Mutex,
         condition: std.Thread.Condition,
         
         const Self = @This();
@@ -158,7 +159,7 @@ fn AllContext(comptime T: type) type {
                 .errors = errors,
                 .completion_count = std.atomic.Value(usize).init(0),
                 .completed = std.atomic.Value(bool).init(false),
-                .result_mutex = std.Thread.Mutex{},
+                .result_mutex = compat.Mutex{},
                 .condition = std.Thread.Condition{},
             };
         }
@@ -227,7 +228,7 @@ fn RaceContext(comptime T: type) type {
         winner_index: ?usize,
         winner_error: ?anyerror,
         completed: std.atomic.Value(bool),
-        result_mutex: std.Thread.Mutex,
+        result_mutex: compat.Mutex,
         condition: std.Thread.Condition,
         cancel_tokens: []*CancelToken,
         
@@ -242,7 +243,7 @@ fn RaceContext(comptime T: type) type {
                 .winner_index = null,
                 .winner_error = null,
                 .completed = std.atomic.Value(bool).init(false),
-                .result_mutex = std.Thread.Mutex{},
+                .result_mutex = compat.Mutex{},
                 .condition = std.Thread.Condition{},
                 .cancel_tokens = cancel_tokens,
             };
@@ -315,7 +316,7 @@ fn TimeoutContext(comptime T: type) type {
         error_result: ?anyerror,
         completed: std.atomic.Value(bool),
         timed_out: std.atomic.Value(bool),
-        result_mutex: std.Thread.Mutex,
+        result_mutex: compat.Mutex,
         condition: std.Thread.Condition,
         cancel_token: *CancelToken,
         timeout_ms: u64,
@@ -332,7 +333,7 @@ fn TimeoutContext(comptime T: type) type {
                 .error_result = null,
                 .completed = std.atomic.Value(bool).init(false),
                 .timed_out = std.atomic.Value(bool).init(false),
-                .result_mutex = std.Thread.Mutex{},
+                .result_mutex = compat.Mutex{},
                 .condition = std.Thread.Condition{},
                 .cancel_token = cancel_token,
                 .timeout_ms = timeout_ms,

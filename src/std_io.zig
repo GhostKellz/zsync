@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 const posix = std.posix;
@@ -197,7 +198,7 @@ pub const VTable = struct {
 /// Provides actual concurrent execution of async tasks
 pub const Threaded = struct {
     allocator: Allocator,
-    mutex: std.Thread.Mutex = .{},
+    mutex: compat.Mutex = .{},
     cond: std.Thread.Condition = .{},
     run_queue: std.SinglyLinkedList = .{},
     join_requested: bool = false,

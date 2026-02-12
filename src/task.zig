@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const deprecation = @import("deprecation.zig");
 
 /// Task states
@@ -101,7 +102,7 @@ pub const TaskQueue = struct {
     ready_queue: std.ArrayList(u32),
     next_task_id: std.atomic.Value(u32),
     max_tasks: u32,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -113,7 +114,7 @@ pub const TaskQueue = struct {
             .ready_queue = std.ArrayList(u32){ .allocator = allocator },
             .next_task_id = std.atomic.Value(u32).init(1),
             .max_tasks = max_tasks,
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
         };
     }
 

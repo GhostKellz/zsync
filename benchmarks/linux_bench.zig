@@ -29,14 +29,14 @@ fn benchmark(
 ) !BenchResult {
     std.debug.print("Running {s}...\n", .{name});
 
-    const start = try std.time.Instant.now();
+    const start = try zsync.time.Instant.now();
 
     var i: u64 = 0;
     while (i < iterations) : (i += 1) {
         try @call(.auto, func, args);
     }
 
-    const end = try std.time.Instant.now();
+    const end = try zsync.time.Instant.now();
     const total_ns = end.since(start);
     const avg_ns = total_ns / iterations;
     const ops_per_sec = (iterations * std.time.ns_per_s) / total_ns;

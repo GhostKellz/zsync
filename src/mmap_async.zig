@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
@@ -186,7 +187,7 @@ pub const AsyncMmapManager = struct {
     allocator: Allocator,
     syscall_executor: *syscall_async.AsyncSyscallExecutor,
     regions: RegionMap,
-    region_mutex: std.Thread.Mutex,
+    region_mutex: compat.Mutex,
     page_size: usize,
     total_mapped_size: usize,
     max_mapped_size: usize,
@@ -199,7 +200,7 @@ pub const AsyncMmapManager = struct {
             .allocator = allocator,
             .syscall_executor = syscall_executor,
             .regions = RegionMap.init(allocator),
-            .region_mutex = std.Thread.Mutex{},
+            .region_mutex = compat.Mutex{},
             .page_size = std.mem.page_size,
             .total_mapped_size = 0,
             .max_mapped_size = 1024 * 1024 * 1024, // 1GB default limit
@@ -470,7 +471,7 @@ pub const MmapStats = struct {
 pub const AsyncSharedMemory = struct {
     mmap_manager: *AsyncMmapManager,
     shared_regions: HashMap([]const u8, *MmapRegion, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
-    shared_mutex: std.Thread.Mutex,
+    shared_mutex: compat.Mutex,
     
     const Self = @This();
     
@@ -478,7 +479,7 @@ pub const AsyncSharedMemory = struct {
         return Self{
             .mmap_manager = mmap_manager,
             .shared_regions = HashMap([]const u8, *MmapRegion, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
-            .shared_mutex = std.Thread.Mutex{},
+            .shared_mutex = compat.Mutex{},
         };
     }
     

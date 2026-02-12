@@ -3,6 +3,7 @@
 //! High-performance rate limiting for network and system resources
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const io_v2 = @import("io_v2.zig");
 const time = std.time;
 
@@ -114,7 +115,7 @@ pub const TokenBucket = struct {
     tokens: std.atomic.Value(f64),
     refill_rate: f64,
     last_refill: std.atomic.Value(i64),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     
     pub fn init(capacity: f64, refill_rate: f64) TokenBucket {
         return TokenBucket{
@@ -171,7 +172,7 @@ pub const LeakyBucket = struct {
     current_volume: std.atomic.Value(f64),
     leak_rate: f64,
     last_leak: std.atomic.Value(i64),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     
     pub fn init(capacity: f64, leak_rate: f64) LeakyBucket {
         return LeakyBucket{
@@ -358,10 +359,10 @@ pub const AsyncRateLimiter = struct {
     
     // Statistics
     stats: RateLimitStats,
-    stats_mutex: std.Thread.Mutex,
+    stats_mutex: compat.Mutex,
     
     // Synchronization
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     queue_condition: std.Thread.Condition,
     
     const Self = @This();

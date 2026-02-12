@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const io_interface = @import("io_interface.zig");
 const blocking_io = @import("blocking_io.zig");
 const Io = io_interface.Io;
@@ -75,7 +76,7 @@ pub const StacklessMetricsSnapshot = struct {
 pub const StacklessProfiler = struct {
     enabled: bool,
     metrics: StacklessMetrics,
-    start_time: std.time.Instant,
+    start_time: compat.Instant,
     
     const Self = @This();
     
@@ -83,7 +84,7 @@ pub const StacklessProfiler = struct {
         return Self{
             .enabled = enabled,
             .metrics = StacklessMetrics{},
-            .start_time = std.time.Instant.now() catch unreachable,
+            .start_time = compat.Instant.now() catch unreachable,
         };
     }
     
@@ -370,7 +371,7 @@ const StacklessCoroutine = struct {
     
     fn execute(self: *Self, profiler: ?*StacklessProfiler) void {
         const start_time = if (profiler) |p| p.start_time else null;
-        const exec_start = if (start_time) |_| std.time.Instant.now() catch unreachable else unreachable;
+        const exec_start = if (start_time) |_| compat.Instant.now() catch unreachable else unreachable;
         
         // If we have an optimized awaiter chain, execute it
         if (self.awaiter_chain) |chain| {
@@ -394,7 +395,7 @@ const StacklessCoroutine = struct {
         }
         
         if (profiler) |p| {
-            const exec_end = std.time.Instant.now() catch unreachable;
+            const exec_end = compat.Instant.now() catch unreachable;
             const duration_ns = exec_end.since(exec_start);
             p.recordCoroutineCompletion(duration_ns);
         }

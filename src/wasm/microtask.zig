@@ -2,6 +2,7 @@
 //! Browser-compatible microtask queue for async operations in WASM
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 
 /// Microtask function signature
 pub const MicrotaskFn = *const fn (*anyopaque) anyerror!void;
@@ -17,7 +18,7 @@ pub const MicrotaskQueue = struct {
     allocator: std.mem.Allocator,
     tasks: std.ArrayList(Microtask),
     flushing: std.atomic.Value(bool),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -84,7 +85,7 @@ pub const MicrotaskQueue = struct {
 
 /// Global microtask queue (WASM-friendly)
 var global_queue: ?*MicrotaskQueue = null;
-var global_mutex: std.Thread.Mutex = .{};
+var global_mutex: compat.Mutex = .{};
 
 /// Initialize global microtask queue
 pub fn initGlobalQueue(allocator: std.mem.Allocator) !void {

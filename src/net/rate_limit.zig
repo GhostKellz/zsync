@@ -2,6 +2,7 @@
 //! Token bucket, leaky bucket, and sliding window rate limiters
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 
 /// Token Bucket Rate Limiter
 pub const TokenBucket = struct {
@@ -9,7 +10,7 @@ pub const TokenBucket = struct {
     tokens: std.atomic.Value(u32),
     refill_rate: u32, // tokens per second
     last_refill: std.atomic.Value(i64),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -77,7 +78,7 @@ pub const LeakyBucket = struct {
     level: std.atomic.Value(u32),
     leak_rate: u32, // items per second
     last_leak: std.atomic.Value(i64),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -143,7 +144,7 @@ pub const SlidingWindow = struct {
     max_requests: u32,
     window_ms: u64,
     timestamps: std.ArrayList(i64),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 

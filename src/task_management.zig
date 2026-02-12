@@ -2,6 +2,7 @@
 //! Provides timeout support, task batching, and graceful cancellation
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const future_combinators = @import("future_combinators.zig");
 const io_v2 = @import("io_v2.zig");
 
@@ -208,7 +209,7 @@ const WaitContext = struct {
     timeout_ms: u64,
     completed: std.atomic.Value(bool),
     result: ?TaskResult,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     condition: std.Thread.Condition,
     
     const Self = @This();
@@ -219,7 +220,7 @@ const WaitContext = struct {
             .timeout_ms = timeout_ms,
             .completed = std.atomic.Value(bool).init(false),
             .result = null,
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
             .condition = std.Thread.Condition{},
         };
     }

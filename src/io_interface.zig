@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 /// Sleep for specified seconds and nanoseconds using syscall
 fn nanosleepNs(sec: isize, nsec: isize) void {
@@ -517,7 +518,7 @@ pub const Combinators = struct {
     pub fn timeout(allocator: std.mem.Allocator, future: Future, timeout_ms: u64) !Future {
         const TimeoutContext = struct {
             future: Future,
-            start_time: std.time.Instant,
+            start_time: compat.Instant,
             timeout_ns: u64,
             allocator: std.mem.Allocator,
 
@@ -525,7 +526,7 @@ pub const Combinators = struct {
                 const self: *@This() = @ptrCast(@alignCast(context));
 
                 // Check timeout first
-                const now = std.time.Instant.now() catch unreachable;
+                const now = compat.Instant.now() catch unreachable;
                 const elapsed = now.since(self.start_time);
                 if (elapsed >= self.timeout_ns) {
                     self.future.cancel();
@@ -548,7 +549,7 @@ pub const Combinators = struct {
         };
 
         const context = try allocator.create(TimeoutContext);
-        const now = std.time.Instant.now() catch unreachable;
+        const now = compat.Instant.now() catch unreachable;
         context.* = TimeoutContext{
             .future = future,
             .start_time = now,

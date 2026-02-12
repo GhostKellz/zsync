@@ -2,6 +2,7 @@
 //! Comprehensive benchmarking suite for async runtime performance
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const runtime = @import("runtime.zig");
 const scheduler = @import("scheduler.zig");
 const channel = @import("channel.zig");
@@ -47,11 +48,11 @@ pub const BenchmarkTimer = struct {
     const Self = @This();
 
     pub fn start() Self {
-        return Self{ .start_time = std.time.Instant.now() catch unreachable };
+        return Self{ .start_time = compat.Instant.now() catch unreachable };
     }
 
     pub fn elapsed(self: *const Self) u64 {
-        return @intCast(std.time.Instant.now() catch unreachable - @as(i128, @intCast(self.start_time)));
+        return @intCast(compat.Instant.now() catch unreachable - @as(i128, @intCast(self.start_time)));
     }
 };
 

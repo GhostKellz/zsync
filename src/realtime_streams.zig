@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const io_mod = @import("io_v2.zig");
 const Io = io_mod.Io;
 const zero_copy = @import("zero_copy.zig");
@@ -177,11 +178,11 @@ pub const RealtimeStream = struct {
     
     // Subscriber management
     subscribers: std.ArrayList(Subscriber),
-    subscriber_mutex: std.Thread.Mutex,
+    subscriber_mutex: compat.Mutex,
     
     // Flow control
     backpressure_signal: std.Thread.Condition,
-    flow_control_mutex: std.Thread.Mutex,
+    flow_control_mutex: compat.Mutex,
     is_flowing: std.atomic.Value(bool),
     
     // Real-time scheduling
@@ -223,9 +224,9 @@ pub const RealtimeStream = struct {
             .message_ring = message_ring,
             .priority_queues = priority_queues,
             .subscribers = std.ArrayList(Subscriber){ .allocator = allocator },
-            .subscriber_mutex = std.Thread.Mutex{},
+            .subscriber_mutex = compat.Mutex{},
             .backpressure_signal = std.Thread.Condition{},
-            .flow_control_mutex = std.Thread.Mutex{},
+            .flow_control_mutex = compat.Mutex{},
             .is_flowing = std.atomic.Value(bool).init(true),
             .rt_thread = null,
             .should_stop = std.atomic.Value(bool).init(false),

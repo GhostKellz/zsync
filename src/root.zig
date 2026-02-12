@@ -4,6 +4,12 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
+
+// Compatibility layer (exported for users)
+pub const time = struct {
+    pub const Instant = compat.Instant;
+};
 
 // Core APIs - Colorblind Async Interface
 pub const io_interface = @import("io_interface.zig");
@@ -686,7 +692,7 @@ pub fn BroadcastChannel(comptime T: type) type {
     return struct {
         subscribers: std.ArrayList(*Subscriber),
         allocator: std.mem.Allocator,
-        mutex: std.Thread.Mutex = .{},
+        mutex: compat.Mutex = .{},
 
         const Self = @This();
 
@@ -755,7 +761,7 @@ pub fn WatchChannel(comptime T: type) type {
     return struct {
         value: T,
         version: u64 = 0,
-        mutex: std.Thread.Mutex = .{},
+        mutex: compat.Mutex = .{},
 
         const Self = @This();
 
@@ -790,8 +796,8 @@ pub fn WatchChannel(comptime T: type) type {
 pub const Notify = struct {
     waiters: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     notified: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: compat.Mutex = .{},
+    cond: compat.Condition = .{},
 
     const Self = @This();
 
@@ -841,7 +847,7 @@ pub fn OnceCell(comptime T: type) type {
     return struct {
         value: ?T = null,
         initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-        mutex: std.Thread.Mutex = .{},
+        mutex: compat.Mutex = .{},
 
         const Self = @This();
 
@@ -919,7 +925,7 @@ pub const CancellationToken = struct {
     cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     children: std.ArrayList(*CancellationToken) = .{},
     allocator: std.mem.Allocator = undefined,
-    mutex: std.Thread.Mutex = .{},
+    mutex: compat.Mutex = .{},
     notify: Notify = Notify.init(),
     initialized: bool = false,
 

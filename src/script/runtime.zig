@@ -2,6 +2,7 @@
 //! Helpers for integrating Ghostlang and other script engines with zsync async
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 const Runtime = @import("../runtime.zig").Runtime;
 const channels = @import("../channels.zig");
 
@@ -56,7 +57,7 @@ pub const ScriptEngine = struct {
     allocator: std.mem.Allocator,
     runtime: *Runtime,
     global_env: std.StringHashMap(ScriptValue),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -287,7 +288,7 @@ pub fn ScriptEmitter(comptime T: type) type {
     return struct {
         listeners: std.ArrayList(*const fn (T) anyerror!void),
         allocator: std.mem.Allocator,
-        mutex: std.Thread.Mutex,
+        mutex: compat.Mutex,
 
         const Self = @This();
 

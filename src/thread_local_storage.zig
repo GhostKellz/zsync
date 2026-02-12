@@ -2,6 +2,7 @@
 //! Provides efficient per-thread storage with automatic cleanup
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Thread-local storage key
 pub const TlsKey = struct {
@@ -112,10 +113,10 @@ const ThreadStorage = struct {
 const TlsRegistry = struct {
     allocator: std.mem.Allocator,
     thread_storage: std.HashMap(std.Thread.Id, *ThreadStorage, ThreadIdContext, std.hash_map.default_max_load_percentage),
-    storage_mutex: std.Thread.Mutex = .{},
+    storage_mutex: compat.Mutex = .{},
     next_key: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     key_destructors: std.ArrayList(?*const fn (*anyopaque) void),
-    destructors_mutex: std.Thread.Mutex = .{},
+    destructors_mutex: compat.Mutex = .{},
     
     // Thread-local to avoid hash map lookup on every access
     threadlocal var current_thread_storage: ?*ThreadStorage = null;

@@ -2,6 +2,7 @@
 //! Provides async message passing between tasks
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Channel errors
 pub const ChannelError = error{
@@ -36,9 +37,9 @@ pub fn Channel(comptime T: type) type {
         sender_count: std.atomic.Value(u32),
         receiver_count: std.atomic.Value(u32),
         sequence: std.atomic.Value(u64),
-        mutex: std.Thread.Mutex,
-        not_empty: std.Thread.Condition,
-        not_full: std.Thread.Condition,
+        mutex: compat.Mutex,
+        not_empty: compat.Condition,
+        not_full: compat.Condition,
 
         const Self = @This();
         const MessageType = Message(T);
@@ -53,9 +54,9 @@ pub fn Channel(comptime T: type) type {
                 .sender_count = std.atomic.Value(u32).init(0),
                 .receiver_count = std.atomic.Value(u32).init(0),
                 .sequence = std.atomic.Value(u64).init(0),
-                .mutex = std.Thread.Mutex{},
-                .not_empty = std.Thread.Condition{},
-                .not_full = std.Thread.Condition{},
+                .mutex = compat.Mutex{},
+                .not_empty = compat.Condition{},
+                .not_full = compat.Condition{},
             };
         }
 
@@ -284,8 +285,8 @@ pub fn OneShot(comptime T: type) type {
     return struct {
         value: ?T,
         completed: std.atomic.Value(bool),
-        mutex: std.Thread.Mutex,
-        condition: std.Thread.Condition,
+        mutex: compat.Mutex,
+        condition: compat.Condition,
 
         const Self = @This();
 
@@ -293,8 +294,8 @@ pub fn OneShot(comptime T: type) type {
             return Self{
                 .value = null,
                 .completed = std.atomic.Value(bool).init(false),
-                .mutex = std.Thread.Mutex{},
-                .condition = std.Thread.Condition{},
+                .mutex = compat.Mutex{},
+                .condition = compat.Condition{},
             };
         }
 

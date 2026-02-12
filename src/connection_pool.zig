@@ -2,6 +2,7 @@
 //! Provides connection pooling for TCP, UDP, and QUIC connections
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const io = @import("io.zig");
 const io_v2 = @import("io_v2.zig");
 
@@ -73,7 +74,7 @@ pub const ConnectionPool = struct {
     idle_connections: std.ArrayList(*PooledConnection),
     connection_map: std.HashMap(u32, *PooledConnection, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage),
     next_connection_id: std.atomic.Value(u32),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     active_count: std.atomic.Value(u32),
 
     const Self = @This();
@@ -86,7 +87,7 @@ pub const ConnectionPool = struct {
             .idle_connections = std.ArrayList(*PooledConnection){ .allocator = allocator },
             .connection_map = std.HashMap(u32, *PooledConnection, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(allocator),
             .next_connection_id = std.atomic.Value(u32).init(1),
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
             .active_count = std.atomic.Value(u32).init(0),
         };
     }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const arch = @import("arch/x86_64.zig");
 const platform_imports = @import("platform_imports.zig");
 const platform = platform_imports.linux.platform_linux;
@@ -229,7 +230,7 @@ pub const WorkStealingExecutor = struct {
     
     const WorkQueue = struct {
         queue: std.fifo.LinearFifo(*WorkItem, .Dynamic),
-        mutex: std.Thread.Mutex,
+        mutex: compat.Mutex,
         
         fn init(allocator: std.mem.Allocator) WorkQueue {
             return .{

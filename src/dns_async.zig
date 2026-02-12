@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
@@ -88,7 +89,7 @@ const CacheMap = HashMap([]const u8, CacheEntry, std.hash_map.StringContext, std
 pub const AsyncDnsResolver = struct {
     allocator: Allocator,
     cache: CacheMap,
-    cache_mutex: std.Thread.Mutex,
+    cache_mutex: compat.Mutex,
     servers: ArrayList(net.Address),
     timeout_ms: u64,
     max_cache_entries: usize,
@@ -100,7 +101,7 @@ pub const AsyncDnsResolver = struct {
         return Self{
             .allocator = allocator,
             .cache = CacheMap.init(allocator),
-            .cache_mutex = std.Thread.Mutex{},
+            .cache_mutex = compat.Mutex{},
             .servers = ArrayList(net.Address){ .allocator = allocator },
             .timeout_ms = 5000,
             .max_cache_entries = 10000,

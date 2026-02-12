@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("../compat/thread.zig");
 const microtask_mod = @import("microtask.zig");
 
 /// Promise state
@@ -19,7 +20,7 @@ pub fn Promise(comptime T: type) type {
         state: std.atomic.Value(PromiseState),
         result: ?T,
         error_value: ?anyerror,
-        mutex: std.Thread.Mutex,
+        mutex: compat.Mutex,
         condition: std.Thread.Condition,
 
         const Self = @This();
@@ -218,7 +219,7 @@ pub fn EventEmitter(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
         listeners: std.ArrayList(*const fn (T) anyerror!void),
-        mutex: std.Thread.Mutex,
+        mutex: compat.Mutex,
 
         const Self = @This();
 
@@ -281,7 +282,7 @@ pub fn EventEmitter(comptime T: type) type {
 pub const AbortController = struct {
     aborted: std.atomic.Value(bool),
     reason: ?anyerror,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 

@@ -2,6 +2,30 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [v0.7.5] - 2025-02-11 🔧 **Zig 0.16.0-dev.2535+ Compatibility**
+
+### Fixed
+- **Updated for Zig 0.16.0-dev.2535+ API changes**
+  - `std.Thread.Mutex` removed - created `compat.Mutex` using futex
+  - `std.Thread.Condition` removed - created `compat.Condition` using futex
+  - `std.time.Instant` removed - created `compat.Instant` using clock_gettime
+  - `std.posix.clock_gettime` removed - created `compat.clock_gettime`
+  - `FUTEX_OP` struct field renamed `.op` → `.cmd`
+
+### Added
+- `src/compat/thread.zig` - Compatibility layer for removed std APIs
+- `zsync.time.Instant` export for external users
+
+### Changed
+- Updated 40+ source files to use compat layer
+- `build.zig.zon` minimum_zig_version updated to `0.16.0-dev.2535+b5bd49460`
+
+### Verification
+- All 37 tests passing on Zig 0.16.0-dev.2535+
+- `zig build` and `zig build test` succeed
+
+---
+
 ## [v0.7.3] - 2025-12-03 ✨ **Cleanup & Zig 0.16 Readiness**
 
 ### Highlights

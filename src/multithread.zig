@@ -2,6 +2,7 @@
 //! Work-stealing task scheduler with thread-safe operations
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const task = @import("task.zig");
 const scheduler = @import("scheduler.zig");
 const reactor = @import("reactor.zig");
@@ -14,7 +15,7 @@ pub const WorkStealingQueue = struct {
     capacity: u32,
     mask: u32,
     allocator: std.mem.Allocator,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -30,7 +31,7 @@ pub const WorkStealingQueue = struct {
             .capacity = cap,
             .mask = cap - 1,
             .allocator = allocator,
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
         };
     }
 

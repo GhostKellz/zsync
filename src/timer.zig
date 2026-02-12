@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 /// Sleep for specified seconds and nanoseconds using syscall
 fn nanosleepNs(sec: isize, nsec: isize) void {
@@ -48,7 +49,7 @@ pub const TimerWheel = struct {
     sorted_timers: std.ArrayList(u64), // Timer IDs sorted by expiry time
     next_timer_id: std.atomic.Value(u64),
     start_time: u64, // Runtime start time in milliseconds
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -60,7 +61,7 @@ pub const TimerWheel = struct {
             .sorted_timers = .{},
             .next_timer_id = std.atomic.Value(u64).init(1),
             .start_time = getCurrentTimeMs(),
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
         };
     }
 
@@ -75,7 +76,7 @@ pub const TimerWheel = struct {
 
     /// Get current time in milliseconds since runtime start
     fn getCurrentTimeMs() u64 {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(compat.CLOCK.REALTIME) catch unreachable;
         return @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
     }
 
@@ -283,7 +284,7 @@ pub fn sleep(duration_ms: u64) void {
 
 /// Global timer wheel for standalone timer functions
 var global_wheel: ?*TimerWheel = null;
-var global_wheel_mutex: std.Thread.Mutex = .{};
+var global_wheel_mutex: compat.Mutex = .{};
 
 /// Initialize global timer wheel (call once at startup)
 pub fn initGlobalTimerWheel(allocator: std.mem.Allocator) !void {
@@ -360,19 +361,19 @@ pub fn delay(duration_ms: u64) void {
 
 /// Get current time in nanoseconds (monotonic)
 pub fn nanoTime() u64 {
-    const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    const ts = compat.clock_gettime(compat.CLOCK.MONOTONIC) catch unreachable;
     return @intCast(@as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec)));
 }
 
 /// Get current time in microseconds (monotonic)
 pub fn microTime() u64 {
-    const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+    const ts = compat.clock_gettime(compat.CLOCK.MONOTONIC) catch unreachable;
     return @intCast(@divTrunc(@as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec)), std.time.ns_per_us));
 }
 
 /// Get current time in milliseconds (wall clock)
 pub fn milliTime() u64 {
-    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const ts = compat.clock_gettime(compat.CLOCK.REALTIME) catch unreachable;
     return @intCast(@divTrunc(@as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec)), std.time.ns_per_ms));
 }
 

@@ -2,12 +2,13 @@
 //! Async-aware synchronization primitives for concurrent programming
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Semaphore for limiting concurrency
 pub const Semaphore = struct {
     permits: std.atomic.Value(isize),
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
     max_permits: usize,
 
     const Self = @This();
@@ -70,8 +71,8 @@ pub const Barrier = struct {
     count: usize,
     waiting: std.atomic.Value(usize),
     generation: std.atomic.Value(usize),
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
 
     const Self = @This();
 
@@ -111,8 +112,8 @@ pub const Barrier = struct {
 /// Latch for one-time synchronization
 pub const Latch = struct {
     count: std.atomic.Value(usize),
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
 
     const Self = @This();
 
@@ -155,8 +156,8 @@ pub const Latch = struct {
 /// Async-aware Mutex
 pub const AsyncMutex = struct {
     locked: std.atomic.Value(bool),
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
 
     const Self = @This();
 
@@ -206,9 +207,9 @@ pub const AsyncMutex = struct {
 pub const AsyncRwLock = struct {
     readers: std.atomic.Value(u32),
     writer: std.atomic.Value(bool),
-    mutex: std.Thread.Mutex,
-    read_condition: std.Thread.Condition,
-    write_condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    read_condition: compat.Condition,
+    write_condition: compat.Condition,
 
     const Self = @This();
 
@@ -270,8 +271,8 @@ pub const AsyncRwLock = struct {
 /// WaitGroup for coordinating multiple tasks (like Go's sync.WaitGroup)
 pub const WaitGroup = struct {
     counter: std.atomic.Value(u32),
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
 
     const Self = @This();
 

@@ -2,6 +2,7 @@
 //! Provides testing utilities, edge case validation, and stress testing
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const Zsync = @import("root.zig");
 const error_management = @import("error_management.zig");
 const platform = @import("platform.zig");
@@ -222,7 +223,7 @@ pub const TestSuite = struct {
         };
         
         for (edge_cases) |edge_case| {
-            const start_time = std.time.Instant.now() catch unreachable;
+            const start_time = compat.Instant.now() catch unreachable;
             
             const result = edge_case.test_fn(self) catch |err| blk: {
                 std.debug.print("   ❌ {s}: {}\n", .{ edge_case.name, err });
@@ -230,12 +231,12 @@ pub const TestSuite = struct {
                     .test_name = edge_case.name,
                     .passed = false,
                     .error_message = @errorName(err),
-                    .execution_time_ns = std.time.Instant.now() catch unreachable - start_time,
+                    .execution_time_ns = compat.Instant.now() catch unreachable - start_time,
                 };
             };
             
             if (@TypeOf(result) == void) {
-                const execution_time = std.time.Instant.now() catch unreachable - start_time;
+                const execution_time = compat.Instant.now() catch unreachable - start_time;
                 try self.results.edge_case_tests.append(self.allocator, TestResults.EdgeCaseResult{
                     .test_name = edge_case.name,
                     .passed = true,
@@ -360,7 +361,7 @@ pub const TestSuite = struct {
     }
     
     fn testBlockingIo(self: *Self) !TestResults.ExecutionResults {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         const start_memory = self.allocator.context.peak_used_bytes;
         
         var blocking_io = Zsync.BlockingIo.init(self.allocator);
@@ -373,7 +374,7 @@ pub const TestSuite = struct {
         try self.runConcurrencyTests(io);
         try self.runResourceCleanupTests(io);
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const end_memory = self.allocator.context.peak_used_bytes;
         
         std.debug.print("   ✅ BlockingIo: All tests passed\n");
@@ -387,7 +388,7 @@ pub const TestSuite = struct {
     }
     
     fn testThreadPoolIo(self: *Self) !TestResults.ExecutionResults {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         const start_memory = self.allocator.context.peak_used_bytes;
         
         var threadpool_io = try Zsync.ThreadPoolIo.init(self.allocator, .{ .num_threads = self.config.num_threads });
@@ -401,7 +402,7 @@ pub const TestSuite = struct {
         try self.runResourceCleanupTests(io);
         try self.runParallelismTests(io);
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const end_memory = self.allocator.context.peak_used_bytes;
         
         std.debug.print("   ✅ ThreadPoolIo: All tests passed\n");
@@ -415,7 +416,7 @@ pub const TestSuite = struct {
     }
     
     fn testGreenThreadsIo(self: *Self) !TestResults.ExecutionResults {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         const start_memory = self.allocator.context.peak_used_bytes;
         
         var greenthreads_io = try Zsync.GreenThreadsIo.init(self.allocator, .{});
@@ -429,7 +430,7 @@ pub const TestSuite = struct {
         try self.runResourceCleanupTests(io);
         try self.runStackSwappingTests(io);
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const end_memory = self.allocator.context.peak_used_bytes;
         
         std.debug.print("   ✅ GreenThreadsIo: All tests passed\n");
@@ -443,7 +444,7 @@ pub const TestSuite = struct {
     }
     
     fn testStacklessIo(self: *Self) !TestResults.ExecutionResults {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         const start_memory = self.allocator.context.peak_used_bytes;
         
         var stackless_io = Zsync.StacklessIo.init(self.allocator, .{});
@@ -457,7 +458,7 @@ pub const TestSuite = struct {
         try self.runResourceCleanupTests(io);
         try self.runStacklessTests(io);
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const end_memory = self.allocator.context.peak_used_bytes;
         
         std.debug.print("   ✅ StacklessIo: All tests passed\n");
@@ -544,7 +545,7 @@ pub const TestSuite = struct {
             futures.deinit();
         }
         
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         
         // Start parallel CPU-bound tasks
         for (0..4) |i| {
@@ -557,7 +558,7 @@ pub const TestSuite = struct {
             try future.await(io);
         }
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const total_time = end_time - start_time;
         
         std.debug.print("   🚀 Parallel execution took {}ms\n", .{@divFloor(total_time, 1_000_000)});
@@ -737,13 +738,13 @@ fn stacklessTestTask(io: Zsync.Io, name: []const u8) !void {
     // Stress test implementations
     fn testHighConcurrency(self: *Self) !TestResults.StressTestResult {
         _ = self;
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         const operations = 1000;
         
         // Simulate high concurrency test
         std.time.sleep(10 * std.time.ns_per_ms); // 10ms simulation
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const duration_s = @as(f64, @floatFromInt(end_time - start_time)) / 1e9;
         
         return TestResults.StressTestResult{

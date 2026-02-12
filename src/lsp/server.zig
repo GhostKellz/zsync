@@ -2,6 +2,7 @@
 //! JSON-RPC based Language Server Protocol implementation for Grim/Grove
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 const Runtime = @import("../runtime.zig").Runtime;
 const channels = @import("../channels.zig");
 
@@ -114,7 +115,7 @@ pub const LspServer = struct {
     pending_requests: std.AutoHashMap(RequestId, std.json.Value),
     initialized: std.atomic.Value(bool),
     shutdown_requested: std.atomic.Value(bool),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     // Communication channels
     stdin: std.fs.File,

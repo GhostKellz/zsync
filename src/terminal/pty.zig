@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("../compat/thread.zig");
 const Runtime = @import("../runtime.zig").Runtime;
 
 /// PTY Configuration
@@ -31,7 +32,7 @@ pub const Pty = struct {
     child_pid: ?std.posix.pid_t,
     config: PtyConfig,
     read_buffer: []u8,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 

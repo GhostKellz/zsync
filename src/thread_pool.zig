@@ -5,6 +5,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
+const compat = @import("compat/thread.zig");
 
 /// Generate a random usize using OS entropy
 fn randomUsize() usize {
@@ -73,8 +74,8 @@ const WorkItem = struct {
 const WorkQueue = struct {
     head: ?*WorkItem,
     tail: ?*WorkItem,
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
     shutdown: std.atomic.Value(bool),
     
     const Self = @This();

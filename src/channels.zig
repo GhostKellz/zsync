@@ -2,6 +2,7 @@
 //! Bounded and unbounded channels for async communication
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Create a bounded channel with fixed capacity
 pub fn bounded(comptime T: type, allocator: std.mem.Allocator, capacity: usize) !Channel(T) {
@@ -21,9 +22,9 @@ pub fn Channel(comptime T: type) type {
         head: usize,
         tail: usize,
         size: std.atomic.Value(usize),
-        mutex: std.Thread.Mutex,
-        not_empty: std.Thread.Condition,
-        not_full: std.Thread.Condition,
+        mutex: compat.Mutex,
+        not_empty: compat.Condition,
+        not_full: compat.Condition,
         closed: std.atomic.Value(bool),
         allocator: std.mem.Allocator,
 
@@ -162,8 +163,8 @@ pub fn Channel(comptime T: type) type {
 pub fn UnboundedChannel(comptime T: type) type {
     return struct {
         items: std.ArrayList(T),
-        mutex: std.Thread.Mutex,
-        not_empty: std.Thread.Condition,
+        mutex: compat.Mutex,
+        not_empty: compat.Condition,
         closed: std.atomic.Value(bool),
         allocator: std.mem.Allocator,
 

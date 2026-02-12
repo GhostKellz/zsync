@@ -2,6 +2,7 @@
 //! Generic connection pool with health checks and auto-reconnect
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 const sync_mod = @import("../sync.zig");
 
 /// Connection pool configuration
@@ -20,7 +21,7 @@ pub fn ConnectionPool(comptime T: type) type {
         config: PoolConfig,
         connections: std.ArrayList(PooledConnection),
         available: sync_mod.Semaphore,
-        mutex: std.Thread.Mutex,
+        mutex: compat.Mutex,
         factory: *const fn (std.mem.Allocator) anyerror!T,
         destroyer: *const fn (T) void,
         health_check: ?*const fn (T) bool,

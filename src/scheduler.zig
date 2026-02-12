@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 /// Frame state for async operations
 pub const FrameState = enum {
@@ -207,7 +208,7 @@ pub const AsyncScheduler = struct {
     frame_pool: std.ArrayList(*AsyncFrame),
     next_frame_id: std.atomic.Value(u32),
     running: std.atomic.Value(bool),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     is_shutdown: bool,
 
     const Self = @This();
@@ -220,7 +221,7 @@ pub const AsyncScheduler = struct {
             .frame_pool = std.ArrayList(*AsyncFrame){},
             .next_frame_id = std.atomic.Value(u32).init(1),
             .running = std.atomic.Value(bool).init(false),
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
             .is_shutdown = false,
         };
     }

@@ -3,6 +3,7 @@
 //! Designed for maximum throughput and minimal latency
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const io_v2 = @import("io_v2.zig");
 const linux = std.os.linux;
 
@@ -25,7 +26,7 @@ pub const MemoryPool = struct {
     allocated_blocks: std.hash_map.HashMap(usize, MemoryBlock, std.hash_map.AutoContext(usize), 80),
     block_size: u32,
     allocator: std.mem.Allocator,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     
     const Self = @This();
     
@@ -280,7 +281,7 @@ pub const ZeroCopyNetworkInterface = struct {
     
     // Statistics
     stats: NetworkStats,
-    stats_mutex: std.Thread.Mutex,
+    stats_mutex: compat.Mutex,
     
     // Configuration
     config: ZeroCopyConfig,
@@ -505,7 +506,7 @@ pub const ZeroCopyNetworkInterface = struct {
                     .data_offset = 0,
                     .data_length = @intCast(data.len),
                     .packet_type = .ethernet,
-                    .timestamp = @intCast(std.time.Instant.now() catch unreachable),
+                    .timestamp = @intCast(compat.Instant.now() catch unreachable),
                     .metadata = PacketMetadata{},
                 };
                 

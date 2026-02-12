@@ -2,6 +2,7 @@
 //! Full WebSocket implementation with frame parsing, handshake, and masking
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 const crypto = std.crypto;
 const base64 = std.base64;
 
@@ -123,7 +124,7 @@ pub const WebSocketConnection = struct {
     fragment_buffer: std.ArrayList(u8),
     fragment_opcode: ?OpCode,
     is_client: bool,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
     const BUFFER_SIZE = 8192;

@@ -2,6 +2,7 @@
 //! Provides compile-time and runtime warnings for deprecated patterns
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Emit a compile-time deprecation warning (disabled for current stability)
 pub fn compileTimeDeprecation(comptime message: []const u8) void {
@@ -15,7 +16,7 @@ pub fn runtimeDeprecation(comptime call_site: []const u8, message: []const u8) v
     const DeprecationTracker = struct {
         var warned_sites = std.atomic.Value(u64).init(0);
         var site_hashes: [64]u64 = [_]u64{0} ** 64;
-        var mutex = std.Thread.Mutex{};
+        var mutex = compat.Mutex{};
         
         fn shouldWarn(site_hash: u64) bool {
             mutex.lock();

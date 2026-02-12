@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 /// Configuration for buffer pool
 pub const BufferPoolConfig = struct {
@@ -43,7 +44,7 @@ pub const BufferPool = struct {
     config: BufferPoolConfig,
     available: std.ArrayList(*PooledBuffer),
     all_buffers: std.ArrayList(*PooledBuffer),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     total_allocated: std.atomic.Value(usize),
     total_in_use: std.atomic.Value(usize),
 

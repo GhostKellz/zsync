@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
@@ -565,7 +566,7 @@ pub const AsyncKernelEventManager = struct {
     signal_handler: AsyncSignalHandler,
     epoll_manager: AsyncEpollManager,
     event_queue: ArrayList(KernelEvent),
-    queue_mutex: std.Thread.Mutex,
+    queue_mutex: compat.Mutex,
     running: std.atomic.Value(bool),
     worker_thread: ?std.Thread,
     
@@ -578,7 +579,7 @@ pub const AsyncKernelEventManager = struct {
             .signal_handler = try AsyncSignalHandler.init(allocator),
             .epoll_manager = try AsyncEpollManager.init(allocator),
             .event_queue = ArrayList(KernelEvent){ .allocator = allocator },
-            .queue_mutex = std.Thread.Mutex{},
+            .queue_mutex = compat.Mutex{},
             .running = std.atomic.Value(bool).init(false),
             .worker_thread = null,
         };
@@ -766,7 +767,7 @@ pub const AsyncInterruptMonitor = struct {
     optimization_threshold: u64,
     hot_interrupts: ArrayList(u32),
     cold_interrupts: ArrayList(u32),
-    stats_mutex: std.Thread.Mutex,
+    stats_mutex: compat.Mutex,
 
     const Self = @This();
 
@@ -783,7 +784,7 @@ pub const AsyncInterruptMonitor = struct {
             .optimization_threshold = 10000,
             .hot_interrupts = ArrayList(u32){ .allocator = allocator },
             .cold_interrupts = ArrayList(u32){ .allocator = allocator },
-            .stats_mutex = std.Thread.Mutex{},
+            .stats_mutex = compat.Mutex{},
         };
     }
 
@@ -853,7 +854,7 @@ pub const AsyncInterruptMonitor = struct {
     }
 
     fn handleInterrupt(self: *Self, ctx: InterruptContext) !void {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         
         if (self.handlers.get(ctx.vector)) |handler| {
             var mutable_ctx = ctx;
@@ -862,7 +863,7 @@ pub const AsyncInterruptMonitor = struct {
             
             try handler.callback(&mutable_ctx);
             
-            const end_time = std.time.Instant.now() catch unreachable;
+            const end_time = compat.Instant.now() catch unreachable;
             const duration = @as(u64, @intCast(end_time - start_time));
             _ = handler.total_duration_ns.fetchAdd(duration, .monotonic);
         }
@@ -930,7 +931,7 @@ pub fn createTimerInterrupt(allocator: Allocator, interval_ns: u64, callback: *c
             .interrupt_type = .timer,
             .priority = .normal,
             .vector = 0x20,
-            .timestamp = @intCast(std.time.Instant.now() catch unreachable),
+            .timestamp = @intCast(compat.Instant.now() catch unreachable),
             .cpu_id = 0,
         },
         .callback = callback,
@@ -950,7 +951,7 @@ pub fn createNetworkInterrupt(allocator: Allocator, callback: *const fn (*Interr
             .interrupt_type = .network,
             .priority = .high,
             .vector = 0x30,
-            .timestamp = @intCast(std.time.Instant.now() catch unreachable),
+            .timestamp = @intCast(compat.Instant.now() catch unreachable),
             .cpu_id = 0,
         },
         .callback = callback,
@@ -1032,7 +1033,7 @@ pub const RealTimeTask = struct {
     }
     
     pub fn isDeadlineMissed(self: *const RealTimeTask) bool {
-        return @as(u64, @intCast(std.time.Instant.now() catch unreachable)) > self.deadline_ns;
+        return @as(u64, @intCast(compat.Instant.now() catch unreachable)) > self.deadline_ns;
     }
 };
 
@@ -1061,7 +1062,7 @@ pub const EnhancedRealTimeScheduler = struct {
     
     // Statistics and metrics
     stats: SchedulerStats,
-    stats_mutex: std.Thread.Mutex,
+    stats_mutex: compat.Mutex,
     
     // Configuration
     config: SchedulerConfig,
@@ -1261,7 +1262,7 @@ pub const EnhancedRealTimeScheduler = struct {
     }
     
     fn executeTask(self: *Self, task: ScheduledTask, worker_id: usize) !void {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         
         // Set current task
         self.current_task = @constCast(&task);
@@ -1279,7 +1280,7 @@ pub const EnhancedRealTimeScheduler = struct {
         try mutable_task.execute();
         
         // Update completion statistics
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         const execution_time = @as(u64, @intCast(end_time - start_time));
         
         self.stats_mutex.lock();
@@ -1332,20 +1333,20 @@ pub const ScheduledTask = struct {
     max_retries: u32 = 3,
     
     pub fn execute(self: *ScheduledTask) !void {
-        const start_time = std.time.Instant.now() catch unreachable;
+        const start_time = compat.Instant.now() catch unreachable;
         
         try self.callback(self);
         
-        const end_time = std.time.Instant.now() catch unreachable;
+        const end_time = compat.Instant.now() catch unreachable;
         self.actual_duration_ns = @intCast(end_time - start_time);
     }
     
     pub fn isDeadlineMissed(self: *const ScheduledTask) bool {
-        return @as(u64, @intCast(std.time.Instant.now() catch unreachable)) > self.deadline_ns;
+        return @as(u64, @intCast(compat.Instant.now() catch unreachable)) > self.deadline_ns;
     }
     
     pub fn getRemainingTime(self: *const ScheduledTask) i64 {
-        const current_time = @as(u64, @intCast(std.time.Instant.now() catch unreachable));
+        const current_time = @as(u64, @intCast(compat.Instant.now() catch unreachable));
         if (current_time >= self.deadline_ns) {
             return 0;
         }
@@ -1428,7 +1429,7 @@ pub const DeadlineTracker = struct {
     }
     
     pub fn getNextExpiredTask(self: *Self) ?u64 {
-        const current_time = @as(u64, @intCast(std.time.Instant.now() catch unreachable));
+        const current_time = @as(u64, @intCast(compat.Instant.now() catch unreachable));
         
         while (self.deadlines.peek()) |entry| {
             if (entry.deadline_ns <= current_time) {

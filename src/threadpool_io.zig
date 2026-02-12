@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const io_interface = @import("io_interface.zig");
 
 const Io = io_interface.Io;
@@ -40,7 +41,7 @@ const Task = struct {
 /// Thread pool future that can be cancelled
 const ThreadPoolFuture = struct {
     result_ptr: ?*IoError!IoResult,
-    result_mutex: std.Thread.Mutex,
+    result_mutex: compat.Mutex,
     cancelled: std.atomic.Value(bool),
     allocator: std.mem.Allocator,
     
@@ -50,7 +51,7 @@ const ThreadPoolFuture = struct {
         const future = try allocator.create(Self);
         future.* = Self{
             .result_ptr = null,
-            .result_mutex = std.Thread.Mutex{},
+            .result_mutex = compat.Mutex{},
             .cancelled = std.atomic.Value(bool).init(false),
             .allocator = allocator,
         };
@@ -115,8 +116,8 @@ const ThreadPoolFuture = struct {
 /// Simple thread-safe task queue
 const TaskQueue = struct {
     tasks: std.ArrayList(Task),
-    mutex: std.Thread.Mutex,
-    condition: std.Thread.Condition,
+    mutex: compat.Mutex,
+    condition: compat.Condition,
     allocator: std.mem.Allocator,
     shutdown: bool = false,
     
@@ -125,8 +126,8 @@ const TaskQueue = struct {
     fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .tasks = std.ArrayList(Task).empty,
-            .mutex = std.Thread.Mutex{},
-            .condition = std.Thread.Condition{},
+            .mutex = compat.Mutex{},
+            .condition = compat.Condition{},
             .allocator = allocator,
             .shutdown = false,
         };

@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const error_management = @import("error_management.zig");
 
 /// Type inference system for async operations
@@ -440,12 +441,12 @@ pub fn TypedFuture(comptime T: type) type {
             
             pub fn init(timeout_ms: u64) Timeout {
                 return Timeout{
-                    .deadline_ns = std.time.Instant.now() catch unreachable + (timeout_ms * std.time.ns_per_ms),
+                    .deadline_ns = compat.Instant.now() catch unreachable + (timeout_ms * std.time.ns_per_ms),
                 };
             }
             
             pub fn isExpired(self: *const Timeout) bool {
-                return std.time.Instant.now() catch unreachable > self.deadline_ns;
+                return compat.Instant.now() catch unreachable > self.deadline_ns;
             }
         };
         

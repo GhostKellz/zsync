@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 /// Comprehensive error set for async operations
 pub const AsyncError = error{
@@ -162,7 +163,7 @@ pub const RecoveryHint = struct {
 pub const ResourceTracker = struct {
     resources: std.ArrayList(Resource),
     allocator: std.mem.Allocator,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     
     const Self = @This();
     
@@ -189,7 +190,7 @@ pub const ResourceTracker = struct {
         return Self{
             .resources = std.ArrayList(Resource){ .allocator = allocator },
             .allocator = allocator,
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
         };
     }
     
@@ -423,7 +424,7 @@ pub const StackGuard = struct {
 pub const MemorySafetyValidator = struct {
     allocations: std.HashMap(usize, AllocationInfo, std.hash_map.AutoContext(usize), std.hash_map.default_max_load_percentage),
     allocator: std.mem.Allocator,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     
     const Self = @This();
     
@@ -439,7 +440,7 @@ pub const MemorySafetyValidator = struct {
         return Self{
             .allocations = std.HashMap(usize, AllocationInfo, std.hash_map.AutoContext(usize), std.hash_map.default_max_load_percentage).init(allocator),
             .allocator = allocator,
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
         };
     }
     

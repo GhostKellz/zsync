@@ -2,6 +2,7 @@
 //! Dynamic plugin loading and lifecycle management for GShell
 
 const std = @import("std");
+const compat = @import("../compat/thread.zig");
 const Runtime = @import("../runtime.zig").Runtime;
 
 /// Plugin State
@@ -152,7 +153,7 @@ pub const PluginManager = struct {
     runtime: *Runtime,
     plugins: std.StringHashMap(*Plugin),
     plugin_dirs: std.ArrayList([]const u8),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const Self = @This();
 

@@ -5,6 +5,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
+const compat = @import("compat/thread.zig");
 
 /// Sleep for specified seconds and nanoseconds using syscall
 fn nanosleepNs(sec: isize, nsec: isize) void {
@@ -357,7 +358,7 @@ pub const RuntimeMetrics = struct {
 
 /// Global runtime instance (singleton pattern)
 var global_runtime: ?*Runtime = null;
-var global_runtime_mutex = std.Thread.Mutex{};
+var global_runtime_mutex = compat.Mutex{};
 
 /// zsync - The Tokio of Zig - Production-Ready Async Runtime
 pub const Runtime = struct {
@@ -528,7 +529,7 @@ pub const Runtime = struct {
         }
         
         // Note: Zig 0.16 uses Instant.now() instead of nanoTimestamp()
-        const start_instant = std.time.Instant.now() catch unreachable;
+        const start_instant = compat.Instant.now() catch unreachable;
         
         // Execute main task with colorblind async
         const io = self.getIo();
@@ -543,7 +544,7 @@ pub const Runtime = struct {
         nanosleepNs(0, 5 * std.time.ns_per_ms);
 
         // Calculate execution time using Instant API
-        const end_instant = std.time.Instant.now() catch unreachable;
+        const end_instant = compat.Instant.now() catch unreachable;
         const execution_time_ns = end_instant.since(start_instant);
 
         if (self.config.enable_debugging) {
@@ -591,7 +592,7 @@ pub const Runtime = struct {
             runtime: *Self,
             state: std.atomic.Value(Future.State),
             result: ?anyerror,
-            mutex: std.Thread.Mutex,
+            mutex: compat.Mutex,
 
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const task_ctx: *@This() = @ptrCast(@alignCast(ctx));

@@ -2,13 +2,14 @@
 //! Future for async operations with any result type
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Generic future for async results
 pub fn Future(comptime T: type) type {
     return struct {
         state: std.atomic.Value(State),
         result: ?Result,
-        mutex: std.Thread.Mutex,
+        mutex: compat.Mutex,
         condition: std.Thread.Condition,
         allocator: std.mem.Allocator,
 

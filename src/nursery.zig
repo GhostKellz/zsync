@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const io_interface = @import("io_interface.zig");
+const compat = @import("compat/thread.zig");
 
 /// Sleep for specified seconds and nanoseconds using syscall
 fn nanosleepNs(sec: isize, nsec: isize) void {
@@ -18,7 +19,7 @@ const Runtime = runtime_mod.Runtime;
 pub const Nursery = struct {
     runtime: *Runtime,
     tasks: std.ArrayList(TaskEntry),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     completed_count: std.atomic.Value(usize),
     total_count: usize,
     allocator: std.mem.Allocator,

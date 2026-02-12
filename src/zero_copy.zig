@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const io_mod = @import("io_v2.zig");
 const Io = io_mod.Io;
 const Handle = std.posix.fd_t;
@@ -18,7 +19,7 @@ pub const BufferPool = struct {
     page_size: usize,
     free_buffers: std.ArrayList([]align(std.mem.page_size) u8),
     active_buffers: std.AutoHashMap(usize, BufferInfo),
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     const BufferInfo = struct {
         buffer: []align(std.mem.page_size) u8,
@@ -32,7 +33,7 @@ pub const BufferPool = struct {
             .page_size = std.mem.page_size,
             .free_buffers = std.ArrayList([]align(std.mem.page_size) u8){ .allocator = allocator },
             .active_buffers = std.AutoHashMap(usize, BufferInfo).init(allocator),
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
         };
     }
 
@@ -321,7 +322,7 @@ pub const ZeroCopyRingBuffer = struct {
     read_idx: usize,
     write_idx: usize,
     size: usize,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     not_empty: std.Thread.Condition,
     not_full: std.Thread.Condition,
 
@@ -334,7 +335,7 @@ pub const ZeroCopyRingBuffer = struct {
             .read_idx = 0,
             .write_idx = 0,
             .size = 0,
-            .mutex = std.Thread.Mutex{},
+            .mutex = compat.Mutex{},
             .not_empty = std.Thread.Condition{},
             .not_full = std.Thread.Condition{},
         };

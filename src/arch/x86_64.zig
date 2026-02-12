@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("../compat/thread.zig");
 
 // x86_64 context structure for green threads
 pub const Context = extern struct {
@@ -114,7 +115,7 @@ const StackMetadata = struct {
 
 var stack_registry = std.HashMap(usize, StackMetadata, std.hash_map.default_hash_function_type(usize), std.hash_map.default_eql_function_type(usize), std.heap.ArenaAllocator(.{}), 80){};
 var stack_registry_init = false;
-var stack_registry_mutex = std.Thread.Mutex{};
+var stack_registry_mutex = compat.Mutex{};
 
 pub fn allocateStack(allocator: std.mem.Allocator) ![]align(4096) u8 {
     const memory = try allocator.alignedAlloc(u8, @enumFromInt(12), STACK_SIZE); // 2^12 = 4096
