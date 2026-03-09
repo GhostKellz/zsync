@@ -21,7 +21,7 @@ fn fileExists(path: []const u8) bool {
 /// Read file contents into buffer, returns bytes read or 0 on error
 fn readFileContents(path: []const u8, buf: []u8) usize {
     const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch return 0;
-    defer std.posix.close(fd);
+    defer std.Io.Threaded.closeFd(fd);
     const bytes_read = std.posix.read(fd, buf) catch return 0;
     return bytes_read;
 }

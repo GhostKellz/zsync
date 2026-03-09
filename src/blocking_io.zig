@@ -438,7 +438,7 @@ pub const BlockingIo = struct {
         };
         
         // Perform actual close
-        std.posix.close(fd);
+        std.Io.Threaded.closeFd(fd);
         
         const close_context = try self.allocator.create(CloseContext);
         close_context.* = CloseContext{ .self_ref = self };

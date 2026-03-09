@@ -247,7 +247,7 @@ const Worker = struct {
                 writev_task.result = total_bytes;
             },
             .close => |*close_task| {
-                std.posix.close(close_task.fd);
+                std.Io.Threaded.closeFd(close_task.fd);
                 close_task.result = {};
             },
             .custom => |*custom_task| {

@@ -352,7 +352,7 @@ pub const IoUring = struct {
             ring_fd,
             IORING_OFF_SQ_RING,
         ) catch {
-            std.posix.close(ring_fd);
+            std.Io.Threaded.closeFd(ring_fd);
             return IoUringError.SetupFailed;
         };
         
@@ -369,7 +369,7 @@ pub const IoUring = struct {
                 IORING_OFF_CQ_RING,
             ) catch {
                 std.posix.munmap(sq_mmap);
-                std.posix.close(ring_fd);
+                std.Io.Threaded.closeFd(ring_fd);
                 return IoUringError.SetupFailed;
             };
         
@@ -384,7 +384,7 @@ pub const IoUring = struct {
         ) catch {
             if (cq_mmap) |cq| std.posix.munmap(cq);
             std.posix.munmap(sq_mmap);
-            std.posix.close(ring_fd);
+            std.Io.Threaded.closeFd(ring_fd);
             return IoUringError.SetupFailed;
         };
         
@@ -435,7 +435,7 @@ pub const IoUring = struct {
         }
         
         // Close the ring file descriptor
-        std.posix.close(self.ring_fd);
+        std.Io.Threaded.closeFd(self.ring_fd);
     }
 
     /// Get a submission queue entry
