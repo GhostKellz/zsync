@@ -2,6 +2,7 @@
 //! Race multiple futures and return the first to complete
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const future_mod = @import("future.zig");
 
 /// Race multiple futures of the same type and return the first to complete
@@ -52,12 +53,12 @@ pub fn selectTimeout(
         return error.NoFutures;
     }
 
-    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const ts_start = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
     const start: i64 = @intCast(@divTrunc((@as(i128, ts_start.sec) * std.time.ns_per_s + ts_start.nsec), std.time.ns_per_ms));
     const deadline = start + @as(i64, @intCast(timeout_ms));
 
     while (true) {
-        const ts_now = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts_now = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts_now.sec) * std.time.ns_per_s + ts_now.nsec), std.time.ns_per_ms));
         if (now >= deadline) break;
         for (futures) |fut| {

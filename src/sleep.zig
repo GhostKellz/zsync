@@ -2,6 +2,7 @@
 //! Async sleep and cooperative yielding
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Cooperatively yield control to other tasks
 pub fn yieldNow() !void {
@@ -35,10 +36,10 @@ test "yieldNow basic" {
 }
 
 test "sleep milliseconds" {
-    const ts_start = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const ts_start = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
     const start: i64 = @intCast(@divTrunc((@as(i128, ts_start.sec) * std.time.ns_per_s + ts_start.nsec), std.time.ns_per_ms));
     sleep(10);
-    const ts_end = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+    const ts_end = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
     const end: i64 = @intCast(@divTrunc((@as(i128, ts_end.sec) * std.time.ns_per_s + ts_end.nsec), std.time.ns_per_ms));
     const elapsed = end - start;
 

@@ -1,8 +1,8 @@
 # zsync Documentation
 
-**zsync** - The Tokio of Zig
+**zsync** - Async Runtime for Zig
 
-A high-performance, colorblind async runtime for Zig that provides the same ergonomic experience as Rust's Tokio.
+A colorblind async runtime for Zig providing a similar experience to Rust's Tokio.
 
 ## Overview
 
@@ -17,9 +17,11 @@ zsync is a dependency-free async runtime foundation that provides:
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](getting-started.md) | Quick start guide |
-| [API Reference](api-reference.md) | Full API documentation |
+| [Getting Started](GETTING_STARTED.md) | Quick start guide |
+| [API Reference](API_REFERENCE.md) | Full API documentation |
 | [Architecture](architecture.md) | System design and internals |
+| [Examples](EXAMPLES.md) | Code examples and patterns |
+| [Performance](PERFORMANCE.md) | Benchmarks and optimization |
 
 ## Quick Example
 
@@ -62,10 +64,6 @@ zsync is designed to be a clean foundation for higher-level libraries:
 │            Zig std / OS                  │
 └─────────────────────────────────────────┘
 ```
-
-## Version
-
-Current: **v0.7.3**
 
 ## License
 

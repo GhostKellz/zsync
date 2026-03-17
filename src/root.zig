@@ -496,7 +496,7 @@ pub const UdpSocket = if (builtin.target.cpu.arch == .wasm32) struct {
     
     /// Close the UDP socket
     pub fn close(self: *Self) void {
-        std.posix.close(self.socket_fd);
+        std.Io.Threaded.closeFd(self.socket_fd);
     }
 };
 
@@ -617,7 +617,7 @@ pub const Sender = channel.Sender;
 pub const Receiver = channel.Receiver;
 
 // =============================================================================
-// Tokio-style APIs (v0.7.4)
+// Tokio-style APIs
 // =============================================================================
 
 /// Spawn a blocking task on a dedicated thread (like tokio::task::spawn_blocking)
@@ -1116,10 +1116,10 @@ pub fn timeoutFn(comptime func: anytype, args: anytype, timeout_ms: u64) !@TypeO
 }
 
 // Version information
-pub const VERSION = "0.7.4";
+pub const VERSION = "0.7.7";
 pub const VERSION_MAJOR = 0;
 pub const VERSION_MINOR = 7;
-pub const VERSION_PATCH = 4;
+pub const VERSION_PATCH = 7;
 
 /// Print Zsync version and capabilities
 pub fn printVersion() void {
@@ -1144,7 +1144,7 @@ pub fn printVersion() void {
     std.debug.print("  ✅ Structured Concurrency (Nursery)\n", .{});
     std.debug.print("  ✅ WASM Async Support\n", .{});
     std.debug.print("  ✅ Runtime Diagnostics & Metrics\n", .{});
-    std.debug.print("\nTokio-style APIs (v0.7.4):\n", .{});
+    std.debug.print("\nTokio-style APIs:\n", .{});
     std.debug.print("  ✅ spawnBlocking - Dedicated threads for CPU work\n", .{});
     std.debug.print("  ✅ JoinSet - Manage concurrent task groups\n", .{});
     std.debug.print("  ✅ BroadcastChannel - Multi-consumer pub/sub\n", .{});
@@ -1250,8 +1250,8 @@ test "Version information" {
 
     try testing.expect(VERSION_MAJOR == 0);
     try testing.expect(VERSION_MINOR == 7);
-    try testing.expect(VERSION_PATCH == 4);
-    try testing.expect(std.mem.eql(u8, VERSION, "0.7.4"));
+    try testing.expect(VERSION_PATCH == 7);
+    try testing.expect(std.mem.eql(u8, VERSION, "0.7.7"));
 }
 
 /// Legacy compatibility function

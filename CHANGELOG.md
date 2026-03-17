@@ -2,6 +2,54 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [v0.7.7] - 2025-03-16 🔧 **Zig 0.16.0-dev.2736+ Compatibility**
+
+### Fixed
+- **std.posix.close removed** - Updated all files to use `std.Io.Threaded.closeFd()`
+- **greenthreads_io.zig** - Added missing vtable functions (`getMode`, `supportsVectorized`, `supportsZeroCopy`, `getAllocatorVtable`)
+- **greenthreads_io.zig** - Fixed `poll` function signature (removed error union from return type)
+- **greenthreads_io.zig** - Fixed `connect` to use `*const std.posix.sockaddr` matching vtable signature
+- **greenthreads_io.zig** - Fixed broken test referencing non-existent method
+- **Config field naming** - Fixed `num_workers` → `thread_pool_threads` in all documentation
+
+### Changed
+- Removed version numbers from doc headers (version is in code)
+- Removed marketing language ("production-ready") from docs and comments
+- Updated installation docs with `zig fetch --save` syntax
+- Cleaned up README badges
+
+### Documentation
+- `README.md` - Cleaned up, simplified installation instructions
+- `docs/INTEGRATION.md` - Rewritten with canonical I/O pattern
+- `docs/MIGRATION.md` - Expanded with Zig 0.16 migration guide
+- `docs/TOKIO_PRIMITIVES.md` - NEW: Honest quality assessment of Tokio-style APIs
+- `docs/STD_IO_GAP.md` - NEW: Comparison with std.Io
+- `docs/architecture.md` - Updated with honest feature status
+- `docs/API_REFERENCE.md` - Fixed config field names
+- `docs/EXAMPLES.md` - Fixed config field names
+- `docs/PERFORMANCE.md` - Fixed config field names
+
+### Downstream Impact
+
+**zcrypto users**: No API changes. Continue using `zsync.Io`, `zsync.Future`, `zsync.BlockingIo`.
+
+**zquic users**: zsync remains a dependency but zquic uses its own internal runtime.
+
+### Known Limitations
+
+- **JoinSet** - Executes tasks synchronously (use Nursery for parallelism)
+- **BroadcastChannel** - No capacity limits or lag handling
+- **WatchChannel** - No async `changed()` method
+- **Green threads** - Linux 5.1+ only (other platforms use thread pool)
+- **Windows/macOS** - Thread pool only (no native async backend)
+
+### Verification
+- All 37 tests passing on Zig 0.16.0-dev.2736+
+- `zig build` and `zig build test` succeed
+- Minimum Zig version: `0.16.0-dev.2736+3b515fbed`
+
+---
+
 ## [v0.7.5] - 2025-02-11 🔧 **Zig 0.16.0-dev.2535+ Compatibility**
 
 ### Fixed

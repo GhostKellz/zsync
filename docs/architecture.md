@@ -4,7 +4,7 @@
 
 zsync follows several key principles:
 
-1. **Colorblind Async** - Code should work identically whether running synchronously or asynchronously
+1. **Colorblind Async** - Code works identically whether running synchronously or asynchronously
 2. **Zero-Cost Abstractions** - Pay only for what you use
 3. **Platform Optimization** - Use the best backend for each platform
 4. **Composability** - Small, focused modules that compose well
@@ -21,17 +21,28 @@ zsync follows several key principles:
 │  └─────────┴─────────┴─────────┴─────────┴─────────────────┘│
 ├─────────────────────────────────────────────────────────────┤
 │                     Io Interface (VTable)                    │
-├─────────┬─────────┬─────────┬─────────┬─────────────────────┤
-│Blocking │ThreadPool│io_uring │  Green  │      WASM         │
-│   Io    │    Io    │   Io    │ Threads │    Microtasks     │
-├─────────┴─────────┴─────────┴─────────┴─────────────────────┤
+├─────────┬─────────┬─────────┬───────────────────────────────┤
+│Blocking │ThreadPool│io_uring │      Green Threads           │
+│   Io    │    Io    │   Io    │       (Linux)                │
+├─────────┴─────────┴─────────┴───────────────────────────────┤
 │                     Platform Layer                           │
 │  ┌─────────┬─────────┬─────────┬─────────┬─────────────────┐│
 │  │  Linux  │  macOS  │ Windows │  BSD    │      WASM       ││
-│  │io_uring │ kqueue  │  IOCP   │ kqueue  │   Event Loop    ││
+│  │io_uring │ (pool)  │ (pool)  │ (pool)  │   (blocking)    ││
 │  └─────────┴─────────┴─────────┴─────────┴─────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## Feature Status
+
+| Feature | Linux | macOS | Windows | BSD | WASM |
+|---------|-------|-------|---------|-----|------|
+| Blocking I/O | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Thread Pool | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Green Threads | ✅ (io_uring) | ❌ | ❌ | ❌ | ❌ |
+| Zero-Copy | ✅ | Partial | ❌ | Partial | ❌ |
+| Channels | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Timers | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## Core Components
 
@@ -68,7 +79,6 @@ pub const Runtime = struct {
     config: Config,
     io_impl: IoImplementation,
     metrics: RuntimeMetrics,
-    // ...
 };
 ```
 
@@ -77,37 +87,19 @@ Key responsibilities:
 - Track runtime metrics
 - Manage global runtime instance
 
-### 3. Thread Pool (`thread_pool.zig`, `std_io.zig`)
+### 3. Thread Pool (`thread_pool.zig`)
 
-Real thread pool implementation with:
+Thread pool implementation with:
 
-- Worker threads with condition variable signaling
-- Lock-free work queue (SinglyLinkedList)
-- Futex-based completion events
-- Automatic thread spawning up to CPU count
-
-```zig
-pub const Threaded = struct {
-    run_queue: std.SinglyLinkedList,
-    cond: std.Thread.Condition,
-    workers: []Worker,
-    // ...
-};
-```
+- Worker threads with futex-based signaling
+- Lock-free work queue
+- Automatic worker count based on CPU cores
+- Graceful shutdown with task draining
 
 ### 4. Timer System (`timer.zig`)
 
-Hierarchical timer wheel for efficient timer management:
+Timer wheel for efficient timer management:
 
-```zig
-pub const TimerWheel = struct {
-    timers: HashMap(u64, TimerEntry),
-    sorted_timers: ArrayList(u64),  // Sorted by expiry
-    // ...
-};
-```
-
-Features:
 - O(log n) insertion
 - O(1) expiry checking
 - Interval timer support
@@ -118,12 +110,12 @@ Features:
 Message passing primitives:
 
 - **Bounded channels** - Fixed capacity with backpressure
-- **Unbounded channels** - Unlimited capacity
-- **OneShot channels** - Single value transfer
+- **Unbounded channels** - Dynamic capacity
+- MPMC (multi-producer, multi-consumer) support
 
 ### 6. Synchronization (`sync.zig`)
 
-Async-aware synchronization primitives:
+Synchronization primitives:
 
 - `AsyncMutex` - Non-blocking mutex
 - `AsyncRwLock` - Reader-writer lock
@@ -133,37 +125,43 @@ Async-aware synchronization primitives:
 
 ## Platform Backends
 
-### Linux
+### Linux (Full Support)
 
-- **io_uring** - Kernel-level async I/O (5.1+)
+- **io_uring** - Kernel-level async I/O (kernel 5.1+)
 - **epoll** - Fallback for older kernels
-- Zero-copy: `sendfile`, `splice`
+- Zero-copy: `sendfile`, `splice`, `copy_file_range`
+- Green threads with cooperative scheduling
 
-### macOS
+### macOS (Thread Pool)
 
-- **kqueue** - BSD event notification
-- **GCD** - Grand Central Dispatch integration
-- Thread pool fallback
+- Thread pool execution model
+- `sendfile` for zero-copy (partial)
+- kqueue planned for future
 
-### Windows
+### Windows (Thread Pool)
 
-- **IOCP** - I/O Completion Ports
-- Thread pool with IOCP integration
+- Thread pool execution model
+- IOCP integration planned for future
 
-### WASM
+### BSD (Thread Pool)
 
-- **Microtask queue** - Browser event loop integration
-- Promise-based async
-- No threading (single-threaded)
+- Thread pool execution model
+- kqueue planned for future
+
+### WASM (Blocking Only)
+
+- Blocking execution model
+- No threading support
+- Microtask queue for browser integration
 
 ## Memory Management
 
 zsync is careful about memory:
 
 1. **Allocator Threading** - All allocations go through user-provided allocator
-2. **Buffer Pooling** - Reusable buffers for I/O
+2. **Buffer Pooling** - Reusable buffers for I/O operations
 3. **Page Alignment** - Zero-copy buffers are page-aligned
-4. **Arena Patterns** - Short-lived allocations use arenas
+4. **Deferred cleanup** - `defer future.destroy(allocator)` pattern
 
 ## Error Handling
 
@@ -173,18 +171,36 @@ Consistent error handling across all components:
 pub const IoError = error{
     WouldBlock,
     Cancelled,
-    Timeout,
-    ConnectionReset,
+    TimedOut,
+    ConnectionClosed,
+    BrokenPipe,
     // ...
 };
 ```
 
-## Future Directions
+## Roadmap
 
-- [ ] io_uring Evented backend with full fiber support
-- [ ] HTTP/2 and HTTP/3 (in zhttp)
-- [ ] TLS integration (in zcrypto)
-- [ ] Distributed runtime support
+### Planned
+- [ ] kqueue backend for macOS/BSD
+- [ ] IOCP backend for Windows
+- [ ] Full std.Io adapter
+
+### In Progress
+- [x] Zig 0.16.0-dev compatibility
+- [x] Tokio-style primitives (partial)
+- [x] Structured concurrency (Nursery)
+
+### Complete
+- [x] Colorblind async interface
+- [x] Thread pool execution
+- [x] io_uring green threads (Linux)
+- [x] Channels (bounded/unbounded)
+- [x] Timer system
+- [x] Zero-copy I/O (Linux)
+- [x] Buffer pool
+- [x] WebSocket (RFC 6455)
+- [x] Rate limiting
+- [x] Connection pooling
 
 ## File Organization
 
@@ -194,14 +210,16 @@ src/
 ├── runtime.zig        # Runtime management
 ├── io_interface.zig   # Colorblind I/O interface
 ├── blocking_io.zig    # Synchronous I/O backend
-├── std_io.zig         # std.Io compatible backend
 ├── thread_pool.zig    # Thread pool implementation
+├── greenthreads_io.zig# Green threads (Linux)
 ├── timer.zig          # Timer wheel
 ├── channel.zig        # Channel primitives
 ├── sync.zig           # Synchronization primitives
 ├── scheduler.zig      # Task scheduler
 ├── nursery.zig        # Structured concurrency
-├── zero_copy.zig      # Zero-copy I/O utilities
+├── buffer_pool.zig    # Buffer management
+├── compat/
+│   └── thread.zig     # Zig 0.16 compatibility
 ├── net/
 │   ├── websocket.zig  # WebSocket RFC 6455
 │   ├── pool.zig       # Connection pooling

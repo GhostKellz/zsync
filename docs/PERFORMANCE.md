@@ -1,4 +1,4 @@
-# Zsync v0.7.0 Performance Guide
+# Zsync Performance Guide
 
 Optimize your zsync applications for maximum performance.
 
@@ -68,13 +68,13 @@ const config = zsync.Config{
 ```zig
 const config = zsync.Config{
     .execution_model = .thread_pool,
-    .num_workers = 4, // Match CPU cores for CPU-bound
+    .thread_pool_threads = 4, // Match CPU cores for CPU-bound
 };
 ```
 
 **Worker Count Guidelines:**
-- CPU-bound: `num_workers = CPU cores`
-- I/O-bound: `num_workers = CPU cores * 2-4`
+- CPU-bound: `thread_pool_threads = CPU cores`
+- I/O-bound: `thread_pool_threads = CPU cores * 2-4`
 - Mixed: Start with `CPU cores * 2`, benchmark
 
 ---
@@ -330,7 +330,7 @@ const config = zsync.Config{
 ```zig
 const config = zsync.Config{
     .execution_model = .thread_pool,
-    .num_workers = 4, // Match cores
+    .thread_pool_threads = 4, // Match cores
 };
 ```
 
@@ -440,7 +440,7 @@ std.debug.print("p50: {d}ns, p95: {d}ns, p99: {d}ns\n", .{p50, p95, p99});
 .max_cached = 64, // Down from 256
 
 // Reduce workers
-.num_workers = 2, // Down from 8
+.thread_pool_threads = 2, // Down from 8
 ```
 
 ### Issue: Low Throughput

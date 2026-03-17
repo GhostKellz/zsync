@@ -16,7 +16,7 @@ pub const TokenBucket = struct {
 
     /// Initialize token bucket
     pub fn init(capacity: u32, refill_rate: u32) Self {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
         return Self{
             .capacity = capacity,
@@ -45,7 +45,7 @@ pub const TokenBucket = struct {
 
     /// Refill tokens based on elapsed time
     fn refill(self: *Self) void {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
         const last = self.last_refill.load(.acquire);
         const elapsed_ms = now - last;
@@ -83,7 +83,7 @@ pub const LeakyBucket = struct {
     const Self = @This();
 
     pub fn init(capacity: u32, leak_rate: u32) Self {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
         return Self{
             .capacity = capacity,
@@ -112,7 +112,7 @@ pub const LeakyBucket = struct {
 
     /// Leak items based on elapsed time
     fn leak(self: *Self) void {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
         const last = self.last_leak.load(.acquire);
         const elapsed_ms = now - last;
@@ -166,7 +166,7 @@ pub const SlidingWindow = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
         const window_start = now - @as(i64, @intCast(self.window_ms));
 
@@ -194,7 +194,7 @@ pub const SlidingWindow = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const ts_count = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts_count = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const now: i64 = @intCast(@divTrunc((@as(i128, ts_count.sec) * std.time.ns_per_s + ts_count.nsec), std.time.ns_per_ms));
         const window_start = now - @as(i64, @intCast(self.window_ms));
 

@@ -12,7 +12,7 @@ pub const Kqueue = struct {
     }
     
     pub fn deinit(self: *Kqueue) void {
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
     
     pub fn addRead(self: *Kqueue, fd: i32, udata: ?*anyopaque) !void {

@@ -319,7 +319,7 @@ pub const AsyncFileWatcher = struct {
                 .event_mask = FileEvent.created.toLinux(),
                 .cookie = 0,
                 .name = try self.allocator.dupe(u8, "test_file.txt"),
-                .timestamp = @as(i64, std.posix.clock_gettime(.REALTIME).sec),
+                .timestamp = @as(i64, compat.clock_gettime(std.os.linux.CLOCK.REALTIME).sec),
             },
         };
         
@@ -423,7 +423,7 @@ pub const AsyncSignalHandler = struct {
                 .signal_number = SignalType.child.toLinux(),
                 .sender_pid = 1234,
                 .sender_uid = 1000,
-                .timestamp = @as(i64, std.posix.clock_gettime(.REALTIME).sec),
+                .timestamp = @as(i64, compat.clock_gettime(std.os.linux.CLOCK.REALTIME).sec),
                 .additional_data = null,
             },
         };
@@ -536,7 +536,7 @@ pub const AsyncEpollManager = struct {
                         .file_descriptor = fd,
                         .event_mask = EpollEventType.readable.toLinux(),
                         .user_data = @bitCast(@as(u64, @intCast(fd))),
-                        .timestamp = @as(i64, std.posix.clock_gettime(.REALTIME).sec),
+                        .timestamp = @as(i64, compat.clock_gettime(std.os.linux.CLOCK.REALTIME).sec),
                     },
                 };
                 

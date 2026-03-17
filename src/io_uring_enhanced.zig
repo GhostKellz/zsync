@@ -397,7 +397,7 @@ pub const EnhancedIoUring = struct {
         std.posix.munmap(self.cq.mmap_ptr);
         
         // Close ring file descriptor
-        std.posix.close(self.ring_fd);
+        std.Io.Threaded.closeFd(self.ring_fd);
     }
     
     /// Get next available SQE with advanced features support

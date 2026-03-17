@@ -46,7 +46,7 @@ pub const IoUring = struct {
         params.sq_thread_idle = 1000; // 1 second idle before sleeping
 
         const fd = @as(i32, @intCast(std.os.linux.io_uring_setup(entries, &params)));
-        errdefer std.posix.close(fd);
+        errdefer std.Io.Threaded.closeFd(fd);
 
         // Map submission queue
         const sq_ring_size = params.sq_off.array + params.sq_entries * @sizeOf(u32);
@@ -122,7 +122,7 @@ pub const IoUring = struct {
         std.posix.munmap(self.sq_ring_ptr);
         std.posix.munmap(self.cq_ring_ptr);
         std.posix.munmap(self.sqe_ptr);
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
 
     // Arch Linux optimized submission with batching
@@ -295,7 +295,7 @@ pub const Epoll = struct {
     }
 
     pub fn deinit(self: *Epoll) void {
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
 
     pub fn add(self: *Epoll, fd: i32, events: u32, data: u64) !void {
@@ -356,7 +356,7 @@ fn checkIoUringSupport() bool {
     // Try to create a small io_uring instance
     var params = std.mem.zeroes(linux.io_uring_params);
     const fd = linux.io_uring_setup(2, &params) catch return false;
-    std.posix.close(@intCast(fd));
+    std.Io.Threaded.closeFd(@intCast(fd));
     return true;
 }
 
@@ -370,7 +370,7 @@ pub const Timer = struct {
     }
 
     pub fn deinit(self: *Timer) void {
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
 
     pub fn setRelative(self: *Timer, ns: u64) !void {

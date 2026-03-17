@@ -1,6 +1,6 @@
-# Zsync v0.7.0 API Reference
+# Zsync API Reference
 
-Complete reference for all public APIs in zsync.
+Reference for public APIs in zsync.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ pub const Runtime = struct {
 ```zig
 const runtime = try zsync.Runtime.init(allocator, .{
     .execution_model = .thread_pool,
-    .num_workers = 4,
+    .thread_pool_threads = 4,
 });
 defer runtime.deinit();
 
@@ -486,7 +486,7 @@ Runtime configuration options.
 ```zig
 pub const Config = struct {
     execution_model: ExecutionModel = .auto,
-    num_workers: ?u32 = null,
+    thread_pool_threads: ?u32 = null,
     enable_debugging: bool = false,
     green_thread_stack_size: usize = 65536,
     max_green_threads: u32 = 1024,
@@ -520,35 +520,6 @@ pub fn detect() ExecutionModel;
 - `.green_threads` on Linux 5.1+ with io_uring
 - `.thread_pool` on other platforms
 - Never returns `.auto`
-
----
-
-## Version Information
-
-```zig
-pub const VERSION = "0.7.0";
-pub const VERSION_MAJOR = 0;
-pub const VERSION_MINOR = 7;
-pub const VERSION_PATCH = 0;
-```
-
-### `printVersion()`
-
-Prints version and capabilities.
-
-```zig
-pub fn printVersion() void;
-```
-
-**Output:**
-```
-🚀 Zsync v0.7.0 - The Tokio of Zig
-Execution Models:
-  ✅ blocking
-  ✅ thread_pool
-  ✅ green_threads (Linux 5.1+)
-Platform: x86_64-linux
-```
 
 ---
 

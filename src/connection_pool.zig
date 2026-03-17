@@ -34,7 +34,7 @@ pub const PooledConnection = struct {
     const Self = @This();
 
     pub fn init(id: u32, stream: io.TcpStream) Self {
-        const now = @as(u64, @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
+        const now = @as(u64, @intCast(blk: { const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
         return Self{
             .id = id,
             .stream = stream,
@@ -46,7 +46,7 @@ pub const PooledConnection = struct {
     }
 
     pub fn markUsed(self: *Self) void {
-        self.last_used = @as(u64, @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
+        self.last_used = @as(u64, @intCast(blk: { const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
         self.use_count += 1;
         self.state = .active;
     }
@@ -56,7 +56,7 @@ pub const PooledConnection = struct {
     }
 
     pub fn isExpired(self: *Self, timeout_ms: u64) bool {
-        const now = @as(u64, @intCast(blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
+        const now = @as(u64, @intCast(blk: { const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); }));
         return (now - self.last_used) > timeout_ms;
     }
 

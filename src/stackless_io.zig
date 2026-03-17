@@ -1047,7 +1047,7 @@ fn stacklessUdpRecvFrom(ptr: *anyopaque, io: Io, buffer: []u8) !io_interface.Rec
 fn stacklessUdpClose(ptr: *anyopaque, io: Io) !void {
     _ = io;
     const socket_impl: *StacklessUdpSocket = @ptrCast(@alignCast(ptr));
-    std.posix.close(socket_impl.socket);
+    std.Io.Threaded.closeFd(socket_impl.socket);
     socket_impl.allocator.destroy(socket_impl);
 }
 

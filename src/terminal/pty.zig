@@ -47,7 +47,7 @@ pub const Pty = struct {
             .ACCMODE = .RDWR,
             .NOCTTY = true,
         }, 0);
-        errdefer std.posix.close(master_fd);
+        errdefer std.Io.Threaded.closeFd(master_fd);
 
         // Grant access to slave
         if (std.posix.system.grantpt(master_fd) != 0) {
@@ -96,8 +96,8 @@ pub const Pty = struct {
 
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.read_buffer);
-        std.posix.close(self.master_fd);
-        std.posix.close(self.slave_fd);
+        std.Io.Threaded.closeFd(self.master_fd);
+        std.Io.Threaded.closeFd(self.slave_fd);
     }
 
     /// Spawn process in PTY
@@ -118,9 +118,9 @@ pub const Pty = struct {
             try std.posix.dup2(self.slave_fd, std.posix.STDERR_FILENO);
 
             // Close master
-            std.posix.close(self.master_fd);
+            std.Io.Threaded.closeFd(self.master_fd);
             if (self.slave_fd > 2) {
-                std.posix.close(self.slave_fd);
+                std.Io.Threaded.closeFd(self.slave_fd);
             }
 
             // Change directory if specified
@@ -135,7 +135,7 @@ pub const Pty = struct {
         } else {
             // Parent process
             self.child_pid = pid;
-            std.posix.close(self.slave_fd);
+            std.Io.Threaded.closeFd(self.slave_fd);
         }
     }
 

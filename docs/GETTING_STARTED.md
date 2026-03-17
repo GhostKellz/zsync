@@ -1,24 +1,19 @@
-# Getting Started with Zsync v0.7.0
+# Getting Started with Zsync
 
-**Zsync** is a production-ready async runtime for Zig - "The Tokio of Zig". It provides colorblind async programming where the same code works across multiple execution models.
+**Zsync** is an async runtime for Zig providing colorblind async programming where the same code works across multiple execution models.
 
 ## Installation
 
-### Option 1: Using Zig Package Manager (Recommended)
+Add zsync to your project:
 
-Add zsync to your `build.zig.zon`:
+```bash
+zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/heads/main.tar.gz
+```
 
-```zig
-.{
-    .name = "my-project",
-    .version = "0.1.0",
-    .dependencies = .{
-        .zsync = .{
-            .url = "https://github.com/ghostkellz/zsync/archive/v0.7.0.tar.gz",
-            // Hash will be provided by `zig fetch`
-        },
-    },
-}
+Or for a specific tag:
+
+```bash
+zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/tags/v0.7.7.tar.gz
 ```
 
 Then in your `build.zig`:
@@ -30,16 +25,6 @@ const zsync = b.dependency("zsync", .{
 });
 
 exe.root_module.addImport("zsync", zsync.module("zsync"));
-```
-
-### Option 2: Manual Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/ghostkellz/zsync.git
-cd zsync
-zig build
 ```
 
 ## Quick Start
@@ -65,7 +50,7 @@ pub fn main() !void {
     const runtime = try zsync.Runtime.init(allocator, config);
     defer runtime.deinit();
 
-    std.debug.print("Zsync v{s} initialized!\n", .{zsync.VERSION});
+    std.debug.print("Zsync initialized!\n", .{});
 }
 ```
 
@@ -90,23 +75,18 @@ pub fn main() !void {
 
     const config = zsync.Config{
         .execution_model = .thread_pool,
-        .num_workers = 4,
+        .thread_pool_threads = 4,
     };
 
     const runtime = try zsync.Runtime.init(allocator, config);
     defer runtime.deinit();
 
     runtime.setGlobal();
-    defer {
-        zsync.runtime.global_runtime_mutex.lock();
-        zsync.runtime.global_runtime = null;
-        zsync.runtime.global_runtime_mutex.unlock();
-    }
 
     // Spawn multiple tasks
-    const future1 = try zsync.spawn(fetchData, .{1});
-    const future2 = try zsync.spawn(fetchData, .{2});
-    const future3 = try zsync.spawn(fetchData, .{3});
+    const future1 = try runtime.spawn(fetchData, .{1});
+    const future2 = try runtime.spawn(fetchData, .{2});
+    const future3 = try runtime.spawn(fetchData, .{3});
 
     // Wait for all tasks to complete
     try future1.await();
@@ -135,16 +115,11 @@ pub fn main() !void {
 
     const runtime = try zsync.Runtime.init(allocator, .{
         .execution_model = .thread_pool,
-        .num_workers = 4,
+        .thread_pool_threads = 4,
     });
     defer runtime.deinit();
 
     runtime.setGlobal();
-    defer {
-        zsync.runtime.global_runtime_mutex.lock();
-        zsync.runtime.global_runtime = null;
-        zsync.runtime.global_runtime_mutex.unlock();
-    }
 
     // All tasks in nursery will complete before exit
     const nursery = try zsync.Nursery.init(allocator, runtime);
@@ -249,7 +224,7 @@ const config = zsync.Config{ .execution_model = .blocking };
 ```zig
 const config = zsync.Config{
     .execution_model = .thread_pool,
-    .num_workers = 4,
+    .thread_pool_threads = 4,
 };
 ```
 
@@ -274,12 +249,12 @@ const config = zsync.Config{ .execution_model = .auto };
 
 | Platform | Blocking | Thread Pool | Green Threads |
 |----------|----------|-------------|---------------|
-| Linux 5.1+ | ✅ | ✅ | ✅ (io_uring) |
-| Linux < 5.1 | ✅ | ✅ | ❌ |
-| macOS | ✅ | ✅ | ❌ |
-| Windows | ✅ | ✅ | ❌ |
-| FreeBSD/OpenBSD | ✅ | ✅ | ❌ |
-| WASM | ✅ | ❌ | ❌ |
+| Linux 5.1+ | Yes | Yes | Yes (io_uring) |
+| Linux < 5.1 | Yes | Yes | No |
+| macOS | Yes | Yes | No |
+| Windows | Yes | Yes | No |
+| FreeBSD/OpenBSD | Yes | Yes | No |
+| WASM | Yes | No | No |
 
 ## Configuration Options
 
@@ -289,7 +264,7 @@ pub const Config = struct {
     execution_model: ExecutionModel = .auto,
 
     /// Number of worker threads (thread_pool only)
-    num_workers: ?u32 = null,
+    thread_pool_threads: u32 = 0, // 0 = auto-detect
 
     /// Enable runtime debugging
     enable_debugging: bool = false,
@@ -310,36 +285,7 @@ pub const Config = struct {
 - Read the [API Reference](API_REFERENCE.md) for detailed API documentation
 - Check out [Examples](EXAMPLES.md) for real-world use cases
 - Learn about [Performance Tuning](PERFORMANCE.md)
-- Understand the [Architecture](ARCHITECTURE.md)
-
-## Common Patterns
-
-### Error Handling
-
-All zsync functions return errors that should be handled:
-
-```zig
-const future = zsync.spawn(myTask, .{}) catch |err| {
-    std.debug.print("Failed to spawn: {}\n", .{err});
-    return err;
-};
-```
-
-### Timeouts
-
-Currently manual, but coming in v0.8:
-
-```zig
-const start = std.time.Instant.now() catch unreachable;
-while (future.poll() == .pending) {
-    const now = std.time.Instant.now() catch unreachable;
-    if (now.since(start) > 5 * std.time.ns_per_s) {
-        future.cancel();
-        return error.Timeout;
-    }
-    std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
-}
-```
+- Understand the [Architecture](architecture.md)
 
 ## Troubleshooting
 
@@ -351,14 +297,3 @@ Increase `max_cached` in BufferPoolConfig or release buffers sooner.
 
 ### "GreenThreadsNotSupported" error
 Green threads require Linux 5.1+. Use `.auto` to fall back to thread_pool.
-
-## Contributing
-
-Zsync is part of the Ghostkellz ecosystem. Contributions welcome!
-
-- GitHub: https://github.com/ghostkellz/zsync
-- Issues: https://github.com/ghostkellz/zsync/issues
-
-## License
-
-See LICENSE file in repository.

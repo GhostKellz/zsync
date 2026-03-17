@@ -361,7 +361,7 @@ const Worker = struct {
             },
             
             .close => |op| blk: {
-                std.posix.close(op.fd);
+                std.Io.Threaded.closeFd(op.fd);
                 break :blk IoResult{
                     .bytes_transferred = 0,
                     .error_code = null,

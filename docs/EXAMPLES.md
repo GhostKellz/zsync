@@ -1,4 +1,4 @@
-# Zsync v0.7.0 Examples
+# Zsync Examples
 
 Real-world examples demonstrating zsync capabilities.
 
@@ -153,7 +153,7 @@ pub fn main() !void {
 
     const runtime = try zsync.Runtime.init(allocator, .{
         .execution_model = .thread_pool,
-        .num_workers = 4,
+        .thread_pool_threads = 4,
     });
     defer runtime.deinit();
 
@@ -224,7 +224,7 @@ pub fn main() !void {
 
     const runtime = try zsync.Runtime.init(allocator, .{
         .execution_model = .thread_pool,
-        .num_workers = 4,
+        .thread_pool_threads = 4,
     });
     defer runtime.deinit();
 
@@ -317,7 +317,7 @@ pub fn main() !void {
 
     const runtime = try zsync.Runtime.init(allocator, .{
         .execution_model = .thread_pool,
-        .num_workers = 4,
+        .thread_pool_threads = 4,
     });
     defer runtime.deinit();
 
@@ -372,7 +372,7 @@ pub fn main() !void {
 
     const runtime = try zsync.Runtime.init(allocator, .{
         .execution_model = .thread_pool,
-        .num_workers = 4,
+        .thread_pool_threads = 4,
     });
     defer runtime.deinit();
 
@@ -501,8 +501,8 @@ pub fn main() !void {
 2. **Release buffers promptly** - Keeps pool available
 3. **Use channels for task communication** - Thread-safe messaging
 4. **Set worker count based on workload**:
-   - CPU-bound: `num_workers = CPU cores`
-   - I/O-bound: `num_workers = CPU cores * 2-4`
+   - CPU-bound: `thread_pool_threads = CPU cores`
+   - I/O-bound: `thread_pool_threads = CPU cores * 2-4`
 5. **Use `.auto` execution model** - Platform-optimal selection
 6. **Handle errors properly** - Tasks can fail
 7. **Close channels when done** - Signals consumers to exit

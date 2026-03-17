@@ -356,7 +356,7 @@ pub const ConnectionPool = struct {
                 .stream = stream,
                 .in_use = true,
                 .created_at = blk: {
-                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
                 break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
             },
             };

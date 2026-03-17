@@ -1,5 +1,5 @@
-//! Zsync v0.7.4 Build Configuration
-//! The Tokio of Zig - Production-Ready Async Runtime Build System
+//! Zsync Build Configuration
+//! Async Runtime for Zig
 
 const std = @import("std");
 
@@ -7,7 +7,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Zsync v0.7.4 - Production-Ready Async Runtime Module
+    // Zsync module
     const zsync_mod = b.addModule("zsync", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,

@@ -276,7 +276,7 @@ pub const AsyncScheduler = struct {
         // Store frame in pool for lifecycle management
         try self.frame_pool.append(self.allocator, frame);
 
-        const ts_task = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        const ts_task = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
         const timestamp: u64 = @intCast(@divTrunc((@as(i128, ts_task.sec) * std.time.ns_per_s + ts_task.nsec), std.time.ns_per_ms));
         const task = ScheduledTask.init(frame.*, priority, timestamp);
         try self.ready_queue.push(task);
@@ -338,7 +338,7 @@ pub const AsyncScheduler = struct {
             frame.state = .ready;
 
             // Move from suspended to ready queue
-            const ts_resume = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+            const ts_resume = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
             const timestamp_resume: u64 = @intCast(@divTrunc((@as(i128, ts_resume.sec) * std.time.ns_per_s + ts_resume.nsec), std.time.ns_per_ms));
             const task = ScheduledTask.init(frame.*, .normal, timestamp_resume);
             self.ready_queue.push(task) catch return; // Ignore error for now

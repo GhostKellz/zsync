@@ -71,7 +71,7 @@ pub const ErrorContext = struct {
             .error_code = error_code,
             .source_location = source_location,
             .message = message,
-            .timestamp = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); },
+            .timestamp = blk: { const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); },
             .thread_id = std.Thread.getCurrentId(),
             .stack_trace = captureStackTrace(),
             .recovery_hint = recovery_hint,
@@ -223,7 +223,7 @@ pub const ResourceTracker = struct {
             .ptr = ptr,
             .cleanup_fn = cleanup_fn,
             .allocated_at = source_location,
-            .timestamp = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); },
+            .timestamp = blk: { const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); },
         };
         
         try self.resources.append(self.allocator, resource);
@@ -481,7 +481,7 @@ pub const MemorySafetyValidator = struct {
             .size = size,
             .alignment = alignment,
             .allocated_at = source_location,
-            .timestamp = blk: { const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); },
+            .timestamp = blk: { const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable; break :blk @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms)); },
             .thread_id = std.Thread.getCurrentId(),
         };
         

@@ -91,7 +91,7 @@ pub fn ConnectionPool(comptime T: type) type {
                     }
 
                     conn.in_use = true;
-                    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                    const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
                     const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
                     conn.last_used = millis;
                     return conn.connection;
@@ -101,7 +101,7 @@ pub fn ConnectionPool(comptime T: type) type {
             // Create new connection if below max
             if (self.connections.items.len < self.config.max_connections) {
                 const conn = try self.factory(self.allocator);
-                const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
                 const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 
                 try self.connections.append(self.allocator, PooledConnection{
@@ -126,7 +126,7 @@ pub fn ConnectionPool(comptime T: type) type {
             for (self.connections.items) |*conn| {
                 if (conn.connection == connection) {
                     conn.in_use = false;
-                    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+                    const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
                     const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
                     conn.last_used = millis;
                     self.available.release();
@@ -137,7 +137,7 @@ pub fn ConnectionPool(comptime T: type) type {
 
         /// Ensure minimum number of connections exist
         fn ensureMinConnections(self: *Self) !void {
-            const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+            const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
             const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 
             while (self.connections.items.len < self.config.min_connections) {
@@ -157,7 +157,7 @@ pub fn ConnectionPool(comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+            const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
             const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
             const timeout = @as(i64, @intCast(self.config.idle_timeout_ms));
 

@@ -147,7 +147,7 @@ pub const MmapRegion = struct {
     const Self = @This();
     
     pub fn init(address: usize, length: usize, protection: MemoryProtection, flags: i32, fd: ?i32, offset: i64) Self {
-        const now = @as(i64, std.posix.clock_gettime(.REALTIME).sec);
+        const now = @as(i64, compat.clock_gettime(std.os.linux.CLOCK.REALTIME).sec);
         return Self{
             .address = address,
             .length = length,
@@ -168,7 +168,7 @@ pub const MmapRegion = struct {
     
     pub fn updateAccess(self: *Self) void {
         self.access_count += 1;
-        self.last_access = @as(i64, std.posix.clock_gettime(.REALTIME).sec);
+        self.last_access = @as(i64, compat.clock_gettime(std.os.linux.CLOCK.REALTIME).sec);
     }
     
     pub fn asSlice(self: *const Self) []u8 {

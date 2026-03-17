@@ -197,7 +197,7 @@ fn checkIoUringSupport() bool {
     
     // Try to create a minimal io_uring instance
     const fd = std.posix.openZ("/dev/null", .{}, 0) catch return false;
-    defer std.posix.close(fd);
+    defer std.Io.Threaded.closeFd(fd);
     
     // This would normally check io_uring_setup syscall
     // For now, assume modern Linux has it

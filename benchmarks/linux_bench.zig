@@ -1,4 +1,4 @@
-//! Zsync v0.7.0 - Linux Performance Benchmarks
+//! Zsync - Linux Performance Benchmarks
 //! Focused benchmarks for Linux-specific features
 
 const std = @import("std");

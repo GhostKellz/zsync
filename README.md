@@ -1,18 +1,17 @@
 <div align="center">
   <img src="assets/icons/zsync.png" alt="Zsync Logo" width="200" height="200">
 
-  # Zsync - High-Performance Async Runtime for Zig
+  # Zsync - Async Runtime for Zig
 
   [![Zig](https://img.shields.io/badge/Zig-0.16--dev-orange.svg)](https://ziglang.org/)
   [![Green Threads](https://img.shields.io/badge/Green_Threads-Async-green.svg)](#green-thread-mode-linux)
   [![io_uring](https://img.shields.io/badge/io__uring-Linux-blue.svg)](#platform-support)
-  [![Performance](https://img.shields.io/badge/Performance-Production_Ready-brightgreen.svg)](#benchmarks)
   [![Zero Cost](https://img.shields.io/badge/Zero_Cost-Abstractions-purple.svg)](#key-features)
 </div>
 
 ## Overview
 
-Zsync is a high-performance async runtime for Zig, inspired by Rust's Tokio. It provides efficient async I/O operations with multiple execution models and platform-specific optimizations.
+Zsync is an async runtime for Zig providing efficient async I/O operations with multiple execution models and platform-specific optimizations.
 
 ### Key Features
 
@@ -30,15 +29,15 @@ pub fn main() !void {
     // Spawn concurrent tasks
     _ = try zsync.spawn(handleClient, .{client1});
     _ = try zsync.spawn(handleClient, .{client2});
-    
+
     // Use channels for communication
     const ch = try zsync.bounded([]const u8, allocator, 100);
     try ch.sender.send("Hello from Zsync!");
     const msg = try ch.receiver.recv();
-    
+
     // Sleep without blocking
     zsync.sleep(1000); // 1 second
-    
+
     // Cooperative yielding
     zsync.yieldNow();
 }
@@ -46,12 +45,16 @@ pub fn main() !void {
 
 ## Installation
 
-### Using Zig Build System
-
-Add as a dependency to your Zig project:
+Add zsync to your project:
 
 ```bash
 zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/heads/main.tar.gz
+```
+
+Or for a specific tag:
+
+```bash
+zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/tags/v0.7.7.tar.gz
 ```
 
 Add to your `build.zig`:
@@ -68,7 +71,7 @@ exe.root_module.addImport("zsync", zsync.module("zsync"));
 
 ```zig
 const std = @import("std");
-const zsync = @import("src/runtime.zig");
+const zsync = @import("zsync");
 
 fn fileProcessor(io: zsync.Io) !void {
     // Vectorized I/O operations
@@ -76,11 +79,11 @@ fn fileProcessor(io: zsync.Io) !void {
         zsync.IoBuffer.init(&buffer1),
         zsync.IoBuffer.init(&buffer2),
     };
-    
+
     var read_future = try io.readv(&buffers);
     defer read_future.destroy(io.getAllocator());
     try read_future.await();
-    
+
     // Zero-copy operations (Linux)
     if (io.supportsZeroCopy()) {
         var copy_future = try io.copyFileRange(src_fd, dst_fd, size);
@@ -97,16 +100,16 @@ pub fn main() !void {
 ## Execution Models
 
 ### Blocking Mode
-Direct system calls with minimal overhead. Best for simple applications or when async overhead isn't justified.
+Direct system calls with minimal overhead. Best for simple applications.
 
 ### Thread Pool Mode
-True parallelism with work-stealing threads. Ideal for CPU-bound tasks and multi-core utilization.
+True parallelism with work-stealing threads. Ideal for CPU-bound tasks.
 
 ### Green Thread Mode (Linux)
-Cooperative multitasking with io_uring support. Excellent for high-concurrency I/O workloads.
+Cooperative multitasking with io_uring support. For high-concurrency I/O workloads.
 
 ### Auto Mode
-Intelligently selects the best execution model based on platform capabilities and workload characteristics.
+Selects the best execution model based on platform capabilities.
 
 ## API Examples
 
@@ -141,9 +144,9 @@ const result = try zsync.timeout(future, 5000); // 5 second timeout
 ## Platform Support
 
 - **Linux**: Full support with io_uring optimizations
-- **macOS**: kqueue-based event loop (planned)
-- **Windows**: IOCP support (planned)
-- **FreeBSD**: kqueue support (planned)
+- **macOS**: Thread pool execution
+- **Windows**: Thread pool execution
+- **FreeBSD/OpenBSD**: Thread pool execution
 
 ## Testing
 
@@ -151,20 +154,11 @@ const result = try zsync.timeout(future, 5000); // 5 second timeout
 zig build test
 ```
 
-## Benchmarks
-
-Run performance benchmarks:
-
-```bash
-zig build bench
-```
-
 ## Contributing
 
-Contributions are welcome! Please ensure:
+Contributions welcome. Please ensure:
 - Code follows Zig style guidelines
 - Tests pass with `zig build test`
-- Performance benchmarks show no regressions
 
 ## License
 
@@ -172,16 +166,13 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Documentation
 
-- [Getting Started](docs/GETTING_STARTED.md) - Installation and first steps
-- [API Reference](docs/API_REFERENCE.md) - Complete API documentation
-- [Examples](docs/EXAMPLES.md) - Code examples and patterns
-- [Architecture](docs/architecture.md) - Design and internals
-- [Performance](docs/PERFORMANCE.md) - Benchmarks and optimization
-- [Migration Guide](docs/MIGRATION.md) - Upgrading between versions
-- [WASM Features](docs/wasm/RIPPLE_WASM_FEATURES.md) - WebAssembly support
+- [Getting Started](docs/GETTING_STARTED.md)
+- [API Reference](docs/API_REFERENCE.md)
+- [Examples](docs/EXAMPLES.md)
+- [Architecture](docs/architecture.md)
+- [Performance](docs/PERFORMANCE.md)
 
 ## Links
 
 - [Repository](https://github.com/ghostkellz/zsync)
 - [Issues](https://github.com/ghostkellz/zsync/issues)
-- [CI Status](ACTIONS_STATUS.md) - Self-hosted runner infrastructure

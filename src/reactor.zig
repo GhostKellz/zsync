@@ -121,7 +121,7 @@ const EpollBackend = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        std.posix.close(self.epoll_fd);
+        std.Io.Threaded.closeFd(self.epoll_fd);
         self.allocator.free(self.events);
     }
 
@@ -232,7 +232,7 @@ const KqueueBackend = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        std.posix.close(self.kqueue_fd);
+        std.Io.Threaded.closeFd(self.kqueue_fd);
         self.allocator.free(self.events);
     }
 

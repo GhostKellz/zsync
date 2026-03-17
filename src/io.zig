@@ -18,7 +18,7 @@ pub const TcpStream = struct {
     /// Connect to a remote address
     pub fn connect(address: std.net.Address) !Self {
         const fd = try std.posix.socket(address.any.family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
-        errdefer std.posix.close(fd);
+        errdefer std.Io.Threaded.closeFd(fd);
 
         // Set non-blocking
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
@@ -120,7 +120,7 @@ pub const TcpStream = struct {
 
     /// Close the stream
     pub fn close(self: Self) void {
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
 
     /// Get local address
@@ -145,7 +145,7 @@ pub const TcpListener = struct {
     /// Bind to an address and start listening
     pub fn bind(address: std.net.Address) !Self {
         const fd = try std.posix.socket(address.any.family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
-        errdefer std.posix.close(fd);
+        errdefer std.Io.Threaded.closeFd(fd);
 
         // Set SO_REUSEADDR
         try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
@@ -210,7 +210,7 @@ pub const TcpListener = struct {
 
     /// Close the listener
     pub fn close(self: Self) void {
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
 
     /// Get local address
@@ -230,7 +230,7 @@ pub const UdpSocket = struct {
     /// Bind to an address
     pub fn bind(address: std.net.Address) !Self {
         const fd = try std.posix.socket(address.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
-        errdefer std.posix.close(fd);
+        errdefer std.Io.Threaded.closeFd(fd);
 
         // Set non-blocking
         const flags = try std.posix.fcntl(fd, std.posix.F.GETFL, 0);
@@ -303,7 +303,7 @@ pub const UdpSocket = struct {
 
     /// Close the socket
     pub fn close(self: Self) void {
-        std.posix.close(self.fd);
+        std.Io.Threaded.closeFd(self.fd);
     }
 
     /// Get local address
