@@ -133,7 +133,7 @@ const TaskQueue = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .items = std.ArrayList(ScheduledTask){},
+            .items = .empty,
             .allocator = allocator,
         };
     }
@@ -218,7 +218,7 @@ pub const AsyncScheduler = struct {
             .allocator = allocator,
             .ready_queue = TaskQueue.init(allocator),
             .suspended_frames = std.HashMap(u32, *AsyncFrame, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(allocator),
-            .frame_pool = std.ArrayList(*AsyncFrame){},
+            .frame_pool = .empty,
             .next_frame_id = std.atomic.Value(u32).init(1),
             .running = std.atomic.Value(bool).init(false),
             .mutex = compat.Mutex{},

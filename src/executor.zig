@@ -29,7 +29,7 @@ pub const Executor = struct {
 
         return Self{
             .runtime = runtime,
-            .tasks = std.ArrayList(*TaskHandle){},
+            .tasks = .empty,
             .allocator = allocator,
         };
     }
@@ -40,7 +40,7 @@ pub const Executor = struct {
 
         return Self{
             .runtime = runtime,
-            .tasks = std.ArrayList(*TaskHandle){},
+            .tasks = .empty,
             .allocator = allocator,
         };
     }

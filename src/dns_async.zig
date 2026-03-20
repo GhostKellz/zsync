@@ -206,10 +206,18 @@ pub const AsyncDnsResolver = struct {
         const expires_at = now + @as(i64, ttl);
         
         const owned_key = try self.allocator.dupe(u8, cache_key);
-        
+        errdefer self.allocator.free(owned_key);
+
         // Clone response for caching
         var cached_response = DnsResponse.init(self.allocator);
-        
+        errdefer {
+            for (cached_response.records.items) |rec| {
+                self.allocator.free(rec.name);
+                self.allocator.free(rec.data);
+            }
+            cached_response.records.deinit(self.allocator);
+        }
+
         for (response.records.items) |record| {
             const cloned_record = DnsRecord{
                 .name = try self.allocator.dupe(u8, record.name),
@@ -219,15 +227,15 @@ pub const AsyncDnsResolver = struct {
             };
             try cached_response.records.append(self.allocator, cloned_record);
         }
-        
+
         cached_response.rcode = response.rcode;
-        
+
         const cache_entry = CacheEntry{
             .response = cached_response,
             .expires_at = expires_at,
             .access_count = 1,
         };
-        
+
         try self.cache.put(owned_key, cache_entry);
     }
     
@@ -253,8 +261,17 @@ pub const AsyncDnsResolver = struct {
     }
     
     fn buildDnsQuery(self: *Self, hostname: []const u8, record_type: RecordType, buffer: []u8) !usize {
+        _ = self;
+
+        // Validate hostname length (max 253 chars per RFC 1035)
+        if (hostname.len > 253) return DnsError.InvalidQuery;
+
+        // Minimum buffer size: 12 (header) + hostname.len + 2 (labels) + 1 (null) + 4 (type+class)
+        const min_size = 12 + hostname.len + 2 + 1 + 4;
+        if (buffer.len < min_size) return DnsError.InvalidQuery;
+
         var offset: usize = 0;
-        
+
         // DNS Header (12 bytes)
         const transaction_id: u16 = @truncate(std.crypto.random.int(u32));
         std.mem.writeInt(u16, buffer[offset..offset + 2], transaction_id, .big);

@@ -365,9 +365,9 @@ pub fn MPMCQueue(comptime T: type) type {
 }
 
 test "lock-free queue basic operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     var queue = try LockFreeQueue(i32).init(allocator);
     defer queue.deinit();
@@ -385,9 +385,9 @@ test "lock-free queue basic operations" {
 }
 
 test "MPMC queue basic operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     var queue = try MPMCQueue(i32).init(allocator, 8);
     defer queue.deinit();
@@ -402,9 +402,9 @@ test "MPMC queue basic operations" {
 }
 
 test "work stealing deque operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     var deque = try WorkStealingDeque(i32).init(allocator);
     defer deque.deinit();

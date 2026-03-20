@@ -330,9 +330,9 @@ pub fn cleanupCurrentThread() void {
 }
 
 test "thread local storage basic operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     try init(allocator);
     defer deinit();
@@ -350,9 +350,9 @@ test "thread local storage basic operations" {
 }
 
 test "typed thread local storage" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     try init(allocator);
     defer deinit();

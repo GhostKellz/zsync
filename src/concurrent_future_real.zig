@@ -457,9 +457,9 @@ pub fn LockFreeConcurrentFuture(comptime T: type, comptime n: usize) type {
 }
 
 test "concurrent future real implementation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     // Test basic concurrent execution
     var cf = try ConcurrentFuture(i32, 3).init(allocator, null);
@@ -480,9 +480,9 @@ test "concurrent future real implementation" {
 }
 
 test "work stealing executor" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
     
     var executor = try WorkStealingExecutor.init(allocator, 4);
     defer executor.deinit();

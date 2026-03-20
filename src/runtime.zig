@@ -760,10 +760,10 @@ pub const Runtime = struct {
 
 /// Run with automatic execution model detection
 pub fn run(comptime task_fn: anytype, args: anytype) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    
-    const runtime = try Runtime.init(gpa.allocator(), .{});
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+
+    const runtime = try Runtime.init(debug_allocator.allocator(), .{});
     defer runtime.deinit();
     
     try runtime.run(task_fn, args);
@@ -771,15 +771,15 @@ pub fn run(comptime task_fn: anytype, args: anytype) !void {
 
 /// Run with blocking I/O (C-equivalent performance)
 pub fn runBlocking(comptime task_fn: anytype, args: anytype) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+
     const config = Config{
         .execution_model = .blocking,
         .enable_debugging = true,
     };
-    
-    const runtime = try Runtime.init(gpa.allocator(), config);
+
+    const runtime = try Runtime.init(debug_allocator.allocator(), config);
     defer runtime.deinit();
     
     try runtime.run(task_fn, args);
@@ -787,9 +787,9 @@ pub fn runBlocking(comptime task_fn: anytype, args: anytype) !void {
 
 /// Run with high-performance configuration
 pub fn runHighPerf(comptime task_fn: anytype, args: anytype) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+
     const config = Config{
         .execution_model = .thread_pool,
         .thread_pool_threads = @intCast(@max(1, std.Thread.getCpuCount() catch 4)),
@@ -797,8 +797,8 @@ pub fn runHighPerf(comptime task_fn: anytype, args: anytype) !void {
         .enable_vectorized_io = true,
         .enable_metrics = true,
     };
-    
-    const runtime = try Runtime.init(gpa.allocator(), config);
+
+    const runtime = try Runtime.init(debug_allocator.allocator(), config);
     defer runtime.deinit();
     
     try runtime.run(task_fn, args);

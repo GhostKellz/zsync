@@ -26,7 +26,8 @@ pub const SubmissionEntry = struct {
     const Self = @This();
 
     /// Prepare a read operation
-    pub fn prepRead(self: *Self, fd: i32, buffer: []u8, offset: u64) void {
+    pub fn prepRead(self: *Self, fd: i32, buffer: []u8, offset: u64) IoUringError!void {
+        if (buffer.len > std.math.maxInt(u32)) return IoUringError.InvalidOperation;
         self.sqe.* = std.mem.zeroes(linux.io_uring_sqe);
         self.sqe.opcode = linux.IORING_OP.READ;
         self.sqe.fd = fd;
@@ -37,7 +38,8 @@ pub const SubmissionEntry = struct {
     }
 
     /// Prepare a write operation
-    pub fn prepWrite(self: *Self, fd: i32, buffer: []const u8, offset: u64) void {
+    pub fn prepWrite(self: *Self, fd: i32, buffer: []const u8, offset: u64) IoUringError!void {
+        if (buffer.len > std.math.maxInt(u32)) return IoUringError.InvalidOperation;
         self.sqe.* = std.mem.zeroes(linux.io_uring_sqe);
         self.sqe.opcode = linux.IORING_OP.WRITE;
         self.sqe.fd = fd;
@@ -512,7 +514,8 @@ pub const IoUring = struct {
     }
     
     /// Setup a read operation
-    pub fn prepRead(sqe: *IoUringSqe, fd: i32, buffer: []u8, offset: u64, user_data: u64) void {
+    pub fn prepRead(sqe: *IoUringSqe, fd: i32, buffer: []u8, offset: u64, user_data: u64) IoUringError!void {
+        if (buffer.len > std.math.maxInt(u32)) return IoUringError.InvalidOperation;
         sqe.* = IoUringSqe{
             .opcode = IORING_OP_READ,
             .flags = 0,
@@ -529,9 +532,10 @@ pub const IoUring = struct {
             .__pad2 = [_]u64{0},
         };
     }
-    
+
     /// Setup a write operation
-    pub fn prepWrite(sqe: *IoUringSqe, fd: i32, data: []const u8, offset: u64, user_data: u64) void {
+    pub fn prepWrite(sqe: *IoUringSqe, fd: i32, data: []const u8, offset: u64, user_data: u64) IoUringError!void {
+        if (data.len > std.math.maxInt(u32)) return IoUringError.InvalidOperation;
         sqe.* = IoUringSqe{
             .opcode = IORING_OP_WRITE,
             .flags = 0,
@@ -700,8 +704,8 @@ pub const IoUringReactor = struct {
         
         // Setup the SQE based on operation type
         switch (operation.opcode) {
-            .read => IoUring.prepRead(sqe, operation.fd, operation.buffer, operation.offset, user_data),
-            .write => IoUring.prepWrite(sqe, operation.fd, @constCast(operation.data), operation.offset, user_data),
+            .read => try IoUring.prepRead(sqe, operation.fd, operation.buffer, operation.offset, user_data),
+            .write => try IoUring.prepWrite(sqe, operation.fd, @constCast(operation.data), operation.offset, user_data),
             .accept => IoUring.prepAccept(sqe, operation.fd, operation.addr, user_data),
             .connect => IoUring.prepConnect(sqe, operation.fd, operation.addr.?, user_data),
             .close => IoUring.prepClose(sqe, operation.fd, user_data),

@@ -701,7 +701,7 @@ pub fn BroadcastChannel(comptime T: type) type {
             allocator: std.mem.Allocator,
 
             pub fn init(allocator: std.mem.Allocator) Subscriber {
-                return .{ .queue = .{}, .allocator = allocator };
+                return .{ .queue = .empty, .allocator = allocator };
             }
 
             pub fn deinit(self: *Subscriber) void {
@@ -711,7 +711,7 @@ pub fn BroadcastChannel(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .subscribers = .{},
+                .subscribers = .empty,
                 .allocator = allocator,
             };
         }
@@ -923,7 +923,7 @@ pub fn OnceCell(comptime T: type) type {
 /// CancellationToken - Coordinated graceful shutdown (like tokio_util::sync::CancellationToken)
 pub const CancellationToken = struct {
     cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    children: std.ArrayList(*CancellationToken) = .{},
+    children: std.ArrayList(*CancellationToken) = .empty,
     allocator: std.mem.Allocator = undefined,
     mutex: compat.Mutex = .{},
     notify: Notify = Notify.init(),
@@ -933,7 +933,7 @@ pub const CancellationToken = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .children = .{},
+            .children = .empty,
             .allocator = allocator,
             .initialized = true,
         };
@@ -1116,10 +1116,10 @@ pub fn timeoutFn(comptime func: anytype, args: anytype, timeout_ms: u64) !@TypeO
 }
 
 // Version information
-pub const VERSION = "0.7.7";
+pub const VERSION = "0.7.8";
 pub const VERSION_MAJOR = 0;
 pub const VERSION_MINOR = 7;
-pub const VERSION_PATCH = 7;
+pub const VERSION_PATCH = 8;
 
 /// Print Zsync version and capabilities
 pub fn printVersion() void {
@@ -1250,8 +1250,8 @@ test "Version information" {
 
     try testing.expect(VERSION_MAJOR == 0);
     try testing.expect(VERSION_MINOR == 7);
-    try testing.expect(VERSION_PATCH == 7);
-    try testing.expect(std.mem.eql(u8, VERSION, "0.7.7"));
+    try testing.expect(VERSION_PATCH == 8);
+    try testing.expect(std.mem.eql(u8, VERSION, "0.7.8"));
 }
 
 /// Legacy compatibility function

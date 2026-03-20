@@ -4,9 +4,9 @@ const runtime_factory = @import("runtime_factory.zig");
 const platform_runtime = @import("platform_runtime.zig");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
 
     std.debug.print("🚀 zsync - Cross-Platform Async Runtime\n", .{});
     std.debug.print("=" ** 60 ++ "\n", .{});

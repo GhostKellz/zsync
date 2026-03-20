@@ -113,8 +113,8 @@ pub const GreenThreadsIo = struct {
 
         pub fn init(allocator: std.mem.Allocator) SchedulerSelf {
             return SchedulerSelf{
-                .ready_queue = std.ArrayList(*GreenThread){},
-                .blocked_queue = std.ArrayList(*GreenThread){},
+                .ready_queue = .empty,
+                .blocked_queue = .empty,
                 .current_thread = null,
                 .allocator = allocator,
                 .is_shutdown = false,

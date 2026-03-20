@@ -85,7 +85,7 @@ pub const CancelToken = struct {
             .cancelled = std.atomic.Value(bool).init(false),
             .reason = reason,
             .parent = null,
-            .children = std.ArrayList(*CancelToken){},
+            .children = .empty,
             .allocator = allocator,
         };
         return token;

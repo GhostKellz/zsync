@@ -47,14 +47,14 @@ pub fn simpleTaskDemo() !void {
 
 /// Channel demonstration using simple queue
 pub fn simpleChannelDemo() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
+
     std.debug.print("📬 Simple channel demo...\n", .{});
-    
+
     // Create a simple queue to simulate channel
-    var queue = std.ArrayList([]const u8){ .allocator = allocator };
+    var queue: std.ArrayList([]const u8) = .empty;
     defer queue.deinit(allocator);
     
     // Add messages

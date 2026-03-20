@@ -333,7 +333,7 @@ pub const WebSocketConnection = struct {
 
         var bytes_read: usize = 0;
         while (bytes_read < payload_len) {
-            const available = self.recv_len - self.recv_pos;
+            const available = if (self.recv_len > self.recv_pos) self.recv_len - self.recv_pos else 0;
             if (available > 0) {
                 const to_copy = @min(available, payload.len - bytes_read);
                 @memcpy(payload[bytes_read..][0..to_copy], self.recv_buffer[self.recv_pos..][0..to_copy]);
@@ -366,7 +366,7 @@ pub const WebSocketConnection = struct {
 
     /// Ensure at least n bytes are available in buffer
     fn ensureBytes(self: *Self, n: usize) !void {
-        while (self.recv_len - self.recv_pos < n) {
+        while (self.recv_pos >= self.recv_len or self.recv_len - self.recv_pos < n) {
             // Shift remaining data to start of buffer
             if (self.recv_pos > 0) {
                 const remaining = self.recv_len - self.recv_pos;
