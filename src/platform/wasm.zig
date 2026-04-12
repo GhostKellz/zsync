@@ -1,6 +1,30 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const MessageQueue = struct {
+    items: std.ArrayList([]u8),
+
+    fn init(allocator: std.mem.Allocator) MessageQueue {
+        _ = allocator;
+        return .{
+            .items = .empty,
+        };
+    }
+
+    fn deinit(self: *MessageQueue, allocator: std.mem.Allocator) void {
+        self.items.deinit(allocator);
+    }
+
+    fn writeItem(self: *MessageQueue, allocator: std.mem.Allocator, item: []u8) !void {
+        try self.items.append(allocator, item);
+    }
+
+    fn readItem(self: *MessageQueue) ?[]u8 {
+        if (self.items.items.len == 0) return null;
+        return self.items.orderedRemove(0);
+    }
+};
+
 // JavaScript FFI Bridge for WASM
 // Provides interface between Zig async runtime and browser APIs
 
@@ -34,208 +58,208 @@ export fn wasm_file_callback(callback_id: u32, success: u32, data_ptr: [*]const 
 
 /// Timer management for async delays and timeouts
 pub const TimerManager = struct {
-    const CallbackMap = std.HashMap(u32, TimerCallback, std.hash_map.DefaultContext(u32), std.heap.page_allocator);
-    
+    const CallbackMap = std.AutoHashMap(u32, TimerCallback);
+
     const TimerCallback = struct {
         completion: *std.atomic.Value(bool),
         result: *?TimerError,
     };
-    
+
     const TimerError = error{
         TimerFailed,
     };
-    
+
     var callbacks: CallbackMap = CallbackMap.init(std.heap.page_allocator);
     var next_callback_id: std.atomic.Value(u32) = std.atomic.Value(u32).init(1);
-    
+
     pub fn setTimeout(delay_ms: u32) !void {
-        const callback_id = next_callback_id.fetchAdd(1, .Monotonic);
-        
+        const callback_id = next_callback_id.fetchAdd(1, .monotonic);
+
         var completion = std.atomic.Value(bool).init(false);
         var result: ?TimerError = null;
-        
+
         try callbacks.put(callback_id, TimerCallback{
             .completion = &completion,
             .result = &result,
         });
-        
+
         js_setTimeout(callback_id, delay_ms);
-        
+
         // Busy wait for completion (could be improved with event loop integration)
-        while (!completion.load(.Acquire)) {
+        while (!completion.load(.acquire)) {
             // Yield to browser event loop
             if (comptime builtin.target.cpu.arch.isWasm()) {
                 std.atomic.spinLoopHint();
             }
         }
-        
+
         _ = callbacks.remove(callback_id);
-        
+
         if (result) |err| {
             return err;
         }
     }
-    
+
     pub fn handleCallback(callback_id: u32) void {
         if (callbacks.get(callback_id)) |callback| {
-            callback.completion.store(true, .Release);
+            callback.completion.store(true, .release);
         }
     }
 };
 
 /// HTTP client using browser fetch API
 pub const HttpManager = struct {
-    const CallbackMap = std.HashMap(u32, HttpCallback, std.hash_map.DefaultContext(u32), std.heap.page_allocator);
-    
+    const CallbackMap = std.AutoHashMap(u32, HttpCallback);
+
     const HttpCallback = struct {
         completion: *std.atomic.Value(bool),
         result: *HttpResult,
         allocator: std.mem.Allocator,
     };
-    
+
     const HttpResult = struct {
         status: u32,
         body: []u8,
         err: ?HttpError,
-        
+
         pub fn deinit(self: *HttpResult, allocator: std.mem.Allocator) void {
             if (self.body.len > 0) {
                 allocator.free(self.body);
             }
         }
     };
-    
+
     const HttpError = error{
         NetworkError,
         InvalidUrl,
         RequestFailed,
     };
-    
+
     var callbacks: CallbackMap = CallbackMap.init(std.heap.page_allocator);
     var next_callback_id: std.atomic.Value(u32) = std.atomic.Value(u32).init(1);
-    
+
     pub fn fetch(allocator: std.mem.Allocator, url: []const u8) !HttpResult {
-        const callback_id = next_callback_id.fetchAdd(1, .Monotonic);
-        
+        const callback_id = next_callback_id.fetchAdd(1, .monotonic);
+
         var completion = std.atomic.Value(bool).init(false);
         var result = HttpResult{
             .status = 0,
             .body = &[_]u8{},
             .err = null,
         };
-        
+
         try callbacks.put(callback_id, HttpCallback{
             .completion = &completion,
             .result = &result,
             .allocator = allocator,
         });
-        
+
         js_fetch(url.ptr, url.len, callback_id);
-        
+
         // Wait for completion
-        while (!completion.load(.Acquire)) {
+        while (!completion.load(.acquire)) {
             if (comptime builtin.target.cpu.arch.isWasm()) {
                 std.atomic.spinLoopHint();
             }
         }
-        
+
         _ = callbacks.remove(callback_id);
-        
+
         if (result.err) |err| {
             return err;
         }
-        
+
         return result;
     }
-    
+
     pub fn handleCallback(callback_id: u32, status: u32, data: []const u8) void {
         if (callbacks.get(callback_id)) |callback| {
             callback.result.status = status;
-            
+
             if (data.len > 0) {
                 callback.result.body = callback.allocator.dupe(u8, data) catch {
                     callback.result.err = HttpError.RequestFailed;
-                    callback.completion.store(true, .Release);
+                    callback.completion.store(true, .release);
                     return;
                 };
             }
-            
+
             if (status >= 400) {
                 callback.result.err = HttpError.RequestFailed;
             }
-            
-            callback.completion.store(true, .Release);
+
+            callback.completion.store(true, .release);
         }
     }
 };
 
 /// WebSocket implementation using browser WebSocket API
 pub const WebSocketManager = struct {
-    const CallbackMap = std.HashMap(u32, *WebSocket, std.hash_map.DefaultContext(u32), std.heap.page_allocator);
-    
+    const CallbackMap = std.AutoHashMap(u32, *WebSocket);
+
     pub const WebSocket = struct {
         id: u32,
         url: []const u8,
         state: std.atomic.Value(State),
-        message_queue: std.fifo.LinearFifo([]u8, .Dynamic),
+        message_queue: MessageQueue,
         allocator: std.mem.Allocator,
-        
+
         const State = enum {
             connecting,
             open,
             closed,
             err,
         };
-        
+
         pub fn init(allocator: std.mem.Allocator, url: []const u8) !*WebSocket {
             const ws = try allocator.create(WebSocket);
             ws.* = WebSocket{
                 .id = 0,
                 .url = try allocator.dupe(u8, url),
                 .state = std.atomic.Value(State).init(.connecting),
-                .message_queue = std.fifo.LinearFifo([]u8, .Dynamic).init(allocator),
+                .message_queue = MessageQueue.init(allocator),
                 .allocator = allocator,
             };
-            
-            const callback_id = next_callback_id.fetchAdd(1, .Monotonic);
+
+            const callback_id = next_callback_id.fetchAdd(1, .monotonic);
             ws.id = js_websocket_connect(url.ptr, url.len, callback_id);
-            
+
             try callbacks.put(callback_id, ws);
-            
+
             return ws;
         }
-        
+
         pub fn deinit(self: *WebSocket) void {
             self.allocator.free(self.url);
-            
+
             // Clear message queue
             while (self.message_queue.readItem()) |msg| {
                 self.allocator.free(msg);
             }
-            self.message_queue.deinit();
-            
+            self.message_queue.deinit(self.allocator);
+
             js_websocket_close(self.id);
             self.allocator.destroy(self);
         }
-        
+
         pub fn send(self: *WebSocket, data: []const u8) void {
-            if (self.state.load(.Acquire) == .open) {
+            if (self.state.load(.acquire) == .open) {
                 js_websocket_send(self.id, data.ptr, data.len);
             }
         }
-        
+
         pub fn receive(self: *WebSocket) ?[]u8 {
             return self.message_queue.readItem();
         }
-        
+
         pub fn waitForOpen(self: *WebSocket) !void {
-            while (self.state.load(.Acquire) == .connecting) {
+            while (self.state.load(.acquire) == .connecting) {
                 if (comptime builtin.target.cpu.arch.isWasm()) {
                     std.atomic.spinLoopHint();
                 }
             }
-            
-            switch (self.state.load(.Acquire)) {
+
+            switch (self.state.load(.acquire)) {
                 .open => {},
                 .err => return error.ConnectionFailed,
                 .closed => return error.ConnectionClosed,
@@ -243,27 +267,27 @@ pub const WebSocketManager = struct {
             }
         }
     };
-    
+
     var callbacks: CallbackMap = CallbackMap.init(std.heap.page_allocator);
     var next_callback_id: std.atomic.Value(u32) = std.atomic.Value(u32).init(1);
-    
+
     pub fn handleCallback(callback_id: u32, event_type: u32, data: []const u8) void {
         if (callbacks.get(callback_id)) |ws| {
             switch (event_type) {
                 0 => { // onopen
-                    ws.state.store(.open, .Release);
+                    ws.state.store(.open, .release);
                 },
                 1 => { // onmessage
                     const msg = ws.allocator.dupe(u8, data) catch return;
-                    ws.message_queue.writeItem(msg) catch {
+                    ws.message_queue.writeItem(ws.allocator, msg) catch {
                         ws.allocator.free(msg);
                     };
                 },
                 2 => { // onclose
-                    ws.state.store(.closed, .Release);
+                    ws.state.store(.closed, .release);
                 },
                 3 => { // onerror
-                    ws.state.store(.err, .Release);
+                    ws.state.store(.err, .release);
                 },
                 else => {},
             }
@@ -273,119 +297,119 @@ pub const WebSocketManager = struct {
 
 /// File operations using browser File API
 pub const FileManager = struct {
-    const CallbackMap = std.HashMap(u32, FileCallback, std.hash_map.DefaultContext(u32), std.heap.page_allocator);
-    
+    const CallbackMap = std.AutoHashMap(u32, FileCallback);
+
     const FileCallback = struct {
         completion: *std.atomic.Value(bool),
         result: *FileResult,
         allocator: std.mem.Allocator,
     };
-    
+
     const FileResult = struct {
         success: bool,
         data: []u8,
         err: ?FileError,
-        
+
         pub fn deinit(self: *FileResult, allocator: std.mem.Allocator) void {
             if (self.data.len > 0) {
                 allocator.free(self.data);
             }
         }
     };
-    
+
     const FileError = error{
         FileNotFound,
         PermissionDenied,
         ReadFailed,
         WriteFailed,
     };
-    
+
     var callbacks: CallbackMap = CallbackMap.init(std.heap.page_allocator);
     var next_callback_id: std.atomic.Value(u32) = std.atomic.Value(u32).init(1);
-    
+
     pub fn readFile(allocator: std.mem.Allocator, file_id: u32) !FileResult {
-        const callback_id = next_callback_id.fetchAdd(1, .Monotonic);
-        
+        const callback_id = next_callback_id.fetchAdd(1, .monotonic);
+
         var completion = std.atomic.Value(bool).init(false);
         var result = FileResult{
             .success = false,
             .data = &[_]u8{},
             .err = null,
         };
-        
+
         try callbacks.put(callback_id, FileCallback{
             .completion = &completion,
             .result = &result,
             .allocator = allocator,
         });
-        
+
         js_file_read(file_id, callback_id);
-        
+
         // Wait for completion
-        while (!completion.load(.Acquire)) {
+        while (!completion.load(.acquire)) {
             if (comptime builtin.target.cpu.arch.isWasm()) {
                 std.atomic.spinLoopHint();
             }
         }
-        
+
         _ = callbacks.remove(callback_id);
-        
+
         if (result.err) |err| {
             return err;
         }
-        
+
         return result;
     }
-    
+
     pub fn writeFile(allocator: std.mem.Allocator, data: []const u8) !void {
-        const callback_id = next_callback_id.fetchAdd(1, .Monotonic);
-        
+        const callback_id = next_callback_id.fetchAdd(1, .monotonic);
+
         var completion = std.atomic.Value(bool).init(false);
         var result = FileResult{
             .success = false,
             .data = &[_]u8{},
             .err = null,
         };
-        
+
         try callbacks.put(callback_id, FileCallback{
             .completion = &completion,
             .result = &result,
             .allocator = allocator,
         });
-        
+
         js_file_write(data.ptr, data.len, callback_id);
-        
+
         // Wait for completion
-        while (!completion.load(.Acquire)) {
+        while (!completion.load(.acquire)) {
             if (comptime builtin.target.cpu.arch.isWasm()) {
                 std.atomic.spinLoopHint();
             }
         }
-        
+
         _ = callbacks.remove(callback_id);
-        
+
         if (result.err) |err| {
             return err;
         }
     }
-    
+
     pub fn handleCallback(callback_id: u32, success: bool, data: []const u8) void {
         if (callbacks.get(callback_id)) |callback| {
             callback.result.success = success;
-            
+
             if (success and data.len > 0) {
                 callback.result.data = callback.allocator.dupe(u8, data) catch {
                     callback.result.err = FileError.ReadFailed;
-                    callback.completion.store(true, .Release);
+                    callback.completion.store(true, .release);
                     return;
                 };
             }
-            
+
             if (!success) {
                 callback.result.err = FileError.ReadFailed;
             }
-            
-            callback.completion.store(true, .Release);
+
+            callback.completion.store(true, .release);
         }
     }
 };
@@ -410,32 +434,32 @@ pub fn yieldToBrowser() void {
 /// WASM Event Loop implementation
 pub const EventLoop = struct {
     running: std.atomic.Value(bool),
-    
+
     pub fn init() EventLoop {
         return EventLoop{
             .running = std.atomic.Value(bool).init(false),
         };
     }
-    
+
     pub fn run(self: *EventLoop) !void {
-        self.running.store(true, .Release);
-        
+        self.running.store(true, .release);
+
         // WASM event loop runs forever, controlled by browser
-        while (self.running.load(.Acquire)) {
+        while (self.running.load(.acquire)) {
             // Yield to browser event loop
             yieldToBrowser();
         }
     }
-    
+
     pub fn stop(self: *EventLoop) void {
-        self.running.store(false, .Release);
+        self.running.store(false, .release);
     }
 };
 
 /// WASM Event Source (placeholder)
 pub const EventSource = struct {
     fd: i32,
-    
+
     pub fn init(fd: i32) EventSource {
         return EventSource{ .fd = fd };
     }
@@ -445,26 +469,26 @@ pub const EventSource = struct {
 pub const Timer = struct {
     delay_ms: u32,
     active: std.atomic.Value(bool),
-    
+
     pub fn init(delay_ms: u32) Timer {
         return Timer{
             .delay_ms = delay_ms,
             .active = std.atomic.Value(bool).init(false),
         };
     }
-    
+
     pub fn start(self: *Timer) !void {
-        self.active.store(true, .Release);
+        self.active.store(true, .release);
         try TimerManager.setTimeout(self.delay_ms);
-        self.active.store(false, .Release);
+        self.active.store(false, .release);
     }
-    
+
     pub fn stop(self: *Timer) void {
-        self.active.store(false, .Release);
+        self.active.store(false, .release);
     }
-    
+
     pub fn isActive(self: *Timer) bool {
-        return self.active.load(.Acquire);
+        return self.active.load(.acquire);
     }
 };
 

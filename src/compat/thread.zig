@@ -5,6 +5,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+extern "kernel32" fn QueryPerformanceCounter(lpPerformanceCount: *i64) callconv(.c) windows.BOOL;
+extern "kernel32" fn QueryPerformanceFrequency(lpFrequency: *i64) callconv(.c) windows.BOOL;
+const windows = std.os.windows;
+const windows_infinite: u32 = 0xffff_ffff;
+
 /// Compatibility shim for std.time.Instant which was removed in Zig 0.16
 pub const Instant = struct {
     timestamp: i128,
@@ -37,8 +42,8 @@ pub const Instant = struct {
             .windows => {
                 var counter: i64 = undefined;
                 var freq: i64 = undefined;
-                _ = std.os.windows.kernel32.QueryPerformanceCounter(&counter);
-                _ = std.os.windows.kernel32.QueryPerformanceFrequency(&freq);
+                _ = QueryPerformanceCounter(&counter);
+                _ = QueryPerformanceFrequency(&freq);
                 return @divFloor(@as(i128, counter) * std.time.ns_per_s, freq);
             },
             else => {
@@ -75,6 +80,38 @@ pub fn clock_gettime(clock_id: std.os.linux.CLOCK) error{}!timespec {
         },
     }
     return ts;
+}
+
+/// Compatibility sleep helper for Zig 0.16-dev stdlib churn.
+pub fn sleepNanos(ns: u64) void {
+    switch (builtin.os.tag) {
+        .linux => {
+            var ts = std.os.linux.timespec{
+                .sec = @intCast(@divTrunc(ns, std.time.ns_per_s)),
+                .nsec = @intCast(@rem(ns, std.time.ns_per_s)),
+            };
+            _ = std.os.linux.nanosleep(&ts, &ts);
+        },
+        .freestanding, .wasi => {
+            // No blocking sleep primitive is available here.
+            var i: u64 = 0;
+            const spins = @max(1, @divTrunc(ns, 1_000));
+            while (i < spins) : (i += 1) {
+                std.atomic.spinLoopHint();
+            }
+        },
+        else => {
+            var i: u64 = 0;
+            const spins = @max(1, @divTrunc(ns, 1_000));
+            while (i < spins) : (i += 1) {
+                std.atomic.spinLoopHint();
+            }
+        },
+    }
+}
+
+pub fn sleepMillis(ms: u64) void {
+    sleepNanos(ms * std.time.ns_per_ms);
 }
 
 /// A blocking mutex compatible with the old std.Thread.Mutex API
@@ -160,17 +197,15 @@ fn futexWait(ptr: *const u32, expected: u32) void {
             );
         },
         .windows => {
-            std.os.windows.kernel32.WaitOnAddress(
-                @ptrCast(ptr),
-                @ptrCast(&expected),
-                @sizeOf(u32),
-                std.os.windows.INFINITE,
-            );
+            _ = windows_infinite;
+            while (@atomicLoad(u32, ptr, .monotonic) == expected) {
+                std.atomic.spinLoopHint();
+            }
         },
         .macos, .ios, .tvos, .watchos, .visionos => {
             // Use ulock on Darwin
             _ = std.c.__ulock_wait(
-                std.c.UL_COMPARE_AND_WAIT | std.c.ULF_NO_ERRNO,
+                .{ .op = .COMPARE_AND_WAIT, .NO_ERRNO = true },
                 @ptrCast(@constCast(ptr)),
                 expected,
                 0,
@@ -195,15 +230,15 @@ fn futexWake(ptr: *const u32, max_waiters: u32) void {
             );
         },
         .windows => {
-            if (max_waiters == 1) {
-                std.os.windows.kernel32.WakeByAddressSingle(@ptrCast(@constCast(ptr)));
-            } else {
-                std.os.windows.kernel32.WakeByAddressAll(@ptrCast(@constCast(ptr)));
-            }
+            // Spin-wait fallback only; waiters observe state changes cooperatively.
         },
         .macos, .ios, .tvos, .watchos, .visionos => {
-            const flags: u32 = std.c.UL_COMPARE_AND_WAIT | std.c.ULF_NO_ERRNO;
-            _ = std.c.__ulock_wake(flags | if (max_waiters > 1) std.c.ULF_WAKE_ALL else 0, @ptrCast(@constCast(ptr)), 0);
+            const flags: std.c.UL = .{
+                .op = .COMPARE_AND_WAIT,
+                .NO_ERRNO = true,
+                .WAKE_ALL = max_waiters > 1,
+            };
+            _ = std.c.__ulock_wake(flags, @ptrCast(@constCast(ptr)), 0);
         },
         else => {
             // Fallback: nothing to do for spin-wait

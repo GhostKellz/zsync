@@ -162,6 +162,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zsync", .module = zsync_mod },
             },
+            .link_libc = true,
         }),
     });
 

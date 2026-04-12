@@ -39,3 +39,4 @@ test_*
 # OS junk
 .DS_Store
 Thumbs.db
+tasks/

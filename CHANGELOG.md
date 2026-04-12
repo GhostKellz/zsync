@@ -2,6 +2,43 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [v0.7.9] - 2026-04-12 🔧 **Current Zig Dev Compatibility And Release Polish**
+
+### Fixed
+- Restored `zig build examples` on current Zig 0.16 dev.
+- Restored `zig build cross-compile` for the declared WASM, AArch64 Linux, AArch64 macOS, and Windows GNU targets.
+- Removed stale Zig stdlib API usage across timer, runtime, platform, and example code.
+- Stabilized `measure()` return typing between `src/root.zig` and `src/timer.zig`.
+- Updated Windows IOCP surface and target configuration for current Zig dev builds.
+- Fixed stale public examples to match the current `Io`, channel, timer, and synchronization APIs.
+- Reduced passing-test noise by removing project-side runtime and platform-info prints from tests.
+- Removed mock `BlockingIo.write` and `writev` payload prints so `zig build test` no longer emits a misleading `failed command:` line during successful runs.
+
+### Hardened
+- Added completion bounds and debug pointer validation in `concurrent_future_real.zig`.
+- Added DNS compressed-name bounds and recursion-limit checks in `dns_async.zig`.
+- Added cache-capacity fail-closed behavior in `dns_async.zig`.
+- Added `io_uring` offset range validation before pointer arithmetic in Linux backends.
+- Added basic fd and PTY type validation in zero-copy and PTY helpers.
+- Added regression coverage for `measure()` compatibility, malformed DNS name parsing, and `ConcurrentFuture` cancellation/completion-order behavior.
+
+### Changed
+- README and install docs no longer hardcode a static release tag in fetch examples.
+- Package metadata now targets `v0.7.9` and the validated Zig `0.16.0-dev.3144+ac6fb0b59` baseline.
+- README badges now use the same `for-the-badge` visual style as the `ghostctl` project.
+- Maintainer task tracking is consolidated under `tasks/todo.md`; the legacy root `TODO.md` was removed.
+
+### Cleanup
+- Removed stray generated artifacts from the repo root before release (`vgcore`, object/output clutter).
+
+### Verification
+- `zig build`
+- `zig build test --summary all`
+- `zig build examples --summary all`
+- `zig build cross-compile --summary all`
+
+---
+
 ## [v0.7.7] - 2025-03-16 🔧 **Zig 0.16.0-dev.2736+ Compatibility**
 
 ### Fixed

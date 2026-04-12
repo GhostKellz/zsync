@@ -164,7 +164,7 @@ pub const TimerWheel = struct {
         while (low < high) {
             const mid = low + (high - low) / 2;
             const mid_timer_id = self.sorted_timers.items[mid];
-            
+
             if (self.timers.get(mid_timer_id)) |timer| {
                 if (timer.expiry_time <= expiry_time) {
                     low = mid + 1;
@@ -250,7 +250,7 @@ pub const TimerWheel = struct {
     pub fn isEmpty(self: *Self) bool {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         return self.sorted_timers.items.len == 0;
     }
 
@@ -277,10 +277,14 @@ pub const TimerWheel = struct {
 
 /// Sleep for the specified duration
 pub fn sleep(duration_ms: u64) void {
-    // This would integrate with the runtime's timer wheel
-    // For now, we'll implement a simple version using nanosleep
-    std.posix.nanosleep(0, duration_ms * std.time.ns_per_ms);
+    // This would integrate with the runtime's timer wheel.
+    compat.sleepMillis(duration_ms);
 }
+
+pub const MeasureResult = struct {
+    result: u64,
+    duration_ns: u64,
+};
 
 /// Global timer wheel for standalone timer functions
 var global_wheel: ?*TimerWheel = null;
@@ -378,13 +382,13 @@ pub fn milliTime() u64 {
 }
 
 /// Measure execution time of a function
-pub fn measure(comptime func: anytype, args: anytype) struct { result: @TypeOf(@call(.auto, func, args)), duration_ns: u64 } {
+pub fn measure(comptime func: anytype, args: anytype) MeasureResult {
     const start = nanoTime();
     const result = @call(.auto, func, args);
     const end = nanoTime();
-    
+
     return .{
-        .result = result,
+        .result = @intCast(result),
         .duration_ns = end - start,
     };
 }
@@ -393,26 +397,26 @@ pub fn measure(comptime func: anytype, args: anytype) struct { result: @TypeOf(@
 test "timer wheel creation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var wheel = try TimerWheel.init(allocator);
     defer wheel.deinit();
-    
+
     try testing.expect(wheel.isEmpty());
 }
 
 test "timer scheduling" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var wheel = try TimerWheel.init(allocator);
     defer wheel.deinit();
-    
+
     const TestCallback = struct {
         fn callback() void {
             // This would set executed = true in a real test
         }
     };
-    
+
     const handle = try wheel.scheduleTimeout(100, TestCallback.callback);
     try testing.expect(handle.isActive());
     try testing.expect(!wheel.isEmpty());
@@ -421,16 +425,16 @@ test "timer scheduling" {
 test "timer expiry calculation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var wheel = try TimerWheel.init(allocator);
     defer wheel.deinit();
-    
+
     const TestCallback = struct {
         fn callback() void {}
     };
-    
+
     _ = try wheel.scheduleTimeout(100, TestCallback.callback);
-    
+
     const next_expiry = wheel.nextExpiry();
     try testing.expect(next_expiry != null);
     try testing.expect(next_expiry.? <= 100);
@@ -439,17 +443,17 @@ test "timer expiry calculation" {
 test "timer cancellation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var wheel = try TimerWheel.init(allocator);
     defer wheel.deinit();
-    
+
     const TestCallback = struct {
         fn callback() void {}
     };
-    
+
     const handle = try wheel.scheduleTimeout(100, TestCallback.callback);
     try testing.expect(handle.isActive());
-    
+
     handle.cancel();
     try testing.expect(!handle.isActive());
 }
@@ -461,10 +465,30 @@ test "time measurement" {
             return 42;
         }
     };
-    
+
     const result = measure(TestFunction.slowFunction, .{});
-    
+
     const testing = std.testing;
     try testing.expect(result.result == 42);
     try testing.expect(result.duration_ns >= 1 * std.time.ns_per_ms);
+}
+
+test "measure result type is stable" {
+    const testing = std.testing;
+    const root = @import("root.zig");
+
+    const TypeA = @TypeOf(measure(struct {
+        fn f() u32 {
+            return 9;
+        }
+    }.f, .{}));
+    const TypeB = @TypeOf(root.measure(struct {
+        fn f() u32 {
+            return 9;
+        }
+    }.f, .{}));
+
+    try testing.expect(TypeA == MeasureResult);
+    try testing.expect(TypeB == root.MeasureResult);
+    try testing.expect(TypeA == TypeB);
 }

@@ -79,6 +79,7 @@ pub const Pty = struct {
         };
 
         const TIOCSWINSZ = 0x5414;
+        if (std.c.isatty(master_fd) == 0) return error.InvalidPty;
         _ = std.posix.system.ioctl(master_fd, TIOCSWINSZ, @intFromPtr(&ws));
 
         const buffer = try allocator.alloc(u8, 4096);
@@ -171,6 +172,7 @@ pub const Pty = struct {
         self.config.cols = cols;
 
         const TIOCSWINSZ = 0x5414;
+        if (std.c.isatty(self.master_fd) == 0) return error.InvalidPty;
         const result = std.posix.system.ioctl(self.master_fd, TIOCSWINSZ, @intFromPtr(&ws));
         if (result != 0) return error.ResizeFailed;
     }

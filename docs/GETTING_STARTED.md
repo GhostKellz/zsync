@@ -10,10 +10,10 @@ Add zsync to your project:
 zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/heads/main.tar.gz
 ```
 
-Or for a specific tag:
+Or for a specific release tag:
 
 ```bash
-zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/tags/v0.7.7.tar.gz
+zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/tags/<tag>.tar.gz
 ```
 
 Then in your `build.zig`:

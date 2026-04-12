@@ -5,15 +5,12 @@ const std = @import("std");
 const zsync = @import("zsync");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-
     std.debug.print("zsync v{s} - Synchronization Example\n", .{zsync.VERSION});
     std.debug.print("=====================================\n\n", .{});
 
     // Semaphore example
     std.debug.print("--- Semaphore ---\n", .{});
-    var sem = zsync.Semaphore.init(allocator, 3);
-    defer sem.deinit();
+    var sem = zsync.Semaphore.init(3);
 
     std.debug.print("Semaphore with 3 permits\n", .{});
 
@@ -53,8 +50,7 @@ pub fn main() !void {
 
     // Barrier example
     std.debug.print("\n--- Barrier ---\n", .{});
-    var barrier = zsync.Barrier.init(allocator, 1);
-    defer barrier.deinit();
+    var barrier = zsync.Barrier.init(1);
 
     std.debug.print("Barrier with count 1\n", .{});
     barrier.wait();

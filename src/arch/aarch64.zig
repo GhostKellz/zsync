@@ -68,7 +68,7 @@ pub const Context = struct {
 /// ARM64 context switching function
 /// Saves current context to old_ctx and loads new_ctx
 /// Follows ARM64 AAPCS calling convention
-pub fn swapContext(old_ctx: *Context, new_ctx: *Context) callconv(.C) void {
+pub fn swapContext(old_ctx: *Context, new_ctx: *Context) callconv(.c) void {
     asm volatile (
         \\// Save callee-saved general purpose registers
         \\stp x19, x20, [x0, #0]
@@ -112,8 +112,7 @@ pub fn swapContext(old_ctx: *Context, new_ctx: *Context) callconv(.C) void {
         :
         : [old_ctx] "{x0}" (old_ctx),
           [new_ctx] "{x1}" (new_ctx),
-        : .{ .memory = true, .x2 = true }
-    );
+        : .{ .memory = true, .x2 = true });
 }
 
 /// Create a new context for a function
@@ -280,16 +279,14 @@ pub inline fn flushCacheLine(addr: usize) void {
     asm volatile ("dc civac, %[addr]"
         :
         : [addr] "r" (addr),
-        : .{ .memory = true }
-    );
+        : .{ .memory = true });
 }
 
 pub inline fn invalidateCacheLine(addr: usize) void {
     asm volatile ("dc ivac, %[addr]"
         :
         : [addr] "r" (addr),
-        : .{ .memory = true }
-    );
+        : .{ .memory = true });
 }
 
 /// Thread-local storage support for ARM64

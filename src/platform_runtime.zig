@@ -10,19 +10,19 @@ pub const RuntimeBackend = enum {
     // Linux: High-performance io_uring
     linux_io_uring,
     linux_epoll,
-    
-    // Windows: I/O Completion Ports 
+
+    // Windows: I/O Completion Ports
     windows_iocp,
     windows_select,
-    
+
     // macOS: kqueue + GCD integration
     macos_kqueue,
     macos_poll,
-    
+
     // WASM: Stackless execution with Web APIs
     wasm_stackless,
     wasm_promise,
-    
+
     // Fallback: POSIX-compatible blocking I/O
     posix_blocking,
     generic_blocking,
@@ -34,30 +34,30 @@ pub const PlatformCapabilities = struct {
     has_io_uring: bool = false,
     has_epoll: bool = false,
     io_uring_version: u32 = 0,
-    
-    // Windows capabilities  
+
+    // Windows capabilities
     has_iocp: bool = false,
     has_overlapped_io: bool = false,
-    
+
     // macOS capabilities
     has_kqueue: bool = false,
     has_gcd: bool = false,
-    
+
     // WASM capabilities
     has_web_workers: bool = false,
     has_promises: bool = false,
-    
+
     // Network capabilities
     has_sendfile: bool = false,
     has_splice: bool = false,
     supports_ipv6: bool = false,
     supports_unix_sockets: bool = false,
-    
+
     // Performance features
     supports_zero_copy: bool = false,
     supports_vectorized_io: bool = false,
     max_concurrent_ops: u32 = 1024,
-    
+
     // System info
     cpu_count: u32 = 1,
     page_size: usize = 4096,
@@ -67,7 +67,7 @@ pub const PlatformCapabilities = struct {
 /// Detect current platform capabilities at comptime and runtime
 pub fn detectCapabilities() PlatformCapabilities {
     var caps = PlatformCapabilities{};
-    
+
     // Compile-time platform detection
     switch (builtin.os.tag) {
         .linux => {
@@ -86,19 +86,19 @@ pub fn detectCapabilities() PlatformCapabilities {
             caps = detectGenericCapabilities();
         },
     }
-    
+
     // Common system info
     caps.cpu_count = @intCast(std.Thread.getCpuCount() catch 1);
     caps.page_size = 4096; // Standard page size, could be detected at runtime
     caps.cache_line_size = 64; // Standard cache line size
-    
+
     return caps;
 }
 
 /// Linux capability detection with io_uring version checking
 fn detectLinuxCapabilities() PlatformCapabilities {
     var caps = PlatformCapabilities{};
-    
+
     if (builtin.os.tag == .linux) {
         // Check io_uring availability
         caps.has_io_uring = checkIoUringSupport();
@@ -108,26 +108,26 @@ fn detectLinuxCapabilities() PlatformCapabilities {
             caps.supports_vectorized_io = true;
             caps.max_concurrent_ops = 32768; // High-performance io_uring limit
         }
-        
+
         // Always available on Linux
         caps.has_epoll = true;
         caps.has_sendfile = true;
         caps.has_splice = true;
         caps.supports_unix_sockets = true;
         caps.supports_ipv6 = true;
-        
+
         if (!caps.supports_vectorized_io) {
             caps.supports_vectorized_io = true; // epoll + readv/writev
         }
     }
-    
+
     return caps;
 }
 
 /// Windows capability detection with IOCP support
 fn detectWindowsCapabilities() PlatformCapabilities {
     var caps = PlatformCapabilities{};
-    
+
     if (builtin.os.tag == .windows) {
         // IOCP is available on Windows NT+
         caps.has_iocp = true;
@@ -135,18 +135,18 @@ fn detectWindowsCapabilities() PlatformCapabilities {
         caps.supports_vectorized_io = true; // WSASend/WSARecv with multiple buffers
         caps.supports_ipv6 = true;
         caps.max_concurrent_ops = 16384; // IOCP recommended limit
-        
+
         // Windows-specific optimizations
         caps.supports_zero_copy = false; // Not implemented yet
     }
-    
+
     return caps;
 }
 
 /// macOS capability detection with kqueue and GCD
 fn detectMacOSCapabilities() PlatformCapabilities {
     var caps = PlatformCapabilities{};
-    
+
     if (builtin.os.tag == .macos) {
         caps.has_kqueue = true;
         caps.has_gcd = true; // Grand Central Dispatch always available
@@ -156,49 +156,49 @@ fn detectMacOSCapabilities() PlatformCapabilities {
         caps.has_sendfile = true;
         caps.max_concurrent_ops = 8192; // kqueue typical limit
     }
-    
+
     return caps;
 }
 
 /// WASM capability detection
 fn detectWasmCapabilities() PlatformCapabilities {
     var caps = PlatformCapabilities{};
-    
+
     if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
         // WASM environment
         caps.has_promises = true;
         caps.has_web_workers = true; // Assume modern browser
         caps.max_concurrent_ops = 256; // Lower limit for WASM
         caps.cpu_count = 1; // Single-threaded by default
-        
+
         // Limited networking in WASM
         caps.supports_ipv6 = false;
         caps.supports_unix_sockets = false;
     }
-    
+
     return caps;
 }
 
 /// Generic/fallback capability detection
 fn detectGenericCapabilities() PlatformCapabilities {
     var caps = PlatformCapabilities{};
-    
+
     // Conservative defaults for unknown platforms
     caps.supports_vectorized_io = true; // Most POSIX systems support readv/writev
     caps.supports_ipv6 = true;
     caps.max_concurrent_ops = 1024;
-    
+
     return caps;
 }
 
 /// Check if io_uring is available on Linux
 fn checkIoUringSupport() bool {
     if (builtin.os.tag != .linux) return false;
-    
+
     // Try to create a minimal io_uring instance
-    const fd = std.posix.openZ("/dev/null", .{}, 0) catch return false;
+    const fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDONLY }, 0) catch return false;
     defer std.Io.Threaded.closeFd(fd);
-    
+
     // This would normally check io_uring_setup syscall
     // For now, assume modern Linux has it
     return true;
@@ -254,7 +254,7 @@ pub fn selectOptimalBackend(caps: PlatformCapabilities) RuntimeBackend {
 pub fn createOptimalRuntime(allocator: std.mem.Allocator) !PlatformRuntime {
     const caps = detectCapabilities();
     const backend = selectOptimalBackend(caps);
-    
+
     return PlatformRuntime{
         .backend = backend,
         .capabilities = caps,
@@ -267,15 +267,15 @@ pub const PlatformRuntime = struct {
     backend: RuntimeBackend,
     capabilities: PlatformCapabilities,
     allocator: std.mem.Allocator,
-    
+
     const Self = @This();
-    
+
     /// Get human-readable backend name
     pub fn getBackendName(self: *const Self) []const u8 {
         return switch (self.backend) {
             .linux_io_uring => "Linux io_uring (High Performance)",
             .linux_epoll => "Linux epoll",
-            .windows_iocp => "Windows IOCP (High Performance)", 
+            .windows_iocp => "Windows IOCP (High Performance)",
             .windows_select => "Windows select()",
             .macos_kqueue => "macOS kqueue + GCD (High Performance)",
             .macos_poll => "macOS poll()",
@@ -285,7 +285,7 @@ pub const PlatformRuntime = struct {
             .generic_blocking => "Generic Blocking I/O",
         };
     }
-    
+
     /// Check if current backend supports high performance features
     pub fn isHighPerformance(self: *const Self) bool {
         return switch (self.backend) {
@@ -293,7 +293,7 @@ pub const PlatformRuntime = struct {
             else => false,
         };
     }
-    
+
     /// Get recommended configuration for current platform
     pub fn getRecommendedConfig(self: *const Self) RuntimeConfig {
         return RuntimeConfig{
@@ -305,7 +305,7 @@ pub const PlatformRuntime = struct {
             .queue_depth = if (self.isHighPerformance()) 1024 else 256,
         };
     }
-    
+
     /// Print detailed platform information
     pub fn printPlatformInfo(self: *const Self) void {
         std.debug.print("\n🚀 zsync - Platform Runtime Information\n", .{});
@@ -314,29 +314,29 @@ pub const PlatformRuntime = struct {
         std.debug.print("Architecture: {s}\n", .{@tagName(builtin.cpu.arch)});
         std.debug.print("Backend: {s}\n", .{self.getBackendName()});
         std.debug.print("High Performance: {}\n", .{self.isHighPerformance()});
-        
+
         std.debug.print("\n📊 Capabilities:\n", .{});
         std.debug.print("  CPU Cores: {}\n", .{self.capabilities.cpu_count});
         std.debug.print("  Max Concurrent Ops: {}\n", .{self.capabilities.max_concurrent_ops});
         std.debug.print("  Zero-copy I/O: {}\n", .{self.capabilities.supports_zero_copy});
         std.debug.print("  Vectorized I/O: {}\n", .{self.capabilities.supports_vectorized_io});
         std.debug.print("  IPv6 Support: {}\n", .{self.capabilities.supports_ipv6});
-        
+
         if (builtin.os.tag == .linux) {
             std.debug.print("  io_uring: {} (v{})\n", .{ self.capabilities.has_io_uring, self.capabilities.io_uring_version });
             std.debug.print("  epoll: {}\n", .{self.capabilities.has_epoll});
         }
-        
+
         if (builtin.os.tag == .windows) {
             std.debug.print("  IOCP: {}\n", .{self.capabilities.has_iocp});
             std.debug.print("  Overlapped I/O: {}\n", .{self.capabilities.has_overlapped_io});
         }
-        
+
         if (builtin.os.tag == .macos) {
             std.debug.print("  kqueue: {}\n", .{self.capabilities.has_kqueue});
             std.debug.print("  Grand Central Dispatch: {}\n", .{self.capabilities.has_gcd});
         }
-        
+
         const config = self.getRecommendedConfig();
         std.debug.print("\n⚙️ Recommended Configuration:\n", .{});
         std.debug.print("  Threads: {}\n", .{config.thread_count});

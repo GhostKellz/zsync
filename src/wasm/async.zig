@@ -152,7 +152,11 @@ pub const AsyncContext = struct {
     pub fn sleep(self: *Self, ms: u64) !void {
         _ = self;
         // In WASM, this would integrate with setTimeout
-        std.posix.nanosleep(0, ms * std.time.ns_per_ms);
+        var i: u64 = 0;
+        const spins = @max(1, ms * 100);
+        while (i < spins) : (i += 1) {
+            std.atomic.spinLoopHint();
+        }
     }
 };
 

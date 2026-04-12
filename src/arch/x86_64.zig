@@ -89,7 +89,7 @@ pub fn makeContext(ctx: *Context, stack: []u8, entry: *const fn (*anyopaque) voi
 }
 
 // Entry point for new contexts
-fn contextEntryPoint() callconv(.C) void {
+fn contextEntryPoint() callconv(.c) void {
     asm volatile ("movq 0(%%rsp), %%rax" ::: .{ .rax = true, .memory = true });
     asm volatile ("movq %%rbx, %%rdi" ::: .{ .rdi = true, .memory = true });
     asm volatile ("addq $8, %%rsp" ::: .{ .memory = true });
@@ -98,7 +98,7 @@ fn contextEntryPoint() callconv(.C) void {
 }
 
 // Cleanup function for when context exits
-fn contextCleanup() callconv(.C) noreturn {
+fn contextCleanup() callconv(.c) noreturn {
     // This should trigger a return to scheduler
     @panic("Green thread exited without yielding to scheduler");
 }

@@ -103,7 +103,7 @@ fn myTask(io: zsync.Io) !void {
 }
 ```
 
-## Recommended Approach for v0.7.7
+## Recommended Approach for v0.7.9
 
 1. **Keep zsync's simpler VTable** - It's easier to implement and use
 2. **Add std.Io shim where needed** - For interop with std.Io-based libraries

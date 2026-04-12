@@ -202,6 +202,9 @@ pub fn splice(
     if (builtin.os.tag != .linux) {
         return error.SpliceNotSupported;
     }
+    if (fd_in < 0 or fd_out < 0) {
+        return error.BadFileDescriptor;
+    }
 
     const rc = std.os.linux.splice(fd_in, off_in, fd_out, off_out, len, flags);
     return switch (std.posix.errno(rc)) {

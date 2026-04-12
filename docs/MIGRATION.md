@@ -1,6 +1,6 @@
 # zsync Migration Guide
 
-Guide for migrating to zsync v0.7.7 and Zig 0.16.0-dev compatibility.
+Guide for migrating to the current zsync release line and Zig 0.16.0-dev compatibility.
 
 ## Zig 0.16 Breaking Changes
 
@@ -252,7 +252,7 @@ These remain unchanged from v0.7.6.
 
 ### Minimum Zig Version
 
-v0.7.7 requires Zig `0.16.0-dev.2736+3b515fbed` or later.
+The current release line requires Zig `0.16.0-dev.3144+ac6fb0b59` or later.
 
 ## See Also
 

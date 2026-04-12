@@ -7,6 +7,7 @@ const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
 const platform_runtime = @import("platform_runtime.zig");
 const platform_imports = @import("platform_imports.zig");
+const compat = @import("compat/thread.zig");
 
 // Use conditional imports
 const blocking_io = platform_imports.blocking_io;
@@ -19,23 +20,23 @@ const wasm_runtime = platform_imports.wasm.stackless;
 pub const RuntimeFactory = struct {
     allocator: std.mem.Allocator,
     platform: platform_runtime.PlatformRuntime,
-    
+
     const Self = @This();
-    
+
     /// Create factory with optimal platform detection
     pub fn init(allocator: std.mem.Allocator) !Self {
         const platform = try platform_runtime.createOptimalRuntime(allocator);
-        
+
         return Self{
             .allocator = allocator,
             .platform = platform,
         };
     }
-    
+
     /// Create platform-optimized async runtime
     pub fn createAsyncRuntime(self: *Self) !AsyncRuntime {
         const config = self.platform.getRecommendedConfig();
-        
+
         switch (self.platform.backend) {
             .linux_io_uring => {
                 if (builtin.os.tag == .linux) {
@@ -86,23 +87,23 @@ pub const RuntimeFactory = struct {
             },
         }
     }
-    
+
     /// Create blocking I/O fallback runtime
     fn createFallbackRuntime(self: *Self) !AsyncRuntime {
         const runtime = blocking_io.BlockingIo.init(self.allocator, 4096);
         return AsyncRuntime{ .blocking = runtime };
     }
-    
+
     /// Print platform information and recommendations
     pub fn printInfo(self: *const Self) void {
         self.platform.printPlatformInfo();
     }
-    
+
     /// Get current platform capabilities
     pub fn getCapabilities(self: *const Self) platform_runtime.PlatformCapabilities {
         return self.platform.capabilities;
     }
-    
+
     /// Check if high-performance backend is available
     pub fn isHighPerformance(self: *const Self) bool {
         return self.platform.isHighPerformance();
@@ -114,24 +115,24 @@ pub const AsyncRuntime = union(enum) {
     // Linux
     linux_io_uring: platform_imports.PlatformSpecificType(if (green_threads != void) green_threads.GreenThreadsIo else void),
     linux_epoll: void, // TODO: Implement
-    
+
     // Windows
     windows_iocp: platform_imports.PlatformSpecificType(if (windows_iocp != void) windows_iocp_io.WindowsIocpIo else void),
     windows_select: void, // TODO: Implement
-    
+
     // macOS
     macos_kqueue: void, // TODO: Implement
     macos_poll: void, // TODO: Implement
-    
+
     // WASM
     wasm_promise: void, // TODO: Implement
     wasm_stackless: void, // TODO: Implement
-    
+
     // Fallback
     blocking: blocking_io.BlockingIo,
-    
+
     const Self = @This();
-    
+
     /// Get unified I/O interface for any runtime
     pub fn io(self: *Self) io_interface.Io {
         return switch (self.*) {
@@ -154,7 +155,7 @@ pub const AsyncRuntime = union(enum) {
                     return simple_runtime.io();
                 }
             },
-            
+
             // Other platforms return blocking I/O interface for now
             inline else => {
                 // This creates a minimal blocking I/O interface
@@ -163,7 +164,7 @@ pub const AsyncRuntime = union(enum) {
             },
         };
     }
-    
+
     /// Cleanup runtime resources
     pub fn deinit(self: *Self) void {
         switch (self.*) {
@@ -183,7 +184,7 @@ pub const AsyncRuntime = union(enum) {
             },
         }
     }
-    
+
     /// Get runtime performance metrics
     pub fn getMetrics(self: *const Self) RuntimeMetrics {
         return switch (self.*) {
@@ -208,7 +209,7 @@ pub const AsyncRuntime = union(enum) {
             inline else => RuntimeMetrics{}, // Default empty metrics
         };
     }
-    
+
     /// Poll for async events (platform-specific)
     pub fn poll(self: *Self, timeout_ms: u32) !void {
         switch (self.*) {
@@ -216,20 +217,20 @@ pub const AsyncRuntime = union(enum) {
                 if (builtin.os.tag == .linux) {
                     try runtime.poll(timeout_ms);
                 } else {
-                    std.posix.nanosleep(0, timeout_ms * 1000);
+                    compat.sleepMillis(timeout_ms);
                 }
             },
             .blocking => {
                 // Blocking I/O doesn't need polling
-                std.posix.nanosleep(0, timeout_ms * 1000); // Convert to nanoseconds
+                compat.sleepMillis(timeout_ms);
             },
             inline else => {
                 // Fallback: just sleep
-                std.posix.nanosleep(0, timeout_ms * 1000);
+                compat.sleepMillis(timeout_ms);
             },
         }
     }
-    
+
     /// Get backend name
     pub fn getBackendName(self: *const Self) []const u8 {
         return switch (self.*) {

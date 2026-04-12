@@ -57,17 +57,17 @@ pub const SystemCapabilities = struct {
     has_systemd: bool,
     cpu_count: u32,
     total_memory: u64,
-    
+
     pub const KernelVersion = struct {
         major: u32,
         minor: u32,
         patch: u32,
-        
+
         pub fn supports_io_uring(self: KernelVersion) bool {
             // io_uring requires kernel 5.1+
             return self.major > 5 or (self.major == 5 and self.minor >= 1);
         }
-        
+
         pub fn supports_io_uring_advanced(self: KernelVersion) bool {
             // Advanced features like IORING_SETUP_SQPOLL require 5.11+
             return self.major > 5 or (self.major == 5 and self.minor >= 11);
@@ -81,7 +81,7 @@ pub fn detectLinuxDistro() LinuxDistro {
     if (parseOsRelease()) |distro| {
         return distro;
     }
-    
+
     // Try legacy detection methods
     if (fileExists("/etc/arch-release")) return .arch;
     if (fileExists("/etc/debian_version")) return .debian;
@@ -101,7 +101,7 @@ pub fn detectLinuxDistro() LinuxDistro {
     if (fileExists("/etc/gentoo-release")) return .gentoo;
     if (fileExists("/etc/alpine-release")) return .alpine;
     if (fileExists("/etc/void-release")) return .void;
-    
+
     return .unknown;
 }
 
@@ -111,17 +111,17 @@ fn parseOsRelease() ?LinuxDistro {
     const bytes_read = readFileContents("/etc/os-release", &buf);
     if (bytes_read == 0) return null;
     const content = buf[0..bytes_read];
-    
+
     var lines = std.mem.tokenizeScalar(u8, content, '\n');
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "ID=")) {
             const id = line[3..];
             const distro_id = std.mem.trim(u8, id, "\"");
-            
+
             return parseDistroId(distro_id);
         }
     }
-    
+
     return null;
 }
 
@@ -144,21 +144,21 @@ fn parseDistroId(id: []const u8) LinuxDistro {
     if (std.mem.eql(u8, id, "elementary")) return .elementary;
     if (std.mem.eql(u8, id, "kali")) return .kali;
     if (std.mem.eql(u8, id, "parrot")) return .parrot;
-    
+
     return .unknown;
 }
 
 /// Get kernel version
 pub fn getKernelVersion() SystemCapabilities.KernelVersion {
     const uname = std.posix.uname();
-    
+
     // Parse kernel version from uname.release
     // Format: major.minor.patch-extra
     var iter = std.mem.tokenizeAny(u8, &uname.release, ".-");
     const major = std.fmt.parseInt(u32, iter.next() orelse "0", 10) catch 0;
     const minor = std.fmt.parseInt(u32, iter.next() orelse "0", 10) catch 0;
     const patch = std.fmt.parseInt(u32, iter.next() orelse "0", 10) catch 0;
-    
+
     return .{
         .major = major,
         .minor = minor,
@@ -170,7 +170,7 @@ pub fn getKernelVersion() SystemCapabilities.KernelVersion {
 pub fn detectSystemCapabilities() SystemCapabilities {
     const distro = if (builtin.os.tag == .linux) detectLinuxDistro() else .unknown;
     const kernel = getKernelVersion();
-    
+
     return .{
         .distro = distro,
         .kernel_version = kernel,
@@ -196,7 +196,7 @@ fn getTotalMemory() u64 {
     const bytes_read = readFileContents("/proc/meminfo", &buf);
     if (bytes_read == 0) return 0;
     const content = buf[0..bytes_read];
-    
+
     var lines = std.mem.tokenizeScalar(u8, content, '\n');
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "MemTotal:")) {
@@ -207,7 +207,7 @@ fn getTotalMemory() u64 {
             return kb * 1024; // Convert to bytes
         }
     }
-    
+
     return 0;
 }
 
@@ -284,11 +284,7 @@ pub fn printSystemInfo() void {
     const settings = getDistroOptimalSettings(caps.distro);
 
     std.debug.print("🐧 Linux Distribution: {s}\n", .{@tagName(caps.distro)});
-    std.debug.print("🔧 Kernel: {}.{}.{}\n", .{
-        caps.kernel_version.major,
-        caps.kernel_version.minor,
-        caps.kernel_version.patch
-    });
+    std.debug.print("🔧 Kernel: {}.{}.{}\n", .{ caps.kernel_version.major, caps.kernel_version.minor, caps.kernel_version.patch });
     std.debug.print("💾 CPU Cores: {}\n", .{caps.cpu_count});
     std.debug.print("🧠 Memory: {} MB\n", .{caps.total_memory / (1024 * 1024)});
     std.debug.print("⚡ io_uring: {}\n", .{caps.has_io_uring});
@@ -440,24 +436,20 @@ pub fn detectPackageManager() PackageManager {
 // Tests
 test "detect Linux distribution" {
     if (builtin.os.tag != .linux) return;
-    
+
     const distro = detectLinuxDistro();
-    std.debug.print("\nDetected distro: {s}\n", .{@tagName(distro)});
+    try std.testing.expect(distro != .unknown);
 }
 
 test "kernel version parsing" {
     const kernel = getKernelVersion();
-    std.debug.print("\nKernel version: {}.{}.{}\n", .{ 
-        kernel.major, 
-        kernel.minor, 
-        kernel.patch 
-    });
-    std.debug.print("Supports io_uring: {}\n", .{kernel.supports_io_uring()});
-    std.debug.print("Supports advanced io_uring: {}\n", .{kernel.supports_io_uring_advanced()});
+    try std.testing.expect(kernel.major > 0);
 }
 
 test "system capabilities" {
     if (builtin.os.tag != .linux) return;
-    
-    printSystemInfo();
+
+    const caps = detectSystemCapabilities();
+    try std.testing.expect(caps.cpu_count > 0);
+    try std.testing.expect(caps.total_memory > 0);
 }

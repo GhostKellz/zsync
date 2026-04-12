@@ -1,13 +1,23 @@
-<div align="center">
-  <img src="assets/icons/zsync.png" alt="Zsync Logo" width="200" height="200">
+<p align="center">
+  <img src="assets/icons/zsync.png" alt="Zsync Logo" width="200" height="200" />
+</p>
 
-  # Zsync - Async Runtime for Zig
+<h1 align="center">Zsync</h1>
 
-  [![Zig](https://img.shields.io/badge/Zig-0.16--dev-orange.svg)](https://ziglang.org/)
-  [![Green Threads](https://img.shields.io/badge/Green_Threads-Async-green.svg)](#green-thread-mode-linux)
-  [![io_uring](https://img.shields.io/badge/io__uring-Linux-blue.svg)](#platform-support)
-  [![Zero Cost](https://img.shields.io/badge/Zero_Cost-Abstractions-purple.svg)](#key-features)
-</div>
+<p align="center">
+  <strong>Async Runtime for Zig</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Zig-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="Zig">
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
+  <img src="https://img.shields.io/badge/io__uring-0A66C2?style=for-the-badge&logo=linux&logoColor=white" alt="io_uring">
+  <img src="https://img.shields.io/badge/Green_Threads-2E8B57?style=for-the-badge&logo=threads&logoColor=white" alt="Green Threads">
+  <img src="https://img.shields.io/badge/WASM-654FF0?style=for-the-badge&logo=webassembly&logoColor=white" alt="WASM">
+  <img src="https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
+  <img src="https://img.shields.io/badge/macOS-111111?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Zero_Cost-8A2BE2?style=for-the-badge&logo=lightning&logoColor=white" alt="Zero Cost">
+</p>
 
 ## Overview
 
@@ -51,10 +61,10 @@ Add zsync to your project:
 zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/heads/main.tar.gz
 ```
 
-Or for a specific tag:
+Or for a specific release tag:
 
 ```bash
-zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/tags/v0.7.7.tar.gz
+zig fetch --save https://github.com/ghostkellz/zsync/archive/refs/tags/<tag>.tar.gz
 ```
 
 Add to your `build.zig`:

@@ -35,6 +35,11 @@ pub const IoUring = struct {
         cqes: []linux.io_uring_cqe,
     };
 
+    fn validateOffsetRange(base_len: usize, start: u32, item_size: usize, item_count: u32) !void {
+        const end = @as(usize, start) + item_size * @as(usize, item_count);
+        if (end > base_len) return error.InvalidRingLayout;
+    }
+
     pub fn init(entries: u32) !IoUring {
         var params = std.mem.zeroes(linux.io_uring_params);
 
@@ -80,6 +85,9 @@ pub const IoUring = struct {
             fd,
             linux.IORING_OFF_CQ_RING,
         );
+
+        try validateOffsetRange(sq_ring_ptr.len, params.sq_off.array, @sizeOf(u32), params.sq_entries);
+        try validateOffsetRange(cq_ring_ptr.len, params.cq_off.cqes, @sizeOf(linux.io_uring_cqe), params.cq_entries);
 
         // Setup submission queue
         const sq = SubmissionQueue{

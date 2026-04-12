@@ -11,7 +11,7 @@ pub fn main() !void {
     std.debug.print("==============================\n\n", .{});
 
     // Create a bounded channel with capacity 5
-    var channel = zsync.Channel(u32).init(allocator, 5);
+    var channel = try zsync.Channel(u32).init(allocator, 5);
     defer channel.deinit();
 
     std.debug.print("Created bounded channel with capacity 5\n\n", .{});
@@ -76,7 +76,7 @@ pub fn main() !void {
     // --- Use Case: Producer/Consumer Pattern ---
     std.debug.print("\n--- Use Case: Batch Processing ---\n", .{});
 
-    var work_queue = zsync.Channel(u32).init(allocator, 100);
+    var work_queue = try zsync.Channel(u32).init(allocator, 100);
     defer work_queue.deinit();
 
     // Producer: batch send items

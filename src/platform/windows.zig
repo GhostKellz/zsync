@@ -2,27 +2,104 @@ const std = @import("std");
 const builtin = @import("builtin");
 const windows = std.os.windows;
 
+pub const OVERLAPPED = extern struct {
+    Internal: usize = 0,
+    InternalHigh: usize = 0,
+    Anonymous: extern union {
+        s: extern struct {
+            Offset: u32,
+            OffsetHigh: u32,
+        },
+        Pointer: ?*anyopaque,
+    } = .{ .Pointer = null },
+    hEvent: ?windows.HANDLE = null,
+};
+const wait_infinite: u32 = 0xffff_ffff;
+
+extern "kernel32" fn CreateIoCompletionPort(
+    file_handle: windows.HANDLE,
+    existing_completion_port: ?windows.HANDLE,
+    completion_key: usize,
+    number_of_concurrent_threads: u32,
+) callconv(.c) ?windows.HANDLE;
+
+extern "kernel32" fn GetQueuedCompletionStatus(
+    completion_port: windows.HANDLE,
+    lpNumberOfBytesTransferred: *u32,
+    lpCompletionKey: *usize,
+    lpOverlapped: **OVERLAPPED,
+    dwMilliseconds: u32,
+) callconv(.c) windows.BOOL;
+
+extern "kernel32" fn PostQueuedCompletionStatus(
+    completion_port: windows.HANDLE,
+    dwNumberOfBytesTransferred: u32,
+    dwCompletionKey: usize,
+    lpOverlapped: ?*OVERLAPPED,
+) callconv(.c) windows.BOOL;
+
+extern "kernel32" fn CreateWaitableTimerW(
+    timer_attributes: ?*anyopaque,
+    manual_reset: windows.BOOL,
+    timer_name: ?[*:0]const u16,
+) callconv(.c) ?windows.HANDLE;
+
+extern "kernel32" fn SetWaitableTimer(
+    timer: windows.HANDLE,
+    due_time: *const i64,
+    period: i32,
+    completion_routine: ?*anyopaque,
+    arg_to_completion_routine: ?*anyopaque,
+    resume_system: windows.BOOL,
+) callconv(.c) windows.BOOL;
+
+extern "kernel32" fn CancelWaitableTimer(timer: windows.HANDLE) callconv(.c) windows.BOOL;
+
+extern "kernel32" fn WaitForSingleObject(handle: windows.HANDLE, milliseconds: u32) callconv(.c) u32;
+
+extern "kernel32" fn SetThreadAffinityMask(thread: windows.HANDLE, mask: usize) callconv(.c) usize;
+
+extern "kernel32" fn GetCurrentThread() callconv(.c) windows.HANDLE;
+
+extern "kernel32" fn GetLastError() callconv(.c) windows.WIN32_ERROR;
+
+extern "kernel32" fn ReadFile(
+    file_handle: windows.HANDLE,
+    buffer: ?*anyopaque,
+    bytes_to_read: u32,
+    bytes_read: ?*u32,
+    overlapped: ?*OVERLAPPED,
+) callconv(.c) windows.BOOL;
+
+extern "kernel32" fn WriteFile(
+    file_handle: windows.HANDLE,
+    buffer: ?*const anyopaque,
+    bytes_to_write: u32,
+    bytes_written: ?*u32,
+    overlapped: ?*OVERLAPPED,
+) callconv(.c) windows.BOOL;
+
 // Windows IOCP (I/O Completion Ports) implementation
 pub const IOCP = struct {
     handle: windows.HANDLE,
-    
+
     pub fn init(max_concurrent_threads: u32) !IOCP {
-        const handle = windows.kernel32.CreateIoCompletionPort(
+        const handle = CreateIoCompletionPort(
             windows.INVALID_HANDLE_VALUE,
             null,
             0,
             max_concurrent_threads,
         ) orelse return error.CreateIocpFailed;
-        
+
         return IOCP{ .handle = handle };
     }
-    
+
     pub fn deinit(self: *IOCP) void {
         windows.CloseHandle(self.handle);
     }
-    
+
     pub fn associate(self: *IOCP, file_handle: windows.HANDLE, completion_key: usize) !void {
-        const result = windows.kernel32.CreateIoCompletionPort(
+        const result = CreateIoCompletionPort(
             file_handle,
             self.handle,
             completion_key,
@@ -32,46 +109,46 @@ pub const IOCP = struct {
             return error.AssociateFileFailed;
         }
     }
-    
+
     pub fn getQueuedCompletionStatus(
         self: *IOCP,
         bytes_transferred: *u32,
         completion_key: *usize,
-        overlapped: **windows.OVERLAPPED,
+        overlapped: **OVERLAPPED,
         timeout_ms: u32,
     ) !bool {
-        const result = windows.kernel32.GetQueuedCompletionStatus(
+        const result = GetQueuedCompletionStatus(
             self.handle,
             bytes_transferred,
             completion_key,
             overlapped,
             timeout_ms,
         );
-        
+
         if (result == 0) {
-            const err = windows.kernel32.GetLastError();
+            const err = GetLastError();
             if (err == .WAIT_TIMEOUT) {
                 return false; // Timeout, no completion
             }
             return error.GetCompletionStatusFailed;
         }
-        
+
         return true;
     }
-    
+
     pub fn postQueuedCompletionStatus(
         self: *IOCP,
         bytes_transferred: u32,
         completion_key: usize,
-        overlapped: ?*windows.OVERLAPPED,
+        overlapped: ?*OVERLAPPED,
     ) !void {
-        const result = windows.kernel32.PostQueuedCompletionStatus(
+        const result = PostQueuedCompletionStatus(
             self.handle,
             bytes_transferred,
             completion_key,
             overlapped,
         );
-        
+
         if (result == 0) {
             return error.PostCompletionStatusFailed;
         }
@@ -80,11 +157,11 @@ pub const IOCP = struct {
 
 // Windows async I/O operation
 pub const AsyncOp = struct {
-    overlapped: windows.OVERLAPPED,
+    overlapped: OVERLAPPED,
     operation_type: OperationType,
     buffer: []u8,
     completion_key: usize,
-    
+
     const OperationType = enum {
         read,
         write,
@@ -92,55 +169,55 @@ pub const AsyncOp = struct {
         accept,
         timer,
     };
-    
+
     pub fn initRead(buffer: []u8, completion_key: usize) AsyncOp {
         return AsyncOp{
-            .overlapped = std.mem.zeroes(windows.OVERLAPPED),
+            .overlapped = std.mem.zeroes(OVERLAPPED),
             .operation_type = .read,
             .buffer = buffer,
             .completion_key = completion_key,
         };
     }
-    
+
     pub fn initWrite(buffer: []u8, completion_key: usize) AsyncOp {
         return AsyncOp{
-            .overlapped = std.mem.zeroes(windows.OVERLAPPED),
+            .overlapped = std.mem.zeroes(OVERLAPPED),
             .operation_type = .write,
             .buffer = buffer,
             .completion_key = completion_key,
         };
     }
-    
+
     pub fn readFile(self: *AsyncOp, file_handle: windows.HANDLE) !void {
         var bytes_read: u32 = undefined;
-        const result = windows.kernel32.ReadFile(
+        const result = ReadFile(
             file_handle,
             self.buffer.ptr,
             @intCast(self.buffer.len),
             &bytes_read,
             &self.overlapped,
         );
-        
+
         if (result == 0) {
-            const err = windows.kernel32.GetLastError();
+            const err = GetLastError();
             if (err != .IO_PENDING) {
                 return error.ReadFileFailed;
             }
         }
     }
-    
+
     pub fn writeFile(self: *AsyncOp, file_handle: windows.HANDLE) !void {
         var bytes_written: u32 = undefined;
-        const result = windows.kernel32.WriteFile(
+        const result = WriteFile(
             file_handle,
             self.buffer.ptr,
             @intCast(self.buffer.len),
             &bytes_written,
             &self.overlapped,
         );
-        
+
         if (result == 0) {
-            const err = windows.kernel32.GetLastError();
+            const err = GetLastError();
             if (err != .IO_PENDING) {
                 return error.WriteFileFailed;
             }
@@ -151,26 +228,26 @@ pub const AsyncOp = struct {
 // Windows timer using CreateWaitableTimer
 pub const Timer = struct {
     handle: windows.HANDLE,
-    
+
     pub fn init() !Timer {
-        const handle = windows.kernel32.CreateWaitableTimerW(
+        const handle = CreateWaitableTimerW(
             null,
             windows.TRUE, // Manual reset
             null,
         ) orelse return error.CreateTimerFailed;
-        
+
         return Timer{ .handle = handle };
     }
-    
+
     pub fn deinit(self: *Timer) void {
         windows.CloseHandle(self.handle);
     }
-    
+
     pub fn setRelative(self: *Timer, ns: u64) !void {
         // Convert nanoseconds to 100-nanosecond intervals (negative for relative)
         const intervals: i64 = -@as(i64, @intCast(ns / 100));
-        
-        const result = windows.kernel32.SetWaitableTimer(
+
+        const result = SetWaitableTimer(
             self.handle,
             @ptrCast(&intervals),
             0, // No period (one-shot)
@@ -178,21 +255,21 @@ pub const Timer = struct {
             null, // No arg to completion routine
             windows.FALSE, // Don't resume system
         );
-        
+
         if (result == 0) {
             return error.SetTimerFailed;
         }
     }
-    
+
     pub fn cancel(self: *Timer) !void {
-        const result = windows.kernel32.CancelWaitableTimer(self.handle);
+        const result = CancelWaitableTimer(self.handle);
         if (result == 0) {
             return error.CancelTimerFailed;
         }
     }
-    
+
     pub fn wait(self: *Timer, timeout_ms: u32) !bool {
-        const result = windows.kernel32.WaitForSingleObject(self.handle, timeout_ms);
+        const result = WaitForSingleObject(self.handle, timeout_ms);
         return switch (result) {
             windows.WAIT_OBJECT_0 => true,
             windows.WAIT_TIMEOUT => false,
@@ -204,23 +281,23 @@ pub const Timer = struct {
 // Event source abstraction for Windows
 pub const EventSource = struct {
     iocp: IOCP,
-    
+
     pub fn init() !EventSource {
         const num_cpus = getNumCpus();
         return EventSource{
             .iocp = try IOCP.init(num_cpus),
         };
     }
-    
+
     pub fn deinit(self: *EventSource) void {
         self.iocp.deinit();
     }
-    
+
     pub fn associateFile(self: *EventSource, file_handle: windows.HANDLE, completion_key: usize) !void {
         try self.iocp.associate(file_handle, completion_key);
     }
-    
-    pub fn postCompletion(self: *EventSource, bytes: u32, key: usize, overlapped: ?*windows.OVERLAPPED) !void {
+
+    pub fn postCompletion(self: *EventSource, bytes: u32, key: usize, overlapped: ?*OVERLAPPED) !void {
         try self.iocp.postQueuedCompletionStatus(bytes, key, overlapped);
     }
 };
@@ -230,15 +307,15 @@ pub const EventLoop = struct {
     source: EventSource,
     timers: std.ArrayList(Timer),
     allocator: std.mem.Allocator,
-    
+
     pub fn init(allocator: std.mem.Allocator) !EventLoop {
         return EventLoop{
             .source = try EventSource.init(),
-            .timers = .{},
+            .timers = .empty,
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *EventLoop) void {
         for (self.timers.items) |*timer| {
             timer.deinit();
@@ -246,42 +323,42 @@ pub const EventLoop = struct {
         self.timers.deinit(self.allocator);
         self.source.deinit();
     }
-    
+
     pub fn run(self: *EventLoop) !void {
         var bytes_transferred: u32 = undefined;
         var completion_key: usize = undefined;
-        var overlapped: *windows.OVERLAPPED = undefined;
-        
+        var overlapped: *OVERLAPPED = undefined;
+
         while (true) {
             const has_completion = try self.source.iocp.getQueuedCompletionStatus(
                 &bytes_transferred,
                 &completion_key,
                 &overlapped,
-                windows.INFINITE, // Block indefinitely
+                wait_infinite, // Block indefinitely
             );
-            
+
             if (has_completion) {
                 // Handle completion based on completion_key
                 const task_id = completion_key;
                 _ = task_id;
                 // TODO: Resume corresponding green thread
-                
+
                 std.debug.print("IOCP completion: key={}, bytes={}\n", .{ completion_key, bytes_transferred });
             }
         }
     }
-    
+
     pub fn createTimer(self: *EventLoop) !*Timer {
         const timer = try Timer.init();
         try self.timers.append(self.allocator, timer);
         return &self.timers.items[self.timers.items.len - 1];
     }
-    
+
     pub fn runOnce(self: *EventLoop, timeout_ms: u32) !bool {
         var bytes_transferred: u32 = undefined;
         var completion_key: usize = undefined;
-        var overlapped: *windows.OVERLAPPED = undefined;
-        
+        var overlapped: *OVERLAPPED = undefined;
+
         return try self.source.iocp.getQueuedCompletionStatus(
             &bytes_transferred,
             &completion_key,
@@ -294,11 +371,11 @@ pub const EventLoop = struct {
 // Windows thread affinity using SetThreadAffinityMask
 pub fn setThreadAffinity(cpu: u32) !void {
     const mask: usize = @as(usize, 1) << @intCast(cpu);
-    const result = windows.kernel32.SetThreadAffinityMask(
-        windows.kernel32.GetCurrentThread(),
+    const result = SetThreadAffinityMask(
+        GetCurrentThread(),
         mask,
     );
-    
+
     if (result == 0) {
         return error.SetAffinityFailed;
     }
@@ -314,11 +391,11 @@ pub inline fn memoryBarrier() void {
 }
 
 pub inline fn loadAcquire(comptime T: type, ptr: *const T) T {
-    return @atomicLoad(T, ptr, .Acquire);
+    return @atomicLoad(T, ptr, .acquire);
 }
 
 pub inline fn storeRelease(comptime T: type, ptr: *T, value: T) void {
-    @atomicStore(T, ptr, value, .Release);
+    @atomicStore(T, ptr, value, .release);
 }
 
 // Windows-specific networking optimizations
@@ -336,7 +413,7 @@ pub const NetworkOptimizations = struct {
             return error.SetSockOptFailed;
         }
     }
-    
+
     pub fn enableReuseAddr(socket: windows.SOCKET) !void {
         const flag: c_int = 1;
         const result = windows.ws2_32.setsockopt(
@@ -350,7 +427,7 @@ pub const NetworkOptimizations = struct {
             return error.SetSockOptFailed;
         }
     }
-    
+
     pub fn setReceiveBufferSize(socket: windows.SOCKET, size: c_int) !void {
         const result = windows.ws2_32.setsockopt(
             socket,
@@ -363,7 +440,7 @@ pub const NetworkOptimizations = struct {
             return error.SetSockOptFailed;
         }
     }
-    
+
     pub fn setSendBufferSize(socket: windows.SOCKET, size: c_int) !void {
         const result = windows.ws2_32.setsockopt(
             socket,
@@ -381,7 +458,7 @@ pub const NetworkOptimizations = struct {
 // Windows async socket operations using WSASend/WSARecv
 pub const AsyncSocket = struct {
     socket: windows.SOCKET,
-    
+
     pub fn init(family: c_int, sock_type: c_int, protocol: c_int) !AsyncSocket {
         const socket = windows.ws2_32.WSASocketW(
             family,
@@ -391,27 +468,27 @@ pub const AsyncSocket = struct {
             0,
             windows.ws2_32.WSA_FLAG_OVERLAPPED,
         );
-        
+
         if (socket == windows.ws2_32.INVALID_SOCKET) {
             return error.CreateSocketFailed;
         }
-        
+
         return AsyncSocket{ .socket = socket };
     }
-    
+
     pub fn deinit(self: *AsyncSocket) void {
         _ = windows.ws2_32.closesocket(self.socket);
     }
-    
+
     pub fn asyncRecv(self: *AsyncSocket, buffer: []u8, overlapped: *windows.OVERLAPPED) !void {
         var wsabuf = windows.ws2_32.WSABUF{
             .len = @intCast(buffer.len),
             .buf = buffer.ptr,
         };
-        
+
         var bytes_received: u32 = undefined;
         var flags: u32 = 0;
-        
+
         const result = windows.ws2_32.WSARecv(
             self.socket,
             &wsabuf,
@@ -421,7 +498,7 @@ pub const AsyncSocket = struct {
             overlapped,
             null,
         );
-        
+
         if (result != 0) {
             const err = windows.ws2_32.WSAGetLastError();
             if (err != windows.ws2_32.WSA_IO_PENDING) {
@@ -429,15 +506,15 @@ pub const AsyncSocket = struct {
             }
         }
     }
-    
+
     pub fn asyncSend(self: *AsyncSocket, buffer: []const u8, overlapped: *windows.OVERLAPPED) !void {
         var wsabuf = windows.ws2_32.WSABUF{
             .len = @intCast(buffer.len),
             .buf = @constCast(buffer.ptr),
         };
-        
+
         var bytes_sent: u32 = undefined;
-        
+
         const result = windows.ws2_32.WSASend(
             self.socket,
             &wsabuf,
@@ -447,7 +524,7 @@ pub const AsyncSocket = struct {
             overlapped,
             null,
         );
-        
+
         if (result != 0) {
             const err = windows.ws2_32.WSAGetLastError();
             if (err != windows.ws2_32.WSA_IO_PENDING) {

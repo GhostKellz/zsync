@@ -8,23 +8,23 @@ const platform = platform_imports.linux.platform_linux;
 pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
     return struct {
         const Self = @This();
-        
+
         // Each future has its own green thread context
         contexts: [n]arch.Context,
         stacks: [n][]align(std.mem.page_size) u8,
         results: [n]?T,
         errors: [n]?anyerror,
         states: [n]State,
-        
+
         // Synchronization
         completion_count: std.atomic.Value(usize),
         completion_order: [n]usize, // Track completion order
         next_completion: std.atomic.Value(usize),
-        
+
         // Platform integration
         allocator: std.mem.Allocator,
         io_ring: ?*platform.IoUring,
-        
+
         const State = enum {
             pending,
             running,
@@ -32,7 +32,7 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
             failed,
             cancelled,
         };
-        
+
         pub fn init(allocator: std.mem.Allocator, io_ring: ?*platform.IoUring) !Self {
             var self = Self{
                 .contexts = undefined,
@@ -46,23 +46,23 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                 .allocator = allocator,
                 .io_ring = io_ring,
             };
-            
+
             // Allocate stacks for each future
             for (&self.stacks) |*stack| {
                 stack.* = try arch.allocateStack(allocator);
             }
-            
+
             return self;
         }
-        
+
         pub fn deinit(self: *Self) void {
             // Free all stacks
             for (self.stacks) |stack| {
                 arch.deallocateStack(self.allocator, stack);
             }
         }
-        
-        pub fn spawn(self: *Self, functions: [n]*const fn() T) !void {
+
+        pub fn spawn(self: *Self, functions: [n]*const fn () T) !void {
             // Initialize contexts for each function
             for (functions, 0..) |func, i| {
                 const wrapper = struct {
@@ -71,36 +71,37 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                         const future = task_info.future;
                         const index = task_info.index;
                         const user_func = task_info.func;
-                        
+
                         // Execute the function
                         future.results[index] = user_func() catch |err| {
                             future.errors[index] = err;
                             future.states[index] = .failed;
                             return;
                         };
-                        
+
                         // Mark as completed
                         future.states[index] = .completed;
-                        
+
                         // Update completion tracking
                         const completion_index = future.completion_count.fetchAdd(1, .release);
                         future.completion_order[completion_index] = index;
                     }
                 };
-                
+
                 // Create task info for this context
                 const task_info = try self.allocator.create(TaskInfo);
                 task_info.* = .{
+                    .magic = task_info_magic,
                     .future = self,
                     .index = i,
                     .func = func,
                 };
-                
+
                 // Initialize the context
                 arch.makeContext(&self.contexts[i], self.stacks[i], wrapper.execute, task_info);
                 self.states[i] = .running;
             }
-            
+
             // Start all contexts concurrently
             for (&self.contexts) |*ctx| {
                 // In a real scheduler, this would be queued for execution
@@ -108,7 +109,7 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                 _ = ctx;
             }
         }
-        
+
         pub fn awaitAll(self: *Self) ![n]T {
             // Wait for all futures to complete
             while (self.completion_count.load(.acquire) < n) {
@@ -119,7 +120,7 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                     std.time.sleep(1000); // 1μs
                 }
             }
-            
+
             // Check for errors and collect results
             var results: [n]T = undefined;
             for (self.states, 0..) |state, i| {
@@ -136,10 +137,10 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                     else => unreachable, // Should not happen after completion
                 }
             }
-            
+
             return results;
         }
-        
+
         pub fn awaitAny(self: *Self) !struct { index: usize, value: T } {
             // Wait for first completion
             while (self.completion_count.load(.acquire) == 0) {
@@ -150,10 +151,10 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                     std.time.sleep(1000); // 1μs
                 }
             }
-            
+
             // Get the first completed future
             const first_completed_index = self.completion_order[0];
-            
+
             switch (self.states[first_completed_index]) {
                 .completed => {
                     return .{
@@ -170,28 +171,28 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                 else => unreachable,
             }
         }
-        
+
         pub fn awaitRacing(self: *Self) !T {
             const result = try self.awaitAny();
-            
+
             // Cancel remaining futures
             for (self.states, 0..) |*state, i| {
                 if (i != result.index and state.* == .running) {
                     state.* = .cancelled;
                 }
             }
-            
+
             return result.value;
         }
-        
+
         pub fn cancel(self: *Self, index: usize) void {
             if (index >= n) return;
-            
+
             if (self.states[index] == .running) {
                 self.states[index] = .cancelled;
             }
         }
-        
+
         pub fn cancelAll(self: *Self) void {
             for (&self.states) |*state| {
                 if (state.* == .running) {
@@ -199,23 +200,23 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                 }
             }
         }
-        
+
         pub fn getCompletionOrder(self: *Self) []const usize {
             const completed = self.completion_count.load(.acquire);
             return self.completion_order[0..completed];
         }
-        
+
         pub fn getProgress(self: *Self) struct { completed: usize, total: usize } {
             return .{
                 .completed = self.completion_count.load(.acquire),
                 .total = n,
             };
         }
-        
+
         const TaskInfo = struct {
             future: *Self,
             index: usize,
-            func: *const fn() T,
+            func: *const fn () T,
         };
     };
 }
@@ -227,39 +228,39 @@ pub const WorkStealingExecutor = struct {
     global_queue: WorkQueue,
     running: std.atomic.Value(bool),
     allocator: std.mem.Allocator,
-    
+
     const WorkQueue = struct {
         queue: std.fifo.LinearFifo(*WorkItem, .Dynamic),
         mutex: compat.Mutex,
-        
+
         fn init(allocator: std.mem.Allocator) WorkQueue {
             return .{
                 .queue = std.fifo.LinearFifo(*WorkItem, .Dynamic).init(allocator),
                 .mutex = .{},
             };
         }
-        
+
         fn deinit(self: *WorkQueue) void {
             self.queue.deinit();
         }
-        
+
         fn push(self: *WorkQueue, item: *WorkItem) !void {
             self.mutex.lock();
             defer self.mutex.unlock();
             try self.queue.writeItem(item);
         }
-        
+
         fn pop(self: *WorkQueue) ?*WorkItem {
             self.mutex.lock();
             defer self.mutex.unlock();
             return self.queue.readItem();
         }
-        
+
         fn steal(self: *WorkQueue) ?*WorkItem {
             // Try to steal from the bottom of the queue
             self.mutex.lock();
             defer self.mutex.unlock();
-            
+
             if (self.queue.count > 1) {
                 // Steal the oldest item (FIFO order)
                 return self.queue.readItem();
@@ -267,21 +268,21 @@ pub const WorkStealingExecutor = struct {
             return null;
         }
     };
-    
+
     const WorkItem = struct {
-        execute_fn: *const fn(*anyopaque) void,
+        execute_fn: *const fn (*anyopaque) void,
         context: *anyopaque,
-        cleanup_fn: ?*const fn(*anyopaque) void = null,
+        cleanup_fn: ?*const fn (*anyopaque) void = null,
     };
-    
+
     pub fn init(allocator: std.mem.Allocator, num_threads: usize) !WorkStealingExecutor {
         const worker_threads = try allocator.alloc(std.Thread, num_threads);
         const work_queues = try allocator.alloc(WorkQueue, num_threads);
-        
+
         for (work_queues) |*queue| {
             queue.* = WorkQueue.init(allocator);
         }
-        
+
         return WorkStealingExecutor{
             .worker_threads = worker_threads,
             .work_queues = work_queues,
@@ -290,10 +291,10 @@ pub const WorkStealingExecutor = struct {
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *WorkStealingExecutor) void {
         self.stop();
-        
+
         for (self.work_queues) |*queue| {
             queue.deinit();
         }
@@ -301,63 +302,63 @@ pub const WorkStealingExecutor = struct {
         self.allocator.free(self.work_queues);
         self.allocator.free(self.worker_threads);
     }
-    
+
     pub fn start(self: *WorkStealingExecutor) !void {
         self.running.store(true, .release);
-        
+
         for (self.worker_threads, 0..) |*thread, i| {
             const worker_data = try self.allocator.create(WorkerData);
             worker_data.* = .{
                 .executor = self,
                 .worker_id = i,
             };
-            
+
             thread.* = try std.Thread.spawn(.{}, workerThreadMain, .{worker_data});
         }
     }
-    
+
     pub fn stop(self: *WorkStealingExecutor) void {
         self.running.store(false, .release);
-        
+
         for (self.worker_threads) |*thread| {
             thread.join();
         }
     }
-    
+
     pub fn submit(self: *WorkStealingExecutor, work_item: *WorkItem) !void {
         // Submit to global queue for load balancing
         try self.global_queue.push(work_item);
     }
-    
+
     pub fn submitToWorker(self: *WorkStealingExecutor, worker_id: usize, work_item: *WorkItem) !void {
         if (worker_id >= self.work_queues.len) return error.InvalidWorkerId;
         try self.work_queues[worker_id].push(work_item);
     }
-    
+
     const WorkerData = struct {
         executor: *WorkStealingExecutor,
         worker_id: usize,
     };
-    
+
     fn workerThreadMain(worker_data: *WorkerData) void {
         const executor = worker_data.executor;
         const worker_id = worker_data.worker_id;
         defer executor.allocator.destroy(worker_data);
-        
+
         // Set CPU affinity if on Linux
         if (std.builtin.os.tag == .linux) {
             platform.setThreadAffinity(@intCast(worker_id % platform.getNumCpus())) catch {};
         }
-        
+
         while (executor.running.load(.acquire)) {
             // 1. Try to get work from local queue
             var work_item = executor.work_queues[worker_id].pop();
-            
+
             // 2. If no local work, try global queue
             if (work_item == null) {
                 work_item = executor.global_queue.pop();
             }
-            
+
             // 3. If still no work, try to steal from other workers
             if (work_item == null) {
                 for (executor.work_queues, 0..) |*queue, i| {
@@ -367,7 +368,7 @@ pub const WorkStealingExecutor = struct {
                     }
                 }
             }
-            
+
             // 4. Execute work if found
             if (work_item) |item| {
                 item.execute_fn(item.context);
@@ -386,14 +387,14 @@ pub const WorkStealingExecutor = struct {
 pub fn LockFreeConcurrentFuture(comptime T: type, comptime n: usize) type {
     return struct {
         const Self = @This();
-        
+
         // Lock-free data structures
         results: [n]std.atomic.Value(?T),
         states: [n]std.atomic.Value(State),
         completion_ring: platform.LockfreeQueue(*CompletionEvent),
-        
+
         allocator: std.mem.Allocator,
-        
+
         const State = enum(u8) {
             pending = 0,
             running = 1,
@@ -401,12 +402,12 @@ pub fn LockFreeConcurrentFuture(comptime T: type, comptime n: usize) type {
             failed = 3,
             cancelled = 4,
         };
-        
+
         const CompletionEvent = struct {
             index: usize,
             timestamp: u64,
         };
-        
+
         pub fn init(allocator: std.mem.Allocator) !Self {
             var self = Self{
                 .results = undefined,
@@ -414,29 +415,29 @@ pub fn LockFreeConcurrentFuture(comptime T: type, comptime n: usize) type {
                 .completion_ring = try platform.LockfreeQueue(*CompletionEvent).init(allocator, n * 2),
                 .allocator = allocator,
             };
-            
+
             // Initialize atomic values
             for (&self.results) |*result| {
                 result.* = std.atomic.Value(?T).init(null);
             }
-            
+
             for (&self.states) |*state| {
                 state.* = std.atomic.Value(State).init(.pending);
             }
-            
+
             return self;
         }
-        
+
         pub fn deinit(self: *Self) void {
             self.completion_ring.deinit();
         }
-        
+
         pub fn awaitAnyLockFree(self: *Self) !struct { index: usize, value: T } {
             while (true) {
                 if (self.completion_ring.pop()) |event| {
                     const index = event.index;
                     const state = self.states[index].load(.acquire);
-                    
+
                     switch (state) {
                         .completed => {
                             if (self.results[index].load(.acquire)) |value| {
@@ -448,7 +449,7 @@ pub fn LockFreeConcurrentFuture(comptime T: type, comptime n: usize) type {
                         else => continue,
                     }
                 }
-                
+
                 // Use exponential backoff
                 std.time.sleep(1000);
             }
@@ -460,40 +461,75 @@ test "concurrent future real implementation" {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
-    
+
     // Test basic concurrent execution
     var cf = try ConcurrentFuture(i32, 3).init(allocator, null);
     defer cf.deinit();
-    
-    const functions = [_]*const fn() i32{
-        struct { fn f() i32 { return 1; } }.f,
-        struct { fn f() i32 { return 2; } }.f,
-        struct { fn f() i32 { return 3; } }.f,
+
+    const functions = [_]*const fn () i32{
+        struct {
+            fn f() i32 {
+                return 1;
+            }
+        }.f,
+        struct {
+            fn f() i32 {
+                return 2;
+            }
+        }.f,
+        struct {
+            fn f() i32 {
+                return 3;
+            }
+        }.f,
     };
-    
+
     try cf.spawn(functions);
     const results = try cf.awaitAll();
-    
+
     try std.testing.expectEqual(@as(i32, 1), results[0]);
     try std.testing.expectEqual(@as(i32, 2), results[1]);
     try std.testing.expectEqual(@as(i32, 3), results[2]);
+}
+
+test "concurrent future cancellation and completion order access" {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+    const allocator = debug_allocator.allocator();
+
+    var cf = try ConcurrentFuture(i32, 2).init(allocator, null);
+    defer cf.deinit();
+
+    cf.states[0] = .completed;
+    cf.results[0] = 7;
+    cf.completion_order[0] = 0;
+    cf.completion_count.store(1, .release);
+
+    const any = try cf.awaitAny();
+    try std.testing.expectEqual(@as(usize, 0), any.index);
+    try std.testing.expectEqual(@as(i32, 7), any.value);
+
+    cf.states[1] = .running;
+    cf.cancel(1);
+    try std.testing.expect(cf.states[1] == .cancelled);
+    try std.testing.expectEqual(@as(usize, 1), cf.getCompletionOrder().len);
 }
 
 test "work stealing executor" {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
-    
+
     var executor = try WorkStealingExecutor.init(allocator, 4);
     defer executor.deinit();
-    
+
     try executor.start();
     defer executor.stop();
-    
+
     // Submit some work
     const work_item = try allocator.create(WorkStealingExecutor.WorkItem);
     defer allocator.destroy(work_item);
-    
+
     work_item.* = .{
         .execute_fn = struct {
             fn execute(ctx: *anyopaque) void {
@@ -503,9 +539,9 @@ test "work stealing executor" {
         }.execute,
         .context = @ptrCast(&@as(u32, 42)),
     };
-    
+
     try executor.submit(work_item);
-    
+
     // Give workers time to process
     std.time.sleep(10_000_000); // 10ms
 }

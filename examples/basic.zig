@@ -18,7 +18,7 @@ pub fn main() !void {
     var blocking_io = zsync.createBlockingIo(allocator);
     defer blocking_io.deinit();
 
-    const io = blocking_io.io();
+    var io = blocking_io.io();
 
     // Demonstrate colorblind async - same code works sync and async!
     std.debug.print("Writing with colorblind async...\n", .{});

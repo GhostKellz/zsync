@@ -22,7 +22,7 @@ pub const IoUringError = error{
 pub const SubmissionEntry = struct {
     sqe: *linux.io_uring_sqe,
     user_data: u64,
-    
+
     const Self = @This();
 
     /// Prepare a read operation
@@ -81,7 +81,7 @@ pub const SubmissionEntry = struct {
 /// CQE (Completion Queue Entry) wrapper
 pub const CompletionEntry = struct {
     cqe: *linux.io_uring_cqe,
-    
+
     const Self = @This();
 
     pub fn getUserData(self: *const Self) u64 {
@@ -202,7 +202,7 @@ const IoUringCqe = extern struct {
     flags: u32,
 };
 
-/// io_uring ring wrapper  
+/// io_uring ring wrapper
 pub const IoUring = struct {
     ring_fd: std.posix.fd_t,
     params: IoUringParams,
@@ -211,9 +211,14 @@ pub const IoUring = struct {
     allocator: std.mem.Allocator,
     config: IoUringConfig,
     next_user_data: std.atomic.Value(u64),
-    
+
+    fn validateOffsetRange(base_len: usize, start: u32, item_size: usize, item_count: u32) !void {
+        const end = @as(usize, start) + item_size * @as(usize, item_count);
+        if (end > base_len) return IoUringError.SetupFailed;
+    }
+
     const Self = @This();
-    
+
     const SubmissionQueue = struct {
         head: *u32,
         tail: *u32,
@@ -226,7 +231,7 @@ pub const IoUring = struct {
         mmap_ptr: []align(4096) u8,
         sqe_mmap_ptr: []align(4096) u8,
     };
-    
+
     const CompletionQueue = struct {
         head: *u32,
         tail: *u32,
@@ -236,17 +241,17 @@ pub const IoUring = struct {
         cqes: [*]IoUringCqe,
         mmap_ptr: ?[]align(4096) u8,
     };
-    
+
     // io_uring syscall constants
     const IORING_SETUP_IOPOLL: u32 = 1 << 0;
     const IORING_SETUP_SQPOLL: u32 = 1 << 1;
     const IORING_SETUP_SQ_AFF: u32 = 1 << 2;
     const IORING_SETUP_CQSIZE: u32 = 1 << 3;
-    
+
     const IORING_OFF_SQ_RING: u64 = 0;
     const IORING_OFF_CQ_RING: u64 = 0x8000000;
     const IORING_OFF_SQES: u64 = 0x10000000;
-    
+
     // io_uring opcodes
     const IORING_OP_NOP: u8 = 0;
     const IORING_OP_READV: u8 = 1;
@@ -281,7 +286,7 @@ pub const IoUring = struct {
     const IORING_OP_SPLICE: u8 = 30;
     const IORING_OP_PROVIDE_BUFFERS: u8 = 31;
     const IORING_OP_REMOVE_BUFFERS: u8 = 32;
-    
+
     // Raw syscall wrappers - architecture-aware
     fn io_uring_setup(entries: u32, params: *IoUringParams) i32 {
         // Use the correct syscall enum for the target architecture
@@ -297,10 +302,10 @@ pub const IoUring = struct {
             else => @compileError("io_uring not supported on this architecture"),
         }
     }
-    
+
     fn io_uring_enter(fd: i32, to_submit: u32, min_complete: u32, flags: u32, sig: ?*anyopaque) i32 {
         const sig_ptr = if (sig) |s| @intFromPtr(s) else 0;
-        
+
         switch (builtin.cpu.arch) {
             .x86_64 => {
                 const SYS_io_uring_enter = @as(std.os.linux.syscalls.X64, @enumFromInt(426)); // x86_64 syscall number
@@ -319,14 +324,14 @@ pub const IoUring = struct {
         if (builtin.os.tag != .linux) {
             return IoUringError.NotSupported;
         }
-        
+
         // Initialize io_uring parameters
         var params = IoUringParams{
             .sq_entries = 0, // Will be set by kernel
             .cq_entries = 0, // Will be set by kernel
             .flags = if (config.sq_poll) IORING_SETUP_SQPOLL else 0,
         };
-        
+
         // Call io_uring_setup syscall
         const ring_fd = io_uring_setup(config.entries, &params);
         if (ring_fd < 0) {
@@ -334,17 +339,17 @@ pub const IoUring = struct {
             const errno_val = @as(u32, @intCast(-ring_fd));
             return switch (errno_val) {
                 38 => IoUringError.NotSupported, // ENOSYS
-                12 => IoUringError.OutOfMemory,  // ENOMEM  
+                12 => IoUringError.OutOfMemory, // ENOMEM
                 1 => IoUringError.PermissionDenied, // EPERM
                 else => IoUringError.SetupFailed,
             };
         }
-        
+
         // Calculate memory map sizes
         const sq_size = params.sq_off.array + params.sq_entries * @sizeOf(u32);
         const cq_size = params.cq_off.cqes + params.cq_entries * @sizeOf(IoUringCqe);
         const sqe_size = params.sq_entries * @sizeOf(IoUringSqe);
-        
+
         // Map submission queue
         const sq_mmap = std.posix.mmap(
             null,
@@ -357,7 +362,7 @@ pub const IoUring = struct {
             std.Io.Threaded.closeFd(ring_fd);
             return IoUringError.SetupFailed;
         };
-        
+
         // Map completion queue (may be shared with SQ)
         const cq_mmap = if (params.features & 0x1 != 0) // IORING_FEAT_SINGLE_MMAP
             null
@@ -374,7 +379,7 @@ pub const IoUring = struct {
                 std.Io.Threaded.closeFd(ring_fd);
                 return IoUringError.SetupFailed;
             };
-        
+
         // Map submission queue entries
         const sqe_mmap = std.posix.mmap(
             null,
@@ -389,7 +394,10 @@ pub const IoUring = struct {
             std.Io.Threaded.closeFd(ring_fd);
             return IoUringError.SetupFailed;
         };
-        
+
+        try validateOffsetRange(sq_mmap.len, params.sq_off.array, @sizeOf(u32), params.sq_entries);
+        try validateOffsetRange(cq_ptrLen(cq_mmap, sq_mmap), params.cq_off.cqes, @sizeOf(IoUringCqe), params.cq_entries);
+
         // Initialize submission queue pointers
         const sq = SubmissionQueue{
             .head = @ptrFromInt(@intFromPtr(sq_mmap.ptr) + params.sq_off.head),
@@ -403,7 +411,7 @@ pub const IoUring = struct {
             .mmap_ptr = sq_mmap,
             .sqe_mmap_ptr = sqe_mmap,
         };
-        
+
         // Initialize completion queue pointers
         const cq_ptr = cq_mmap orelse sq_mmap;
         const cq = CompletionQueue{
@@ -415,7 +423,7 @@ pub const IoUring = struct {
             .cqes = @ptrFromInt(@intFromPtr(cq_ptr.ptr) + params.cq_off.cqes),
             .mmap_ptr = cq_mmap,
         };
-        
+
         return Self{
             .ring_fd = ring_fd,
             .params = params,
@@ -427,6 +435,10 @@ pub const IoUring = struct {
         };
     }
 
+    fn cq_ptrLen(cq_mmap: ?[]align(@alignOf(usize)) u8, sq_mmap: []align(@alignOf(usize)) u8) usize {
+        return if (cq_mmap) |cq| cq.len else sq_mmap.len;
+    }
+
     /// Deinitialize io_uring
     pub fn deinit(self: *Self) void {
         // Clean up memory mappings
@@ -435,7 +447,7 @@ pub const IoUring = struct {
         if (self.cq.mmap_ptr) |cq_mmap| {
             std.posix.munmap(cq_mmap);
         }
-        
+
         // Close the ring file descriptor
         std.Io.Threaded.closeFd(self.ring_fd);
     }
@@ -445,59 +457,59 @@ pub const IoUring = struct {
         const tail = self.sq.tail.*;
         const head = @atomicLoad(u32, self.sq.head, .acquire);
         const mask = self.sq.ring_mask.*;
-        
+
         // Check if submission queue is full
         if (tail - head >= self.sq.ring_entries.*) {
             return null;
         }
-        
+
         const idx = tail & mask;
         return &self.sq.sqes[idx];
     }
-    
+
     /// Submit a single SQE
     pub fn submitSqe(self: *Self, _: *IoUringSqe) void {
         const tail = self.sq.tail.*;
         const mask = self.sq.ring_mask.*;
         const idx = tail & mask;
-        
+
         // Set the array entry to point to this SQE
         self.sq.array[idx] = @intCast(idx);
-        
+
         // Advance the tail
         @atomicStore(u32, self.sq.tail, tail + 1, .release);
     }
-    
+
     /// Submit all pending SQEs and optionally wait for completions
     pub fn submit(self: *Self) !u32 {
         const tail = self.sq.tail.*;
         const head = @atomicLoad(u32, self.sq.head, .acquire);
         const to_submit = tail - head;
-        
+
         if (to_submit == 0) {
             return 0;
         }
-        
+
         const ret = io_uring_enter(self.ring_fd, to_submit, 0, 0, null);
         if (ret < 0) {
             const errno_val = @as(u32, @intCast(-ret));
             return switch (errno_val) {
-                16 => IoUringError.Busy,     // EBUSY
-                22 => IoUringError.SetupFailed, // EINVAL -> SetupFailed (more appropriate) 
+                16 => IoUringError.Busy, // EBUSY
+                22 => IoUringError.SetupFailed, // EINVAL -> SetupFailed (more appropriate)
                 else => IoUringError.SubmissionFailed,
             };
         }
-        
+
         return @intCast(ret);
     }
-    
+
     /// Wait for and retrieve completion events
     pub fn getCompletions(self: *Self, cqes: []IoUringCqe) u32 {
         var count: u32 = 0;
         const head = self.cq.head.*;
         const tail = @atomicLoad(u32, self.cq.tail, .acquire);
         const mask = self.cq.ring_mask.*;
-        
+
         var current_head = head;
         while (current_head != tail and count < cqes.len) {
             const idx = current_head & mask;
@@ -505,14 +517,14 @@ pub const IoUring = struct {
             current_head += 1;
             count += 1;
         }
-        
+
         if (count > 0) {
             @atomicStore(u32, self.cq.head, current_head, .release);
         }
-        
+
         return count;
     }
-    
+
     /// Setup a read operation
     pub fn prepRead(sqe: *IoUringSqe, fd: i32, buffer: []u8, offset: u64, user_data: u64) IoUringError!void {
         if (buffer.len > std.math.maxInt(u32)) return IoUringError.InvalidOperation;
@@ -552,7 +564,7 @@ pub const IoUring = struct {
             .__pad2 = [_]u64{0},
         };
     }
-    
+
     /// Setup an accept operation
     pub fn prepAccept(sqe: *IoUringSqe, fd: i32, addr: ?*std.posix.sockaddr, user_data: u64) void {
         sqe.* = IoUringSqe{
@@ -571,7 +583,7 @@ pub const IoUring = struct {
             .__pad2 = [_]u64{0},
         };
     }
-    
+
     /// Setup a connect operation
     pub fn prepConnect(sqe: *IoUringSqe, fd: i32, addr: *const std.posix.sockaddr, user_data: u64) void {
         sqe.* = IoUringSqe{
@@ -590,7 +602,7 @@ pub const IoUring = struct {
             .__pad2 = [_]u64{0},
         };
     }
-    
+
     /// Setup a close operation
     pub fn prepClose(sqe: *IoUringSqe, fd: i32, user_data: u64) void {
         sqe.* = IoUringSqe{
@@ -618,16 +630,16 @@ pub const Operation = struct {
     buffer: []u8 = &[_]u8{},
     data: []const u8 = &[_]u8{},
     offset: u64 = 0,
-    addr: ?*std.posix.sockaddr = null,  // Mutable pointer for accept
+    addr: ?*std.posix.sockaddr = null, // Mutable pointer for accept
 };
 
 /// Future-like structure for async operations
 pub const Future = struct {
     user_data: u64,
     reactor: *IoUringReactor,
-    
+
     const FutureSelf = @This();
-    
+
     pub fn await(self: FutureSelf) !i32 {
         // Polling until completion
         while (true) {
@@ -640,13 +652,13 @@ pub const Future = struct {
                     return result;
                 }
             }
-            
+
             // Poll for more completions
             _ = self.reactor.poll(1) catch 0;
             std.time.sleep(1000000); // 1ms
         }
     }
-    
+
     pub fn destroy(self: FutureSelf, _: std.mem.Allocator) void {
         // Cleanup if operation is still pending
         if (self.reactor.pending_ops.get(self.user_data)) |pending_op| {
@@ -661,25 +673,25 @@ pub const IoUringReactor = struct {
     ring: IoUring,
     allocator: std.mem.Allocator,
     pending_ops: std.AutoHashMap(u64, *PendingOperation),
-    
+
     const Self = @This();
-    
+
     const PendingOperation = struct {
         result: i32 = 0,
         completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         waker: ?*anyopaque = null,
     };
-    
+
     pub fn init(allocator: std.mem.Allocator, config: IoUringConfig) !Self {
         const ring = try IoUring.init(allocator, config);
-        
+
         return Self{
             .ring = ring,
             .allocator = allocator,
             .pending_ops = std.AutoHashMap(u64, *PendingOperation).init(allocator),
         };
     }
-    
+
     pub fn deinit(self: *Self) void {
         // Clean up any remaining pending operations
         var iterator = self.pending_ops.iterator();
@@ -687,21 +699,21 @@ pub const IoUringReactor = struct {
             self.allocator.destroy(entry.value_ptr.*);
         }
         self.pending_ops.deinit();
-        
+
         self.ring.deinit();
     }
-    
+
     /// Submit an operation and return a Future-like structure
     pub fn submitOperation(self: *Self, operation: Operation) !Future {
         const sqe = self.ring.getSqe() orelse return IoUringError.QueueFull;
         const user_data = self.ring.next_user_data.fetchAdd(1, .monotonic);
-        
+
         // Create pending operation tracking
         const pending_op = try self.allocator.create(PendingOperation);
         pending_op.* = PendingOperation{};
-        
+
         try self.pending_ops.put(user_data, pending_op);
-        
+
         // Setup the SQE based on operation type
         switch (operation.opcode) {
             .read => try IoUring.prepRead(sqe, operation.fd, operation.buffer, operation.offset, user_data),
@@ -711,28 +723,28 @@ pub const IoUringReactor = struct {
             .close => IoUring.prepClose(sqe, operation.fd, user_data),
             else => return IoUringError.NotSupported,
         }
-        
+
         self.ring.submitSqe(sqe);
         _ = try self.ring.submit();
-        
+
         return Future{
             .user_data = user_data,
             .reactor = self,
         };
     }
-    
+
     /// Poll for completions and process them
     pub fn poll(self: *Self, timeout_ms: u32) !u32 {
         _ = timeout_ms; // TODO: Implement timeout
-        
+
         var cqes: [32]IoUringCqe = undefined;
         const count = self.ring.getCompletions(&cqes);
-        
+
         for (cqes[0..count]) |cqe| {
             if (self.pending_ops.get(cqe.user_data)) |pending_op| {
                 pending_op.result = cqe.res;
                 pending_op.completed.store(true, .release);
-                
+
                 // Wake up any waiting futures
                 if (pending_op.waker) |waker| {
                     // Wake the future - implementation depends on waker type
@@ -740,7 +752,7 @@ pub const IoUringReactor = struct {
                 }
             }
         }
-        
+
         return count;
     }
 };
@@ -748,10 +760,10 @@ pub const IoUringReactor = struct {
 // Tests (Linux only)
 test "io_uring availability" {
     if (builtin.os.tag != .linux) return;
-    
+
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const config = IoUringConfig{ .entries = 32 };
     var ring = IoUring.init(allocator, config) catch |err| switch (err) {
         IoUringError.NotSupported => return, // Skip test if not supported
@@ -762,10 +774,10 @@ test "io_uring availability" {
 
 test "io_uring reactor creation" {
     if (builtin.os.tag != .linux) return;
-    
+
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const config = IoUringConfig{ .entries = 32 };
     var reactor = IoUringReactor.init(allocator, config) catch |err| switch (err) {
         IoUringError.NotSupported => return, // Skip test if not supported
