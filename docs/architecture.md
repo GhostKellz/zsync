@@ -123,6 +123,34 @@ Synchronization primitives:
 - `Barrier` - Synchronization barrier
 - `WaitGroup` - Go-style wait group
 
+### 7. Task Spawning (`spawn.zig`)
+
+For CPU-bound work that should run on thread pool workers:
+
+```zig
+// Spawn returns immediately, task runs on pool
+const handle = try spawn.spawn(heavyComputation, .{data});
+defer handle.deinit();
+
+// Do other work while task executes...
+
+// Block until complete
+try handle.await();
+```
+
+**When to use spawn vs Io:**
+
+| Use Case | API |
+|----------|-----|
+| File/network I/O | `Io.read()`, `Io.write()` |
+| CPU-bound work (crypto, parsing, compression) | `spawn.spawn()` |
+| Mixed (I/O + computation) | Spawn task that uses `Io` |
+
+**Memory lifecycle:**
+- `spawn()` allocates a TaskHandle (caller owns)
+- Thread pool manages internal WorkItem
+- Task wrapper self-cleans after execution
+
 ## Platform Backends
 
 ### Linux (Full Support)
@@ -136,17 +164,18 @@ Synchronization primitives:
 
 - Thread pool execution model
 - `sendfile` for zero-copy (partial)
-- kqueue planned for future
+- kqueue backend not yet implemented
 
-### Windows (Thread Pool)
+### Windows (Experimental IOCP)
 
-- Thread pool execution model
-- IOCP integration planned for future
+- Thread pool with IOCP completion signaling
+- Native I/O: `ReadFile`/`WriteFile` for files, `recv`/`send` for sockets
+- True overlapped I/O (AcceptEx, ConnectEx) not yet implemented
 
 ### BSD (Thread Pool)
 
 - Thread pool execution model
-- kqueue planned for future
+- kqueue backend not yet implemented
 
 ### WASM (Blocking Only)
 
@@ -161,7 +190,7 @@ zsync is careful about memory:
 1. **Allocator Threading** - All allocations go through user-provided allocator
 2. **Buffer Pooling** - Reusable buffers for I/O operations
 3. **Page Alignment** - Zero-copy buffers are page-aligned
-4. **Deferred cleanup** - `defer future.destroy(allocator)` pattern
+4. **Deferred cleanup** - `defer future.destroy()` pattern
 
 ## Error Handling
 
@@ -182,11 +211,13 @@ pub const IoError = error{
 
 ### Planned
 - [ ] kqueue backend for macOS/BSD
-- [ ] IOCP backend for Windows
+- [ ] True overlapped I/O for Windows (AcceptEx, ConnectEx)
 - [ ] Full std.Io adapter
 
-### In Progress
-- [x] Zig 0.16.0-dev compatibility
+### Completed
+- [x] Zig 0.17.0-dev compatibility
+- [x] Windows IOCP backend (experimental)
+- [x] Cross-platform POSIX I/O in BlockingIo
 - [x] Tokio-style primitives (partial)
 - [x] Structured concurrency (Nursery)
 
@@ -212,14 +243,16 @@ src/
 ├── blocking_io.zig    # Synchronous I/O backend
 ├── thread_pool.zig    # Thread pool implementation
 ├── greenthreads_io.zig# Green threads (Linux)
+├── spawn.zig          # CPU-bound task spawning
 ├── timer.zig          # Timer wheel
 ├── channel.zig        # Channel primitives
 ├── sync.zig           # Synchronization primitives
 ├── scheduler.zig      # Task scheduler
 ├── nursery.zig        # Structured concurrency
 ├── buffer_pool.zig    # Buffer management
+├── select.zig         # Future combinators (race, all, timeout)
 ├── compat/
-│   └── thread.zig     # Zig 0.16 compatibility
+│   └── thread.zig     # Compatibility shims for Zig dev toolchains
 ├── net/
 │   ├── websocket.zig  # WebSocket RFC 6455
 │   ├── pool.zig       # Connection pooling

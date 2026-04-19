@@ -1,4 +1,16 @@
 //! zsync- Enhanced Task Management with Cancellation
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module has context/thread lifecycle issues:
+//! - ExecutionContext is heap-allocated and never destroyed (line 146)
+//! - WaitContext helper contexts are never destroyed (line 230-235)
+//! - Spawns detached threads plus busy-wait watchers for each task
+//! - No proper cleanup of threads on task completion
+//!
+//! Memory leaks will occur with heavy task usage.
+//! Do NOT use in production until lifecycle management is fixed.
+//!
 //! Provides timeout support, task batching, and graceful cancellation
 
 const std = @import("std");
@@ -133,7 +145,7 @@ pub const Task = struct {
             }
             
             fn timeoutWorker(task_ref: *Task, timeout_ms: u64) void {
-                std.time.sleep(timeout_ms * std.time.ns_per_ms);
+                compat.sleepNanos(timeout_ms * std.time.ns_per_ms);
                 
                 const current_state = task_ref.state.load(.acquire);
                 if (current_state == .running) {
@@ -246,7 +258,7 @@ const WaitContext = struct {
     }
     
     fn timeoutWatcher(self: *Self) void {
-        std.time.sleep(self.timeout_ms * std.time.ns_per_ms);
+        compat.sleepNanos(self.timeout_ms * std.time.ns_per_ms);
         
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -309,7 +321,7 @@ const WaitContext = struct {
                     break;
                 },
                 else => {
-                    std.time.sleep(1 * std.time.ns_per_ms); // Small delay
+                    compat.sleepNanos(1 * std.time.ns_per_ms); // Small delay
                 },
             }
         }
@@ -403,7 +415,7 @@ test "Task spawning and cancellation" {
     
     const TestFunction = struct {
         fn longRunningTask(duration_ms: u64) !void {
-            std.time.sleep(duration_ms * std.time.ns_per_ms);
+            compat.sleepNanos(duration_ms * std.time.ns_per_ms);
         }
     };
     
@@ -426,7 +438,7 @@ test "TaskBatch operations" {
     const TestFunction = struct {
         fn quickTask(value: u32) !void {
             _ = value;
-            std.time.sleep(10 * std.time.ns_per_ms);
+            compat.sleepNanos(10 * std.time.ns_per_ms);
         }
     };
     

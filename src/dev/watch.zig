@@ -1,8 +1,9 @@
-//! Zsync v0.6.0 - File Watcher
+//! zsync File Watcher
 //! Cross-platform file watching with debouncing
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("../compat/thread.zig");
 
 /// File watcher event types
 pub const WatchEvent = enum {
@@ -80,7 +81,7 @@ pub const FileWatcher = struct {
         // TODO: Implement with inotify
         // For now, just poll
         while (self.running.load(.acquire)) {
-            std.posix.nanosleep(0, self.debounce_ms * std.time.ns_per_ms);
+            compat.sleepNanos(self.debounce_ms * std.time.ns_per_ms);
             // Poll for changes
         }
     }
@@ -92,7 +93,7 @@ pub const FileWatcher = struct {
         // TODO: Implement with FSEvents
         // For now, just poll
         while (self.running.load(.acquire)) {
-            std.posix.nanosleep(0, self.debounce_ms * std.time.ns_per_ms);
+            compat.sleepNanos(self.debounce_ms * std.time.ns_per_ms);
         }
     }
 
@@ -103,7 +104,7 @@ pub const FileWatcher = struct {
         // TODO: Implement with ReadDirectoryChangesW
         // For now, just poll
         while (self.running.load(.acquire)) {
-            std.posix.nanosleep(0, self.debounce_ms * std.time.ns_per_ms);
+            compat.sleepNanos(self.debounce_ms * std.time.ns_per_ms);
         }
     }
 };
@@ -170,7 +171,7 @@ pub const PollingWatcher = struct {
                 }
             }
 
-            std.posix.nanosleep(0, self.poll_interval_ms * std.time.ns_per_ms);
+            compat.sleepNanos(self.poll_interval_ms * std.time.ns_per_ms);
         }
     }
 

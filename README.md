@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Zig-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="Zig">
+  <img src="https://img.shields.io/badge/Zig-0.17.0--dev-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="Zig 0.17.0-dev">
   <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
   <img src="https://img.shields.io/badge/io__uring-0A66C2?style=for-the-badge&logo=linux&logoColor=white" alt="io_uring">
   <img src="https://img.shields.io/badge/Green_Threads-2E8B57?style=for-the-badge&logo=threads&logoColor=white" alt="Green Threads">
@@ -21,16 +21,21 @@
 
 ## Overview
 
-Zsync is an async runtime for Zig providing efficient async I/O operations with multiple execution models and platform-specific optimizations.
+Zsync is an async runtime for Zig with blocking, thread-pool, and Linux-focused high-concurrency execution models.
 
 ### Key Features
 
-- **Multiple Execution Models**: Blocking, thread pool, green threads, and auto-detection
+- **Multiple Execution Models**: Blocking, thread pool, and auto-detection
 - **Zero-Cost Abstractions**: Pay only for what you use
 - **Platform Optimizations**: io_uring support on Linux with automatic capability detection
-- **Advanced I/O**: Vectorized operations, zero-copy transfers, and efficient buffer management
-- **Future Combinators**: `race()`, `all()`, `timeout()` for complex async patterns
+- **Advanced I/O**: Vectorized operations, backend capability detection, and efficient buffer management
 - **Cancellation Support**: Cooperative cancellation with proper cleanup
+
+### Supported vs Experimental
+
+**Supported (v0.8.0):** `Runtime`, `Io`, `Future`, `BlockingIo`, `ThreadPoolIo`, channels, timers, nursery.
+
+**Experimental:** Future combinators (`race`, `all`, `timeout`), green threads, stackless I/O, network integration, and other warning-labeled prototype modules. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ```zig
 const zsync = @import("zsync");
@@ -41,9 +46,11 @@ pub fn main() !void {
     _ = try zsync.spawn(handleClient, .{client2});
 
     // Use channels for communication
-    const ch = try zsync.bounded([]const u8, allocator, 100);
-    try ch.sender.send("Hello from Zsync!");
-    const msg = try ch.receiver.recv();
+    var ch = try zsync.channels.bounded([]const u8, allocator, 100);
+    defer ch.deinit();
+    try ch.send("Hello from Zsync!");
+    const msg = try ch.recv();
+    _ = msg;
 
     // Sleep without blocking
     zsync.sleep(1000); // 1 second
@@ -91,13 +98,13 @@ fn fileProcessor(io: zsync.Io) !void {
     };
 
     var read_future = try io.readv(&buffers);
-    defer read_future.destroy(io.getAllocator());
+    defer read_future.destroy();
     try read_future.await();
 
     // Zero-copy operations (Linux)
     if (io.supportsZeroCopy()) {
         var copy_future = try io.copyFileRange(src_fd, dst_fd, size);
-        defer copy_future.destroy(io.getAllocator());
+        defer copy_future.destroy();
         try copy_future.await();
     }
 }
@@ -116,7 +123,7 @@ Direct system calls with minimal overhead. Best for simple applications.
 True parallelism with work-stealing threads. Ideal for CPU-bound tasks.
 
 ### Green Thread Mode (Linux)
-Cooperative multitasking with io_uring support. For high-concurrency I/O workloads.
+Present in the repository, but not part of the supported `v0.8.0` release surface.
 
 ### Auto Mode
 Selects the best execution model based on platform capabilities.
@@ -126,9 +133,11 @@ Selects the best execution model based on platform capabilities.
 ### Channel Communication
 
 ```zig
-const ch = try zsync.bounded(i32, allocator, 10);
-try ch.sender.send(42);
-const value = try ch.receiver.recv();
+var ch = try zsync.channels.bounded(i32, allocator, 10);
+defer ch.deinit();
+try ch.send(42);
+const value = try ch.recv();
+_ = value;
 ```
 
 ### Timer Operations
@@ -140,22 +149,13 @@ zsync.yieldNow();  // Cooperative yield
 
 ### Future Combinators
 
-```zig
-// Race multiple futures
-const result = try zsync.race(&[_]*Future{ future1, future2 });
-
-// Wait for all futures
-try zsync.all(&[_]*Future{ future1, future2, future3 });
-
-// Timeout operations
-const result = try zsync.timeout(future, 5000); // 5 second timeout
-```
+Future combinators are currently experimental for `v0.8.0`. Prefer the supported core runtime surface for stable downstream code.
 
 ## Platform Support
 
 - **Linux**: Full support with io_uring optimizations
 - **macOS**: Thread pool execution
-- **Windows**: Thread pool execution
+- **Windows**: Experimental IOCP with native I/O (ReadFile/WriteFile, recv/send)
 - **FreeBSD/OpenBSD**: Thread pool execution
 
 ## Testing
@@ -176,13 +176,17 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Documentation
 
-- [Getting Started](docs/GETTING_STARTED.md)
-- [API Reference](docs/API_REFERENCE.md)
-- [Examples](docs/EXAMPLES.md)
+- [Docs Index](docs/readme.md)
+- [Getting Started](docs/getting-started.md)
+- [API Reference](docs/api-reference.md)
+- [Examples](docs/examples.md)
 - [Architecture](docs/architecture.md)
-- [Performance](docs/PERFORMANCE.md)
+- [Experimental Features](docs/experimental-features.md)
+- [Future Roadmap](docs/future-roadmap.md)
+- [Performance](docs/performance.md)
+- [Integration](docs/integration.md)
+- [WASM Features](docs/wasm/wasm-features.md)
 
 ## Links
 
-- [Repository](https://github.com/ghostkellz/zsync)
 - [Issues](https://github.com/ghostkellz/zsync/issues)

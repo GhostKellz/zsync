@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Plugin System Support
+//! zsync Plugin System Support
 //! Dynamic plugin loading and lifecycle management for GShell
 
 const std = @import("std");
@@ -339,8 +339,8 @@ test "plugin lifecycle" {
 test "plugin manager" {
     const testing = std.testing;
 
-    var config = @import("../runtime.zig").Config.optimal();
-    var runtime = try @import("../runtime.zig").Runtime.init(testing.allocator, &config);
+    const config = @import("../runtime.zig").Config.optimal();
+    const runtime = try @import("../runtime.zig").Runtime.init(testing.allocator, config);
     defer runtime.deinit();
 
     var manager = PluginManager.init(testing.allocator, runtime);

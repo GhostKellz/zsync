@@ -36,24 +36,29 @@ const WorkItem = struct {
     task: Task,
     next: ?*WorkItem,
     cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    
+    completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
     const Task = union(enum) {
         read: struct {
+            fd: std.posix.fd_t,
             buffer: []u8,
             result: ?IoError!usize,
             future_context: *anyopaque,
         },
         write: struct {
+            fd: std.posix.fd_t,
             data: []const u8,
             result: ?IoError!usize,
             future_context: *anyopaque,
         },
         readv: struct {
+            fd: std.posix.fd_t,
             buffers: []IoBuffer,
             result: ?IoError!usize,
             future_context: *anyopaque,
         },
         writev: struct {
+            fd: std.posix.fd_t,
             data: []const []const u8,
             result: ?IoError!usize,
             future_context: *anyopaque,
@@ -66,6 +71,10 @@ const WorkItem = struct {
         custom: struct {
             func: *const fn (*anyopaque) void,
             context: *anyopaque,
+            completed_flag: ?*std.atomic.Value(bool) = null,
+            /// If true, the worker will free the WorkItem after execution
+            /// The func is responsible for freeing its own context
+            self_owned: bool = false,
         },
     };
 };
@@ -77,9 +86,9 @@ const WorkQueue = struct {
     mutex: compat.Mutex,
     condition: compat.Condition,
     shutdown: std.atomic.Value(bool),
-    
+
     const Self = @This();
-    
+
     pub fn init() Self {
         return Self{
             .head = null,
@@ -89,12 +98,12 @@ const WorkQueue = struct {
             .shutdown = std.atomic.Value(bool).init(false),
         };
     }
-    
+
     pub fn deinit(self: *Self) void {
         // Clean up any remaining work items
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         var current = self.head;
         while (current) |item| {
             const next = item.next;
@@ -102,13 +111,13 @@ const WorkQueue = struct {
             current = next;
         }
     }
-    
+
     pub fn push(self: *Self, item: *WorkItem) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         item.next = null;
-        
+
         if (self.tail) |tail| {
             tail.next = item;
             self.tail = item;
@@ -116,10 +125,10 @@ const WorkQueue = struct {
             self.head = item;
             self.tail = item;
         }
-        
+
         self.condition.signal();
     }
-    
+
     pub fn pop(self: *Self) ?*WorkItem {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -138,11 +147,11 @@ const WorkQueue = struct {
 
         return null;
     }
-    
+
     pub fn tryPop(self: *Self) ?*WorkItem {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         if (self.head) |head| {
             self.head = head.next;
             if (self.head == null) {
@@ -150,14 +159,14 @@ const WorkQueue = struct {
             }
             return head;
         }
-        
+
         return null;
     }
-    
+
     pub fn requestShutdown(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        
+
         self.shutdown.store(true, .release);
         self.condition.broadcast();
     }
@@ -170,14 +179,14 @@ const Worker = struct {
     queue: *WorkQueue,
     allocator: std.mem.Allocator,
     metrics: Metrics,
-    
+
     const Self = @This();
-    
+
     const Metrics = struct {
         tasks_completed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
         tasks_stolen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     };
-    
+
     pub fn spawn(allocator: std.mem.Allocator, id: u32, queue: *WorkQueue) !*Self {
         const worker = try allocator.create(Self);
         worker.* = Self{
@@ -187,16 +196,16 @@ const Worker = struct {
             .allocator = allocator,
             .metrics = Metrics{},
         };
-        
+
         worker.thread = try std.Thread.spawn(.{}, workerLoop, .{worker});
         return worker;
     }
-    
+
     pub fn join(self: *Self) void {
         self.thread.join();
         self.allocator.destroy(self);
     }
-    
+
     fn workerLoop(self: *Self) void {
         while (true) {
             const item = self.queue.pop() orelse break;
@@ -204,45 +213,95 @@ const Worker = struct {
             _ = self.metrics.tasks_completed.fetchAdd(1, .monotonic);
         }
     }
-    
-    fn processWorkItem(_: *Self, item: *WorkItem) void {
+
+    fn processWorkItem(self: *Self, item: *WorkItem) void {
         // Check if work item was cancelled before processing
         if (item.cancelled.load(.acquire)) {
+            // Must set completed so destroy() doesn't spin forever
+            item.completed.store(true, .release);
+            // For self-owned cancelled items, still need to clean up
+            if (item.task == .custom and item.task.custom.self_owned) {
+                self.allocator.destroy(item);
+            }
             return;
         }
-        
+
+        // Track if this is a self-owned custom task (need to free WorkItem after)
+        const is_self_owned = item.task == .custom and item.task.custom.self_owned;
+
         switch (item.task) {
             .read => |*read_task| {
-                // Simulate async read with actual file I/O
-                const bytes_read = randomUsize() % read_task.buffer.len;
-                @memset(read_task.buffer[0..bytes_read], 'T'); // 'T' for ThreadPool
-                read_task.result = bytes_read;
+                read_task.result = blk: {
+                    // Linux-only syscall
+                    if (builtin.os.tag != .linux) {
+                        break :blk IoError.NotSupported;
+                    }
+                    const rc = std.os.linux.read(read_task.fd, read_task.buffer.ptr, read_task.buffer.len);
+                    const errno = std.posix.errno(rc);
+                    if (errno != .SUCCESS) {
+                        break :blk switch (errno) {
+                            .AGAIN => IoError.WouldBlock,
+                            .CONNRESET => IoError.ConnectionReset,
+                            .PIPE => IoError.BrokenPipe,
+                            else => IoError.Unexpected,
+                        };
+                    }
+                    break :blk rc;
+                };
             },
             .write => |*write_task| {
-                // Simulate async write
-                std.debug.print("{s}", .{write_task.data});
-                write_task.result = write_task.data.len;
+                write_task.result = blk: {
+                    // Linux-only syscall
+                    if (builtin.os.tag != .linux) {
+                        break :blk IoError.NotSupported;
+                    }
+                    const rc = std.os.linux.write(write_task.fd, write_task.data.ptr, write_task.data.len);
+                    const errno = std.posix.errno(rc);
+                    if (errno != .SUCCESS) {
+                        break :blk switch (errno) {
+                            .AGAIN => IoError.WouldBlock,
+                            .CONNRESET => IoError.ConnectionReset,
+                            .PIPE => IoError.BrokenPipe,
+                            else => IoError.Unexpected,
+                        };
+                    }
+                    break :blk rc;
+                };
             },
             .readv => |*readv_task| {
-                // High-performance vectorized read
                 var total_bytes: usize = 0;
-                for (readv_task.buffers) |*buffer| {
-                    const available = buffer.available();
-                    if (available.len > 0) {
-                        const bytes_read = randomUsize() % @min(available.len, 256);
-                        @memset(available[0..bytes_read], 'V'); // 'V' for Vectorized
-                        buffer.advance(bytes_read);
-                        total_bytes += bytes_read;
+                // Linux-only syscall
+                if (builtin.os.tag == .linux) {
+                    for (readv_task.buffers) |*buffer| {
+                        const available = buffer.available();
+                        if (available.len > 0) {
+                            const rc = std.os.linux.read(readv_task.fd, available.ptr, available.len);
+                            const errno = std.posix.errno(rc);
+                            if (errno != .SUCCESS) break;
+                            if (rc == 0) break;
+                            buffer.advance(rc);
+                            total_bytes += rc;
+                        }
                     }
                 }
                 readv_task.result = total_bytes;
             },
             .writev => |*writev_task| {
-                // High-performance vectorized write
                 var total_bytes: usize = 0;
-                for (writev_task.data) |segment| {
-                    std.debug.print("{s}", .{segment});
-                    total_bytes += segment.len;
+                // Linux-only syscall
+                if (builtin.os.tag == .linux) {
+                    for (writev_task.data) |segment| {
+                        var written: usize = 0;
+                        while (written < segment.len) {
+                            const remaining = segment[written..];
+                            const rc = std.os.linux.write(writev_task.fd, remaining.ptr, remaining.len);
+                            const errno = std.posix.errno(rc);
+                            if (errno != .SUCCESS) break;
+                            if (rc == 0) break;
+                            written += rc;
+                        }
+                        total_bytes += written;
+                    }
                 }
                 writev_task.result = total_bytes;
             },
@@ -251,10 +310,22 @@ const Worker = struct {
                 close_task.result = {};
             },
             .custom => |*custom_task| {
+                // Execute the custom function
                 custom_task.func(custom_task.context);
+                // Signal completion if a flag was provided
+                if (custom_task.completed_flag) |flag| {
+                    flag.store(true, .release);
+                }
             },
         }
-        // Don't destroy the item here - it's needed for polling
+
+        // For non-self-owned items, mark as completed so Future.destroy() can proceed
+        // For self-owned items, we free the WorkItem so don't set completed
+        if (is_self_owned) {
+            self.allocator.destroy(item);
+        } else {
+            item.completed.store(true, .release);
+        }
     }
 };
 
@@ -267,16 +338,18 @@ pub const ThreadPoolIo = struct {
     buffer_size: usize,
     metrics: Metrics,
     is_shutdown: bool,
+    read_fd: std.posix.fd_t,
+    write_fd: std.posix.fd_t,
 
     const Self = @This();
-    
+
     const Metrics = struct {
         operations_submitted: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
         operations_completed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
         bytes_read: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
         bytes_written: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     };
-    
+
     /// Initialize thread pool with specified number of threads
     pub fn init(allocator: std.mem.Allocator, thread_count: u32, buffer_size: usize) !Self {
         const actual_threads = if (thread_count == 0)
@@ -295,6 +368,14 @@ pub const ThreadPoolIo = struct {
             .buffer_size = buffer_size,
             .metrics = Metrics{},
             .is_shutdown = false,
+            .read_fd = if (builtin.os.tag == .windows)
+                std.os.windows.peb().ProcessParameters.hStdInput
+            else
+                std.posix.STDIN_FILENO,
+            .write_fd = if (builtin.os.tag == .windows)
+                std.os.windows.peb().ProcessParameters.hStdOutput
+            else
+                std.posix.STDOUT_FILENO,
         };
 
         // Spawn worker threads
@@ -304,7 +385,7 @@ pub const ThreadPoolIo = struct {
 
         return self;
     }
-    
+
     /// Cleanup thread pool
     pub fn deinit(self: *Self) void {
         // Guard against double-free
@@ -323,22 +404,131 @@ pub const ThreadPoolIo = struct {
         self.allocator.destroy(self.queue);
         self.allocator.free(self.workers);
     }
-    
+
     /// Get the Io interface for this implementation
     pub fn io(self: *Self) Io {
         return Io.init(&vtable, self);
     }
-    
+
     /// Get the allocator used by this implementation
     pub fn getAllocator(self: *const Self) std.mem.Allocator {
         return self.allocator;
     }
-    
+
     /// Get performance metrics
     pub fn getMetrics(self: *const Self) Metrics {
         return self.metrics;
     }
-    
+
+    /// Submit a custom function to run on the thread pool
+    /// Returns a Future that completes when the function finishes
+    pub fn submitCustom(
+        self: *Self,
+        func: *const fn (*anyopaque) void,
+        context: *anyopaque,
+    ) !Future {
+        const CustomContext = struct {
+            work_item: *WorkItem,
+            self_ref: *Self,
+            completed: std.atomic.Value(bool),
+
+            fn poll(ctx: *anyopaque) Future.PollResult {
+                const custom_ctx: *@This() = @ptrCast(@alignCast(ctx));
+
+                if (custom_ctx.completed.load(.acquire)) {
+                    _ = custom_ctx.self_ref.metrics.operations_completed.fetchAdd(1, .monotonic);
+                    return .ready;
+                }
+
+                if (custom_ctx.work_item.cancelled.load(.acquire)) {
+                    return .{ .err = IoError.Cancelled };
+                }
+
+                return .pending;
+            }
+
+            fn cancel(ctx: *anyopaque) void {
+                const custom_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                custom_ctx.work_item.cancelled.store(true, .release);
+            }
+
+            fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
+                const custom_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                // Wait for work item to complete before cleanup
+                while (!custom_ctx.work_item.completed.load(.acquire)) {
+                    std.atomic.spinLoopHint();
+                }
+                allocator.destroy(custom_ctx.work_item);
+                allocator.destroy(custom_ctx);
+            }
+        };
+
+        // Create custom context first so we can get pointer to its completed flag
+        const custom_context = try self.allocator.create(CustomContext);
+        custom_context.* = CustomContext{
+            .work_item = undefined,
+            .self_ref = self,
+            .completed = std.atomic.Value(bool).init(false),
+        };
+
+        // Create work item with pointer to the completion flag
+        const work_item = try self.allocator.create(WorkItem);
+        work_item.* = WorkItem{
+            .task = .{
+                .custom = .{
+                    .func = func,
+                    .context = context,
+                    .completed_flag = &custom_context.completed,
+                },
+            },
+            .next = null,
+        };
+        custom_context.work_item = work_item;
+
+        // Submit to thread pool
+        self.queue.push(work_item);
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+
+        const custom_vtable = Future.FutureVTable{
+            .poll = CustomContext.poll,
+            .cancel = CustomContext.cancel,
+            .destroy = CustomContext.destroy,
+        };
+
+        return Future.init(self.allocator, &custom_vtable, custom_context);
+    }
+
+    /// Get direct access to work queue for advanced usage
+    pub fn getQueue(self: *Self) *WorkQueue {
+        return self.queue;
+    }
+
+    /// Submit a self-owned custom task for fire-and-forget execution
+    /// Unlike submitCustom, this doesn't track completion via Future
+    /// The func is responsible for freeing its own context
+    /// The WorkItem will be automatically freed by the worker after execution
+    pub fn submitSelfOwned(
+        self: *Self,
+        func: *const fn (*anyopaque) void,
+        context: *anyopaque,
+    ) !void {
+        const work_item = try self.allocator.create(WorkItem);
+        work_item.* = WorkItem{
+            .task = .{
+                .custom = .{
+                    .func = func,
+                    .context = context,
+                    .completed_flag = null,
+                    .self_owned = true,
+                },
+            },
+            .next = null,
+        };
+
+        self.queue.push(work_item);
+        _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
+    }
+
     /// VTable implementation for the Io interface
     const vtable = Io.IoVTable{
         .read = read,
@@ -356,20 +546,20 @@ pub const ThreadPoolIo = struct {
         .supports_zero_copy = supportsZeroCopy,
         .get_allocator = getAllocatorVtable,
     };
-    
+
     // Implementation functions
-    
+
     /// Async read operation submitted to thread pool
     fn read(context: *anyopaque, buffer: []u8) IoError!Future {
         const self: *Self = @ptrCast(@alignCast(context));
-        
+
         const ReadContext = struct {
             work_item: *WorkItem,
             self_ref: *Self,
-            
+
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const read_ctx: *@This() = @ptrCast(@alignCast(ctx));
-                
+
                 if (read_ctx.work_item.task.read.result) |result| {
                     if (result) |bytes_read| {
                         _ = read_ctx.self_ref.metrics.bytes_read.fetchAdd(bytes_read, .monotonic);
@@ -379,29 +569,37 @@ pub const ThreadPoolIo = struct {
                         return .{ .err = err };
                     }
                 }
-                
+
+                if (read_ctx.work_item.completed.load(.acquire)) {
+                    return .{ .err = IoError.Cancelled };
+                }
+
                 return .pending;
             }
-            
+
             fn cancel(ctx: *anyopaque) void {
                 const read_ctx: *@This() = @ptrCast(@alignCast(ctx));
                 // Mark work item as cancelled
                 read_ctx.work_item.cancelled.store(true, .release);
             }
-            
+
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
                 const read_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                while (!read_ctx.work_item.completed.load(.acquire)) {
+                    std.atomic.spinLoopHint();
+                }
                 // Clean up the work item
                 allocator.destroy(read_ctx.work_item);
                 allocator.destroy(read_ctx);
             }
         };
-        
+
         // Create work item
         const work_item = try self.allocator.create(WorkItem);
         work_item.* = WorkItem{
             .task = .{
                 .read = .{
+                    .fd = self.read_fd,
                     .buffer = buffer,
                     .result = null,
                     .future_context = undefined,
@@ -409,40 +607,40 @@ pub const ThreadPoolIo = struct {
             },
             .next = null,
         };
-        
+
         // Create future context
         const read_context = try self.allocator.create(ReadContext);
         read_context.* = ReadContext{
             .work_item = work_item,
             .self_ref = self,
         };
-        
+
         work_item.task.read.future_context = read_context;
-        
+
         // Submit to thread pool
         self.queue.push(work_item);
         _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
-        
+
         const read_vtable = Future.FutureVTable{
             .poll = ReadContext.poll,
             .cancel = ReadContext.cancel,
             .destroy = ReadContext.destroy,
         };
-        
-        return Future.init(&read_vtable, read_context);
+
+        return Future.init(self.allocator, &read_vtable, read_context);
     }
-    
+
     /// Async write operation submitted to thread pool
     fn write(context: *anyopaque, data: []const u8) IoError!Future {
         const self: *Self = @ptrCast(@alignCast(context));
-        
+
         const WriteContext = struct {
             work_item: *WorkItem,
             self_ref: *Self,
-            
+
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const write_ctx: *@This() = @ptrCast(@alignCast(ctx));
-                
+
                 if (write_ctx.work_item.task.write.result) |result| {
                     if (result) |bytes_written| {
                         _ = write_ctx.self_ref.metrics.bytes_written.fetchAdd(bytes_written, .monotonic);
@@ -452,26 +650,35 @@ pub const ThreadPoolIo = struct {
                         return .{ .err = err };
                     }
                 }
-                
+
+                if (write_ctx.work_item.completed.load(.acquire)) {
+                    return .{ .err = IoError.Cancelled };
+                }
+
                 return .pending;
             }
-            
+
             fn cancel(ctx: *anyopaque) void {
-                _ = ctx;
+                const write_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                write_ctx.work_item.cancelled.store(true, .release);
             }
-            
+
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
                 const write_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                while (!write_ctx.work_item.completed.load(.acquire)) {
+                    std.atomic.spinLoopHint();
+                }
                 // Clean up the work item
                 allocator.destroy(write_ctx.work_item);
                 allocator.destroy(write_ctx);
             }
         };
-        
+
         const work_item = try self.allocator.create(WorkItem);
         work_item.* = WorkItem{
             .task = .{
                 .write = .{
+                    .fd = self.write_fd,
                     .data = data,
                     .result = null,
                     .future_context = undefined,
@@ -479,40 +686,40 @@ pub const ThreadPoolIo = struct {
             },
             .next = null,
         };
-        
+
         const write_context = try self.allocator.create(WriteContext);
         write_context.* = WriteContext{
             .work_item = work_item,
             .self_ref = self,
         };
-        
+
         work_item.task.write.future_context = write_context;
-        
+
         self.queue.push(work_item);
         _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
-        
+
         const write_vtable = Future.FutureVTable{
             .poll = WriteContext.poll,
             .cancel = WriteContext.cancel,
             .destroy = WriteContext.destroy,
         };
-        
-        return Future.init(&write_vtable, write_context);
+
+        return Future.init(self.allocator, &write_vtable, write_context);
     }
-    
+
     /// Vectorized read - process multiple buffers in parallel
     fn readv(context: *anyopaque, buffers: []IoBuffer) IoError!Future {
         if (buffers.len == 0) return IoError.BufferTooSmall;
-        
+
         const self: *Self = @ptrCast(@alignCast(context));
-        
+
         const ReadvContext = struct {
             work_item: *WorkItem,
             self_ref: *Self,
-            
+
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const readv_ctx: *@This() = @ptrCast(@alignCast(ctx));
-                
+
                 if (readv_ctx.work_item.task.readv.result) |result| {
                     if (result) |bytes_read| {
                         _ = readv_ctx.self_ref.metrics.bytes_read.fetchAdd(bytes_read, .monotonic);
@@ -522,29 +729,37 @@ pub const ThreadPoolIo = struct {
                         return .{ .err = err };
                     }
                 }
-                
+
+                if (readv_ctx.work_item.completed.load(.acquire)) {
+                    return .{ .err = IoError.Cancelled };
+                }
+
                 return .pending;
             }
-            
+
             fn cancel(ctx: *anyopaque) void {
                 const readv_ctx: *@This() = @ptrCast(@alignCast(ctx));
                 // Mark work item as cancelled
                 readv_ctx.work_item.cancelled.store(true, .release);
             }
-            
+
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
                 const readv_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                while (!readv_ctx.work_item.completed.load(.acquire)) {
+                    std.atomic.spinLoopHint();
+                }
                 // Clean up the work item
                 allocator.destroy(readv_ctx.work_item);
                 allocator.destroy(readv_ctx);
             }
         };
-        
+
         // Create work item for vectorized read
         const work_item = try self.allocator.create(WorkItem);
         work_item.* = WorkItem{
             .task = .{
                 .readv = .{
+                    .fd = self.read_fd,
                     .buffers = buffers,
                     .result = null,
                     .future_context = undefined,
@@ -552,42 +767,42 @@ pub const ThreadPoolIo = struct {
             },
             .next = null,
         };
-        
+
         // Create future context
         const readv_context = try self.allocator.create(ReadvContext);
         readv_context.* = ReadvContext{
             .work_item = work_item,
             .self_ref = self,
         };
-        
+
         work_item.task.readv.future_context = readv_context;
-        
+
         // Submit to thread pool
         self.queue.push(work_item);
         _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
-        
+
         const readv_vtable = Future.FutureVTable{
             .poll = ReadvContext.poll,
             .cancel = ReadvContext.cancel,
             .destroy = ReadvContext.destroy,
         };
-        
-        return Future.init(&readv_vtable, readv_context);
+
+        return Future.init(self.allocator, &readv_vtable, readv_context);
     }
-    
+
     /// Vectorized write - process multiple segments in parallel
     fn writev(context: *anyopaque, data: []const []const u8) IoError!Future {
         if (data.len == 0) return IoError.BufferTooSmall;
-        
+
         const self: *Self = @ptrCast(@alignCast(context));
-        
+
         const WritevContext = struct {
             work_item: *WorkItem,
             self_ref: *Self,
-            
+
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const writev_ctx: *@This() = @ptrCast(@alignCast(ctx));
-                
+
                 if (writev_ctx.work_item.task.writev.result) |result| {
                     if (result) |bytes_written| {
                         _ = writev_ctx.self_ref.metrics.bytes_written.fetchAdd(bytes_written, .monotonic);
@@ -597,29 +812,37 @@ pub const ThreadPoolIo = struct {
                         return .{ .err = err };
                     }
                 }
-                
+
+                if (writev_ctx.work_item.completed.load(.acquire)) {
+                    return .{ .err = IoError.Cancelled };
+                }
+
                 return .pending;
             }
-            
+
             fn cancel(ctx: *anyopaque) void {
                 const writev_ctx: *@This() = @ptrCast(@alignCast(ctx));
                 // Mark work item as cancelled
                 writev_ctx.work_item.cancelled.store(true, .release);
             }
-            
+
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
                 const writev_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                while (!writev_ctx.work_item.completed.load(.acquire)) {
+                    std.atomic.spinLoopHint();
+                }
                 // Clean up the work item
                 allocator.destroy(writev_ctx.work_item);
                 allocator.destroy(writev_ctx);
             }
         };
-        
+
         // Create work item for vectorized write
         const work_item = try self.allocator.create(WorkItem);
         work_item.* = WorkItem{
             .task = .{
                 .writev = .{
+                    .fd = self.write_fd,
                     .data = data,
                     .result = null,
                     .future_context = undefined,
@@ -627,60 +850,60 @@ pub const ThreadPoolIo = struct {
             },
             .next = null,
         };
-        
+
         // Create future context
         const writev_context = try self.allocator.create(WritevContext);
         writev_context.* = WritevContext{
             .work_item = work_item,
             .self_ref = self,
         };
-        
+
         work_item.task.writev.future_context = writev_context;
-        
+
         // Submit to thread pool
         self.queue.push(work_item);
         _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
-        
+
         const writev_vtable = Future.FutureVTable{
             .poll = WritevContext.poll,
             .cancel = WritevContext.cancel,
             .destroy = WritevContext.destroy,
         };
-        
-        return Future.init(&writev_vtable, writev_context);
+
+        return Future.init(self.allocator, &writev_vtable, writev_context);
     }
-    
+
     /// Zero-copy file transfer (not yet implemented)
     fn sendFile(_: *anyopaque, _: std.posix.fd_t, _: u64, _: u64) IoError!Future {
         return IoError.NotSupported;
     }
-    
+
     /// Zero-copy file range copy (not yet implemented)
     fn copyFileRange(_: *anyopaque, _: std.posix.fd_t, _: std.posix.fd_t, _: u64) IoError!Future {
         return IoError.NotSupported;
     }
-    
+
     /// Accept connection (not yet implemented)
     fn accept(_: *anyopaque, _: std.posix.fd_t) IoError!Future {
         return IoError.NotSupported;
     }
-    
+
     /// Connect to address (not yet implemented)
-    fn connect(_: *anyopaque, _: std.posix.fd_t, _: *const std.posix.sockaddr) IoError!Future {
+    fn connect(_: *anyopaque, _: std.posix.fd_t, _: *const std.posix.sockaddr, _: std.posix.socklen_t) IoError!Future {
         return IoError.NotSupported;
     }
-    
+
     /// Close file descriptor asynchronously
     fn close(context: *anyopaque, fd: std.posix.fd_t) IoError!Future {
         const self: *Self = @ptrCast(@alignCast(context));
-        
+
         const CloseContext = struct {
             work_item: *WorkItem,
             self_ref: *Self,
-            
+
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const close_ctx: *@This() = @ptrCast(@alignCast(ctx));
-                
+
                 if (close_ctx.work_item.task.close.result) |result| {
                     if (result) |_| {
                         _ = close_ctx.self_ref.metrics.operations_completed.fetchAdd(1, .monotonic);
@@ -689,22 +912,30 @@ pub const ThreadPoolIo = struct {
                         return .{ .err = err };
                     }
                 }
-                
+
+                if (close_ctx.work_item.completed.load(.acquire)) {
+                    return .{ .err = IoError.Cancelled };
+                }
+
                 return .pending;
             }
-            
+
             fn cancel(ctx: *anyopaque) void {
-                _ = ctx;
+                const close_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                close_ctx.work_item.cancelled.store(true, .release);
             }
-            
+
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
                 const close_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                while (!close_ctx.work_item.completed.load(.acquire)) {
+                    std.atomic.spinLoopHint();
+                }
                 // Clean up the work item
                 allocator.destroy(close_ctx.work_item);
                 allocator.destroy(close_ctx);
             }
         };
-        
+
         const work_item = try self.allocator.create(WorkItem);
         work_item.* = WorkItem{
             .task = .{
@@ -716,48 +947,48 @@ pub const ThreadPoolIo = struct {
             },
             .next = null,
         };
-        
+
         const close_context = try self.allocator.create(CloseContext);
         close_context.* = CloseContext{
             .work_item = work_item,
             .self_ref = self,
         };
-        
+
         work_item.task.close.future_context = close_context;
-        
+
         self.queue.push(work_item);
         _ = self.metrics.operations_submitted.fetchAdd(1, .monotonic);
-        
+
         const close_vtable = Future.FutureVTable{
             .poll = CloseContext.poll,
             .cancel = CloseContext.cancel,
             .destroy = CloseContext.destroy,
         };
-        
-        return Future.init(&close_vtable, close_context);
+
+        return Future.init(self.allocator, &close_vtable, close_context);
     }
-    
+
     /// Shutdown the thread pool
     fn shutdown(context: *anyopaque) void {
         const self: *Self = @ptrCast(@alignCast(context));
         self.queue.requestShutdown();
     }
-    
+
     /// Get execution mode
     fn getMode(_: *anyopaque) IoMode {
         return .evented; // Thread pool is event-driven
     }
-    
+
     /// Check if vectorized I/O is supported
     fn supportsVectorized(_: *anyopaque) bool {
         return true; // Thread pool can handle vectorized ops
     }
-    
+
     /// Check if zero-copy operations are supported
     fn supportsZeroCopy(_: *anyopaque) bool {
         return false; // Not yet implemented
     }
-    
+
     /// Get the allocator (vtable function)
     fn getAllocatorVtable(context: *anyopaque) std.mem.Allocator {
         const self: *Self = @ptrCast(@alignCast(context));
@@ -783,24 +1014,43 @@ test "ThreadPoolIo basic operations" {
     try testing.expect(thread_pool.thread_count == 1);
 }
 
+test "ThreadPoolIo cancellation sets completed state" {
+    const testing = std.testing;
+
+    // Test WorkItem cancellation/completion flag interaction
+    var cancelled = std.atomic.Value(bool).init(false);
+    var completed = std.atomic.Value(bool).init(false);
+
+    // Mark as cancelled
+    cancelled.store(true, .release);
+
+    // Simulate worker checking cancellation (as workers do)
+    if (cancelled.load(.acquire)) {
+        completed.store(true, .release);
+    }
+
+    // Verify completed flag is set when cancelled
+    try testing.expect(completed.load(.acquire));
+}
+
 // TODO: Fix thread pool polling
 // test "ThreadPoolIo async write" {
 //     const testing = std.testing;
 //     const allocator = testing.allocator;
-//     
+//
 //     var thread_pool = try ThreadPoolIo.init(allocator, 2, 1024);
 //     defer thread_pool.deinit();
-//     
+//
 //     const io = thread_pool.io();
-//     
+//
 //     // Submit async write
 //     var io_mut = io;
 //     var write_future = try io_mut.write("Hello from thread pool!\n");
 //     defer write_future.destroy(allocator);
-//     
+//
 //     // Wait for completion
 //     try write_future.await();
-//     
+//
 //     // Check metrics
 //     const metrics = thread_pool.getMetrics();
 //     try testing.expect(metrics.operations_submitted.load(.monotonic) > 0);

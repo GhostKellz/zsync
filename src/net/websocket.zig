@@ -555,7 +555,7 @@ pub const WebSocketServer = struct {
         while (self.running.load(.acquire)) {
             const conn = listener.accept() catch |err| switch (err) {
                 error.WouldBlock => {
-                    std.time.sleep(10 * std.time.ns_per_ms);
+                    compat.sleepNanos(10 * std.time.ns_per_ms);
                     continue;
                 },
                 else => return err,

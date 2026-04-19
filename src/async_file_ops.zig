@@ -1,7 +1,20 @@
 //! zsync- Async File I/O Operations
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module has type safety issues:
+//! - AsyncFileResult.await() blindly casts all contexts to ReadContext (line 265)
+//! - writeFileWorker uses `try` in a void-returning worker (line 414)
+//! - read/write/PKGBUILD results share incompatible context shapes
+//! - parsePKGBUILD casts PKGBUILDContext to ReadContext incorrectly (line 524)
+//!
+//! Undefined behavior may occur when using write or PKGBUILD operations.
+//! Do NOT use in production until type safety is fixed.
+//!
 //! Non-blocking file operations for cache warming, PKGBUILD processing, and concurrent file handling
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const future_combinators = @import("future_combinators.zig");
 const task_management = @import("task_management.zig");
 const io_v2 = @import("io_v2.zig");
@@ -265,7 +278,7 @@ pub const AsyncFileResult = struct {
         
         // Wait for completion
         while (!read_context.completed.load(.acquire)) {
-            std.time.sleep(1 * std.time.ns_per_ms);
+            compat.sleepNanos(1 * std.time.ns_per_ms);
         }
         
         if (read_context.error_result) |err| {
@@ -335,7 +348,7 @@ pub const AsyncPKGBUILDResult = struct {
     
     pub fn await(self: Self) !PKGBUILDData {
         while (!self.context.completed.load(.acquire)) {
-            std.time.sleep(1 * std.time.ns_per_ms);
+            compat.sleepNanos(1 * std.time.ns_per_ms);
         }
         
         if (self.context.error_result) |err| {

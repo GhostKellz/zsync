@@ -4,6 +4,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 /// io_uring errors
 pub const IoUringError = error{
@@ -60,10 +61,11 @@ pub const SubmissionEntry = struct {
     }
 
     /// Prepare a timeout operation
-    pub fn prepTimeout(self: *Self, timeout_ns: u64) void {
+    /// Note: `ts` must remain valid until the completion is reaped
+    pub fn prepTimeout(self: *Self, ts: *const linux.kernel_timespec) void {
         self.sqe.* = std.mem.zeroes(linux.io_uring_sqe);
         self.sqe.opcode = linux.IORING_OP.TIMEOUT;
-        self.sqe.addr = @intFromPtr(&timeout_ns);
+        self.sqe.addr = @intFromPtr(ts);
         self.sqe.len = 1;
         self.sqe.user_data = self.user_data;
     }
@@ -247,6 +249,9 @@ pub const IoUring = struct {
     const IORING_SETUP_SQPOLL: u32 = 1 << 1;
     const IORING_SETUP_SQ_AFF: u32 = 1 << 2;
     const IORING_SETUP_CQSIZE: u32 = 1 << 3;
+
+    // io_uring_enter flags
+    pub const IORING_ENTER_GETEVENTS: u32 = 1 << 0;
 
     const IORING_OFF_SQ_RING: u64 = 0;
     const IORING_OFF_CQ_RING: u64 = 0x8000000;
@@ -621,6 +626,26 @@ pub const IoUring = struct {
             .__pad2 = [_]u64{0},
         };
     }
+
+    /// Setup a timeout operation for kernel-backed waiting.
+    /// The timespec pointer must remain valid until the completion is reaped.
+    pub fn prepTimeout(sqe: *IoUringSqe, ts: *const linux.kernel_timespec, user_data: u64) void {
+        sqe.* = IoUringSqe{
+            .opcode = IORING_OP_TIMEOUT,
+            .flags = 0,
+            .ioprio = 0,
+            .fd = -1,
+            .off_addr2 = .{ .off = 1 }, // count=1: complete after 1 timeout or 1 other completion
+            .addr_splice_off_in = .{ .addr = @intFromPtr(ts) },
+            .len = 1,
+            .op_flags = .{ .timeout_flags = 0 },
+            .user_data = user_data,
+            .buf_index_personality = .{ .buf_index = 0 },
+            .file_index = 0,
+            .addr3 = 0,
+            .__pad2 = [_]u64{0},
+        };
+    }
 };
 
 /// Operation types for io_uring
@@ -655,7 +680,7 @@ pub const Future = struct {
 
             // Poll for more completions
             _ = self.reactor.poll(1) catch 0;
-            std.time.sleep(1000000); // 1ms
+            compat.sleepNanos(1000000); // 1ms
         }
     }
 
@@ -733,27 +758,85 @@ pub const IoUringReactor = struct {
         };
     }
 
-    /// Poll for completions and process them
+    // Reserved user_data for internal timeout operations
+    const INTERNAL_TIMEOUT_USER_DATA: u64 = std.math.maxInt(u64);
+
+    /// Poll for completions and process them.
+    ///
+    /// `timeout_ms == 0` performs a non-blocking poll.
+    /// Non-zero timeouts use io_uring's kernel-backed TIMEOUT operation
+    /// for efficient waiting without CPU spinning.
     pub fn poll(self: *Self, timeout_ms: u32) !u32 {
-        _ = timeout_ms; // TODO: Implement timeout
-
         var cqes: [32]IoUringCqe = undefined;
-        const count = self.ring.getCompletions(&cqes);
 
-        for (cqes[0..count]) |cqe| {
+        // First, check for any immediately available completions
+        var count = self.ring.getCompletions(&cqes);
+
+        // If we have completions or non-blocking mode, process and return
+        if (count > 0 or timeout_ms == 0) {
+            return self.processCompletions(cqes[0..count]);
+        }
+
+        // Use kernel-backed timeout for efficient waiting
+        const sqe = self.ring.getSqe() orelse {
+            // Queue full - fall back to a brief sleep and retry
+            compat.sleepNanos(1_000_000); // 1ms fallback
+            count = self.ring.getCompletions(&cqes);
+            return self.processCompletions(cqes[0..count]);
+        };
+
+        // Prepare timeout operation (timespec must be valid until completion)
+        var ts = linux.kernel_timespec{
+            .sec = @intCast(timeout_ms / 1000),
+            .nsec = @intCast(@as(u64, timeout_ms % 1000) * std.time.ns_per_ms),
+        };
+        IoUring.prepTimeout(sqe, &ts, INTERNAL_TIMEOUT_USER_DATA);
+        self.ring.submitSqe(sqe);
+
+        // Submit the timeout and wait for completions using kernel-backed wait
+        _ = self.ring.submit() catch {
+            // Submission failed - fall back to brief sleep
+            compat.sleepNanos(1_000_000);
+            count = self.ring.getCompletions(&cqes);
+            return self.processCompletions(cqes[0..count]);
+        };
+
+        // Block until at least one completion (either timeout or real event)
+        const ret = IoUring.io_uring_enter(self.ring.ring_fd, 0, 1, IoUring.IORING_ENTER_GETEVENTS, null);
+        if (ret < 0) {
+            const errno_val = @as(u32, @intCast(-ret));
+            // EINTR (4) - interrupted, just retry getting completions
+            if (errno_val != 4) {
+                return IoUringError.CompletionFailed;
+            }
+        }
+
+        // Reap completions (including the timeout if it fired)
+        count = self.ring.getCompletions(&cqes);
+        return self.processCompletions(cqes[0..count]);
+    }
+
+    /// Process completion queue entries, filtering internal timeouts
+    fn processCompletions(self: *Self, cqes: []IoUringCqe) u32 {
+        var real_count: u32 = 0;
+
+        for (cqes) |cqe| {
+            // Skip internal timeout completions
+            if (cqe.user_data == INTERNAL_TIMEOUT_USER_DATA) continue;
+
             if (self.pending_ops.get(cqe.user_data)) |pending_op| {
                 pending_op.result = cqe.res;
                 pending_op.completed.store(true, .release);
 
                 // Wake up any waiting futures
                 if (pending_op.waker) |waker| {
-                    // Wake the future - implementation depends on waker type
                     _ = waker;
                 }
+                real_count += 1;
             }
         }
 
-        return count;
+        return real_count;
     }
 };
 

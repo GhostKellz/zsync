@@ -1,4 +1,16 @@
 //! zsync- Advanced Future Combinators
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module is a prototype with unimplemented core functionality:
+//! - AllContext.startFuture() is TODO
+//! - RaceContext.startFuture() is TODO
+//! - TimeoutContext.startFuture() is TODO
+//! - Tests are placeholder-only
+//!
+//! These combinators will block forever or never start work.
+//! Do NOT use in production until startFuture() is implemented.
+//!
 //! Implements Future.all(), Future.race(), timeout, and cancellation primitives
 
 const std = @import("std");
@@ -369,7 +381,7 @@ fn TimeoutContext(comptime T: type) type {
         }
         
         fn timeoutWorker(self: *Self) void {
-            std.time.sleep(self.timeout_ms * std.time.ns_per_ms);
+            compat.sleepNanos(self.timeout_ms * std.time.ns_per_ms);
             
             self.result_mutex.lock();
             defer self.result_mutex.unlock();

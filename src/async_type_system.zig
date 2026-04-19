@@ -482,7 +482,7 @@ pub fn TypedFuture(comptime T: type) type {
                 
                 // Yield to the I/O system
                 _ = io;
-                std.time.sleep(1 * std.time.ns_per_ms);
+                compat.sleepNanos(1 * std.time.ns_per_ms);
             }
             
             return switch (self.state) {
@@ -688,9 +688,9 @@ pub fn ConcurrentFuture(comptime OperationsType: type) type {
         /// Wait for all operations to complete
         pub fn awaitAll(self: *Self, io: anytype) !void {
             _ = io;
-            
+
             while (self.completed_count.load(.acquire) < self.total_count and self.state == .pending) {
-                std.time.sleep(1 * std.time.ns_per_ms);
+                compat.sleepNanos(1 * std.time.ns_per_ms);
             }
             
             if (self.state == .canceled) {
@@ -701,9 +701,9 @@ pub fn ConcurrentFuture(comptime OperationsType: type) type {
         /// Wait for any operation to complete (returns index)
         pub fn awaitAny(self: *Self, io: anytype) !usize {
             _ = io;
-            
+
             while (self.completed_count.load(.acquire) == 0 and self.state == .pending) {
-                std.time.sleep(1 * std.time.ns_per_ms);
+                compat.sleepNanos(1 * std.time.ns_per_ms);
             }
             
             if (self.state == .canceled) {

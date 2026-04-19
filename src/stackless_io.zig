@@ -1,4 +1,16 @@
 //! zsync - StacklessIo Implementation
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module is a mock implementation with known limitations:
+//! - @async builtins are mocked (lines 193-256)
+//! - Coroutine execution just resumes to completion immediately
+//! - write() prints directly instead of async I/O
+//! - Most I/O operations return NotSupported
+//! - asyncConcurrentFn executes sequentially despite concurrent API
+//!
+//! Do NOT use in production until Zig proposal #23446 is implemented.
+//!
 //! Uses stackless coroutines from proposal #23446
 //! Compatible with WASM and other platforms without stack swapping
 
@@ -588,7 +600,7 @@ pub const StacklessIo = struct {
     fn write(context: *anyopaque, data: []const u8) IoError!Future {
         _ = context;
         std.debug.print("{s}", .{data});
-        var future = Future.init(&writeVTable, undefined);
+        var future = Future.init(std.heap.page_allocator, &writeVTable, undefined);
         return future;
     }
     
@@ -626,7 +638,7 @@ pub const StacklessIo = struct {
         return error.NotSupported;
     }
     
-    fn connect(_: *anyopaque, _: std.posix.fd_t, _: std.net.Address) IoError!Future {
+    fn connect(_: *anyopaque, _: std.posix.fd_t, _: *const std.posix.sockaddr, _: std.posix.socklen_t) IoError!Future {
         return error.NotSupported;
     }
     

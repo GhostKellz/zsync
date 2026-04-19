@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - WASM Async Helpers
+//! zsync WASM Async Helpers
 //! Bridge between Zig async/await and JavaScript Promises
 
 const std = @import("std");

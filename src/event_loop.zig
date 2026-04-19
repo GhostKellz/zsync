@@ -2,6 +2,7 @@
 //! This is the heart of the Zsync runtime
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const reactor = @import("reactor.zig");
 const scheduler = @import("scheduler.zig");
 const timer = @import("timer.zig");
@@ -203,7 +204,7 @@ pub const EventLoop = struct {
 
             // Yield if no work was done to prevent busy loop
             if (tasks_processed == 0 and timers_processed == 0 and io_events == 0) {
-                std.time.sleep(10000); // Sleep for 10μs
+                compat.sleepNanos(10000); // Sleep for 10μs
             }
         }
 
@@ -262,7 +263,7 @@ pub const EventLoop = struct {
 
             // Yield if no work was done to prevent busy loop
             if (tasks_processed == 0 and timers_processed == 0 and io_events == 0) {
-                std.time.sleep(1000); // Sleep for 1μs
+                compat.sleepNanos(1000); // Sleep for 1μs
             }
         }
 

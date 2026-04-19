@@ -1,4 +1,15 @@
 //! zsync- Green Threads with io_uring
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module is a prototype implementation with known limitations:
+//! - processCompletions() is a placeholder
+//! - readv/writev ignore buffer contents
+//! - connect() ignores the address argument
+//! - Capability flags report actual implemented features only
+//!
+//! Do NOT use in production until these issues are resolved.
+//!
 //! High-performance cooperative multitasking using io_uring for Linux
 
 const std = @import("std");
@@ -305,8 +316,8 @@ pub const GreenThreadsIo = struct {
                     return Future.PollResult.pending;
                 }
             } else {
-                // Operation not found, assume ready
-                return Future.PollResult.ready;
+                // Operation not found - this is an error, not success
+                return Future.PollResult{ .err = IoError.Cancelled };
             }
         }
 
@@ -326,7 +337,7 @@ pub const GreenThreadsIo = struct {
         };
 
         pub fn toFuture(self: *FutureAdapterSelf) Future {
-            return Future.init(&future_vtable, self);
+            return Future.init(self.allocator, &future_vtable, self);
         }
     };
 
@@ -572,9 +583,10 @@ pub const GreenThreadsIo = struct {
         return adapter.toFuture();
     }
 
-    fn connect(context: *anyopaque, sockfd: std.posix.fd_t, addr: *const std.posix.sockaddr) IoError!Future {
+    fn connect(context: *anyopaque, sockfd: std.posix.fd_t, addr: *const std.posix.sockaddr, addr_len: std.posix.socklen_t) IoError!Future {
         const self: *Self = @ptrCast(@alignCast(context));
         _ = addr;
+        _ = addr_len;
 
         const op = io_uring.Operation{
             .opcode = .connect,
@@ -643,11 +655,14 @@ pub const GreenThreadsIo = struct {
     }
 
     fn supportsVectorized(_: *anyopaque) bool {
-        return true;
+        // NOTE: readv/writev are implemented but ignore buffer contents
+        // Returning false until properly implemented
+        return false;
     }
 
     fn supportsZeroCopy(_: *anyopaque) bool {
-        return true;
+        // NOTE: Zero-copy ops are stubbed, not actually zero-copy
+        return false;
     }
 
     fn getAllocatorVtable(context: *anyopaque) std.mem.Allocator {
@@ -684,6 +699,7 @@ test "green threads creation" {
 
     const io = green_threads.io();
     try std.testing.expect(io.getMode() == .evented);
-    try std.testing.expect(io.supportsVectorized());
-    try std.testing.expect(io.supportsZeroCopy());
+    // NOTE: These return false because the implementations are incomplete
+    try std.testing.expect(!io.supportsVectorized());
+    try std.testing.expect(!io.supportsZeroCopy());
 }

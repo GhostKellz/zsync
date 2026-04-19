@@ -298,8 +298,12 @@ pub const Epoll = struct {
     fd: i32,
 
     pub fn init() !Epoll {
-        const fd = try std.posix.epoll_create1(linux.EPOLL_CLOEXEC);
-        return Epoll{ .fd = fd };
+        const rc = linux.epoll_create1(linux.EPOLL.CLOEXEC);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCreateFailed;
+        }
+        return Epoll{ .fd = @intCast(rc) };
     }
 
     pub fn deinit(self: *Epoll) void {
@@ -311,7 +315,11 @@ pub const Epoll = struct {
             .events = events,
             .data = .{ .u64 = data },
         };
-        try std.posix.epoll_ctl(self.fd, linux.EPOLL_CTL_ADD, fd, &ev);
+        const rc = linux.epoll_ctl(self.fd, linux.EPOLL.CTL_ADD, fd, &ev);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCtlFailed;
+        }
     }
 
     pub fn modify(self: *Epoll, fd: i32, events: u32, data: u64) !void {
@@ -319,42 +327,49 @@ pub const Epoll = struct {
             .events = events,
             .data = .{ .u64 = data },
         };
-        try std.posix.epoll_ctl(self.fd, linux.EPOLL_CTL_MOD, fd, &ev);
+        const rc = linux.epoll_ctl(self.fd, linux.EPOLL.CTL_MOD, fd, &ev);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCtlFailed;
+        }
     }
 
     pub fn delete(self: *Epoll, fd: i32) !void {
-        try std.posix.epoll_ctl(self.fd, linux.EPOLL_CTL_DEL, fd, null);
+        const rc = linux.epoll_ctl(self.fd, linux.EPOLL.CTL_DEL, fd, null);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCtlFailed;
+        }
     }
 
     pub fn wait(self: *Epoll, events: []linux.epoll_event, timeout_ms: i32) !usize {
-        const n = try std.posix.epoll_wait(self.fd, events, timeout_ms);
-        return n;
+        const rc = linux.epoll_wait(self.fd, events.ptr, @intCast(events.len), timeout_ms);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollWaitFailed;
+        }
+        return rc;
     }
 };
 
-// Event source abstraction
+// Event source abstraction - owns storage by value to avoid dangling pointers
 pub const EventSource = union(enum) {
-    io_uring: *IoUring,
-    epoll: *Epoll,
+    io_uring: IoUring,
+    epoll: Epoll,
 
     pub fn init(use_io_uring: bool) !EventSource {
         if (use_io_uring) {
-            // Check if io_uring is available
             if (checkIoUringSupport()) {
-                var ring = try IoUring.init(256);
-                return EventSource{ .io_uring = &ring };
+                return EventSource{ .io_uring = try IoUring.init(256) };
             }
         }
-
-        // Fallback to epoll
-        var epoll = try Epoll.init();
-        return EventSource{ .epoll = &epoll };
+        return EventSource{ .epoll = try Epoll.init() };
     }
 
     pub fn deinit(self: *EventSource) void {
         switch (self.*) {
-            .io_uring => |ring| ring.deinit(),
-            .epoll => |ep| ep.deinit(),
+            .io_uring => |*ring| ring.deinit(),
+            .epoll => |*ep| ep.deinit(),
         }
     }
 };
@@ -432,8 +447,8 @@ pub const EventLoop = struct {
 
     pub fn run(self: *EventLoop) !void {
         switch (self.source) {
-            .io_uring => |ring| try self.runIoUring(ring),
-            .epoll => |ep| try self.runEpoll(ep),
+            .io_uring => |*ring| try self.runIoUring(ring),
+            .epoll => |*ep| try self.runEpoll(ep),
         }
     }
 

@@ -8,7 +8,7 @@ Local CI and testing infrastructure for zsync development.
 # Run full CI suite
 ./dev/ci.sh
 
-# Check Zig 0.16 compatibility
+# Check Zig 0.17 compatibility
 ./dev/check-zig-compat.sh
 
 # Memory leak detection
@@ -20,10 +20,10 @@ Local CI and testing infrastructure for zsync development.
 | Script | Purpose |
 |--------|---------|
 | `ci.sh` | Full CI suite: build, test, lint, compatibility |
-| `check-zig-compat.sh` | Scan for deprecated Zig 0.16 APIs |
+| `check-zig-compat.sh` | Scan for deprecated Zig APIs |
 | `memcheck.sh` | Memory leak detection (GPA + valgrind) |
 
-## Zig 0.16.0-dev Compatibility
+## Zig 0.17.0-dev Compatibility
 
 Key API changes to watch for:
 
@@ -34,7 +34,7 @@ var list = ArrayList(T).init(allocator);
 list.append(item);
 list.deinit();
 
-// NEW (0.16)
+// NEW (current dev)
 var list: ArrayList(T) = .{};
 list.append(allocator, item);
 list.deinit(allocator);
@@ -45,13 +45,13 @@ list.deinit(allocator);
 // OLD (deprecated)
 const ts = std.time.milliTimestamp();
 
-// NEW (0.16)
+// NEW (current dev)
 const now = std.time.Instant.now() catch unreachable;
 const elapsed = now.since(start);
 ```
 
 ### Async/Await
-Zig 0.16 removed language-level async. Use zsync runtime instead:
+Recent Zig dev toolchains do not provide language-level async. Use zsync runtime instead:
 ```zig
 // Use zsync's async primitives
 const runtime = try zsync.Runtime.init(allocator, .{});

@@ -1,4 +1,4 @@
-//! zsync - The Tokio of Zig
+//! zsync - Async runtime for Zig
 //! Colorblind Async Runtime with True Function Color Elimination
 //! Following Zig's latest async paradigm for maximum performance and ergonomics
 
@@ -116,7 +116,7 @@ pub const getGlobalRuntime = runtime.getGlobalRuntime;
 pub const formatError = runtime.formatError;
 pub const printError = runtime.printError;
 
-// v0.7 New Convenience Functions
+// Convenience functions
 pub const TaskHandle = spawn_mod.TaskHandle;
 pub const GenericFuture = future_mod.Future;
 pub const Executor = executor_mod.Executor;
@@ -126,11 +126,11 @@ pub const Latch = sync_mod.Latch;
 pub const Channel = channels.Channel;
 pub const UnboundedChannel = channels.UnboundedChannel;
 
-// v0.7 Structured Concurrency
+// Structured concurrency
 pub const Nursery = nursery_mod.Nursery;
 pub const withNursery = nursery_mod.withNursery;
 
-// v0.7 Buffer Pool
+// Buffer pool
 pub const BufferPool = buffer_pool_mod.BufferPool;
 pub const BufferPoolConfig = buffer_pool_mod.BufferPoolConfig;
 pub const PooledBuffer = buffer_pool_mod.PooledBuffer;
@@ -138,12 +138,12 @@ pub const sendfile = buffer_pool_mod.sendfile;
 pub const splice = buffer_pool_mod.splice;
 pub const copyFileZeroCopy = buffer_pool_mod.copyFileZeroCopy;
 
-// v0.7 Streams
+// Streams
 pub const Stream = streams_mod.Stream;
 pub const fromSlice = streams_mod.fromSlice;
 pub const range = streams_mod.range;
 
-// v0.7 Async Filesystem
+// Async filesystem
 pub const AsyncFile = async_fs_mod.AsyncFile;
 pub const AsyncDir = async_fs_mod.AsyncDir;
 pub const AsyncFs = async_fs_mod.AsyncFs;
@@ -152,9 +152,7 @@ pub const AsyncFs = async_fs_mod.AsyncFs;
 pub const spawnTask = spawn_mod.spawn;
 pub const spawnOn = spawn_mod.spawnOn;
 
-// Channels
-pub const boundedChannel = channels.bounded;
-pub const unboundedChannel = channels.unbounded;
+// Channels - use bounded() and unbounded() functions below
 
 // Sleep and yield
 pub const yieldTask = sleep_mod.yieldNow;
@@ -177,22 +175,22 @@ pub const TokenBucket = rate_limit.TokenBucket;
 pub const LeakyBucket = rate_limit.LeakyBucket;
 pub const SlidingWindow = rate_limit.SlidingWindow;
 
-// Connection Pool (v0.6.0)
+// Connection Pool
 pub const ConnectionPool = connection_pool.ConnectionPool;
 pub const PoolConfig = connection_pool.PoolConfig;
 pub const PoolStats = connection_pool.PoolStats;
 
-// File Watcher (v0.6.0)
+// File Watcher
 pub const FileWatcher = file_watch.FileWatcher;
 pub const PollingWatcher = file_watch.PollingWatcher;
 pub const WatchEvent = file_watch.WatchEvent;
 
-// Async Locks (v0.6.0)
+// Async Locks
 pub const AsyncMutex = sync_mod.AsyncMutex;
 pub const AsyncRwLock = sync_mod.AsyncRwLock;
 pub const WaitGroup = sync_mod.WaitGroup;
 
-// WebSocket (v0.6.0)
+// WebSocket
 pub const WebSocketConnectionV2 = websocket.WebSocketConnection;
 pub const WebSocketServerV2 = websocket.WebSocketServer;
 pub const WebSocketClientV2 = websocket.WebSocketClient;
@@ -200,7 +198,7 @@ pub const WebSocketMessageV2 = websocket.Message;
 pub const WebSocketOpCodeV2 = websocket.OpCode;
 pub const WebSocketCloseCodeV2 = websocket.CloseCode;
 
-// WASM Async Helpers (v0.6.0)
+// WASM Async Helpers
 pub const MicrotaskQueue = wasm_microtask.MicrotaskQueue;
 pub const queueMicrotask = wasm_microtask.queueMicrotask;
 pub const flushMicrotasks = wasm_microtask.flushMicrotasks;
@@ -211,7 +209,7 @@ pub const AbortController = wasm_async.AbortController;
 pub const fetch = wasm_async.fetch;
 pub const FetchResponse = wasm_async.FetchResponse;
 
-// LSP Server (v0.6.0) - For Grim/Grove
+// LSP Server
 pub const LspServer = lsp_server.LspServer;
 pub const LspServerConfig = lsp_server.ServerConfig;
 pub const LspPosition = lsp_server.Position;
@@ -219,27 +217,27 @@ pub const LspRange = lsp_server.Range;
 pub const LspLocation = lsp_server.Location;
 pub const LspDiagnostic = lsp_server.Diagnostic;
 
-// PTY/Terminal (v0.6.0) - For Ghostshell
+// PTY/Terminal
 pub const Pty = pty.Pty;
 pub const PtyConfig = pty.PtyConfig;
 pub const Winsize = pty.Winsize;
 pub const TermAttr = pty.TermAttr;
 
-// Plugin System (v0.6.0) - For GShell
+// Plugin System
 pub const Plugin = plugin_system.Plugin;
 pub const PluginManager = plugin_system.PluginManager;
 pub const PluginMetadata = plugin_system.PluginMetadata;
 pub const PluginState = plugin_system.PluginState;
 pub const discoverPlugins = plugin_system.discoverPlugins;
 
-// Script Runtime (v0.6.0) - For Ghostlang
+// Script Runtime
 pub const ScriptEngine = script_runtime.ScriptEngine;
 pub const ScriptValue = script_runtime.ScriptValue;
 pub const ScriptChannel = script_runtime.ScriptChannel;
 pub const ScriptTimer = script_runtime.ScriptTimer;
 pub const ScriptFFI = script_runtime.FFI;
 
-// Compression Streaming (v0.6.0) - For zpack
+// Compression Streaming
 pub const AsyncCompressor = compression.AsyncCompressor;
 pub const AsyncDecompressor = compression.AsyncDecompressor;
 pub const CompressionConfig = compression.CompressionConfig;
@@ -259,11 +257,11 @@ pub fn createBlockingIo(allocator: std.mem.Allocator) BlockingIo {
 }
 
 /// Example colorblind async function that works with ANY Io implementation
-pub fn saveData(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
+pub fn saveData(_: std.mem.Allocator, io: Io, data: []const u8) !void {
     // This function is truly colorblind - works in sync or async context
     var io_mut = io;
     var future = try io_mut.write(data);
-    defer future.destroy(allocator);
+    defer future.destroy();
 
     // Colorblind await - adapts to execution context
     try future.await();
@@ -274,7 +272,7 @@ pub fn saveDataWithTimeout(allocator: std.mem.Allocator, io: Io, data: []const u
     var io_mut = io;
     const write_future = try io_mut.write(data);
     var timeout_future = try Combinators.timeout(allocator, write_future, timeout_ms);
-    defer timeout_future.destroy(allocator);
+    defer timeout_future.destroy();
 
     try timeout_future.await();
 }
@@ -287,13 +285,13 @@ pub fn concurrentSave(allocator: std.mem.Allocator, io: Io, data1: []const u8, d
 
     var futures = [_]Future{ future1, future2 };
     var all_future = try Combinators.all(allocator, &futures);
-    defer all_future.destroy(allocator);
+    defer all_future.destroy();
 
     try all_future.await();
 
     // Clean up individual futures
-    future1.destroy(io.getAllocator());
-    future2.destroy(io.getAllocator());
+    future1.destroy();
+    future2.destroy();
 }
 
 /// Example of racing operations
@@ -304,13 +302,13 @@ pub fn raceOperations(allocator: std.mem.Allocator, io: Io, data1: []const u8, d
 
     var futures = [_]Future{ future1, future2 };
     var race_future = try Combinators.race(allocator, &futures);
-    defer race_future.destroy(allocator);
+    defer race_future.destroy();
 
     try race_future.await();
 
     // Clean up
-    future1.destroy(io.getAllocator());
-    future2.destroy(io.getAllocator());
+    future1.destroy();
+    future2.destroy();
 }
 
 /// Utility function to detect optimal execution model
@@ -350,35 +348,9 @@ pub fn createOptimalRuntime(allocator: std.mem.Allocator) !*Runtime {
     return Runtime.init(allocator, config);
 }
 
-/// High-level async task spawning - improved implementation
+/// High-level async task spawning - requires initialized runtime
 pub fn spawn(comptime task_fn: anytype, args: anytype) !Future {
-    const runtime_instance = Runtime.global() orelse {
-        // If no runtime exists, create a temporary one for the task
-        const temp_config = Config{ .execution_model = .blocking };
-        var temp_runtime = try Runtime.init(std.heap.page_allocator, temp_config);
-        defer temp_runtime.deinit();
-
-        // Execute the task directly in blocking mode
-        @call(.auto, task_fn, args) catch |err| {
-            std.debug.print("Task failed with error: {}\n", .{err});
-        };
-
-        // Create a completed future
-        const DummyFuture = struct {
-            pub fn poll(_: *anyopaque) Future.PollResult {
-                return .ready;
-            }
-            pub fn cancel(_: *anyopaque) void {}
-            pub fn destroy(_: *anyopaque, _: std.mem.Allocator) void {}
-
-            const vtable = Future.FutureVTable{
-                .poll = poll,
-                .cancel = cancel,
-                .destroy = destroy,
-            };
-        };
-        return Future.init(&DummyFuture.vtable, undefined);
-    };
+    const runtime_instance = Runtime.global() orelse return RuntimeError.RuntimeNotInitialized;
     return runtime_instance.spawn(task_fn, args);
 }
 
@@ -401,7 +373,7 @@ pub fn all(futures: []Future) !Future {
 }
 
 // =============================================================================
-// MISSING ZSYNC v0.7 APIs - Now Exported for zquic compatibility
+// Additional exports kept for downstream compatibility
 // =============================================================================
 
 /// Yield execution to other tasks (cooperative scheduling)
@@ -415,10 +387,12 @@ pub fn sleep(duration_ms: u64) void {
 }
 
 /// Create a bounded channel for message passing
-pub const bounded = channel.bounded;
+/// Returns a Channel(T) with fixed capacity ring buffer
+pub const bounded = channels.bounded;
 
 /// Create an unbounded channel for message passing
-pub const unbounded = channel.unbounded;
+/// Returns an UnboundedChannel(T) that grows dynamically
+pub const unbounded = channels.unbounded;
 
 /// Thread pool I/O implementation for CPU-intensive operations
 pub const ThreadPoolIo = threadpool_io.ThreadPoolIo;
@@ -631,92 +605,238 @@ pub fn spawnBlocking(comptime func: anytype, args: anytype) !std.Thread {
 }
 
 /// JoinSet for managing multiple concurrent tasks (like tokio::task::JoinSet)
+/// Tasks are spawned on separate threads and run concurrently.
+/// Each task entry is heap-allocated to ensure pointer stability across spawns.
 pub fn JoinSet(comptime T: type) type {
     return struct {
-        handles: std.ArrayList(TaskEntry),
+        entries: std.ArrayList(*TaskEntry),
         allocator: std.mem.Allocator,
+        mutex: compat.Mutex = .{},
+        completed_cond: compat.Condition = .{},
+        completed_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
         const Self = @This();
+
         const TaskEntry = struct {
-            id: u64,
+            thread: ?std.Thread = null,
             result: ?T = null,
-            completed: bool = false,
+            err: ?anyerror = null,
+            completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+            joined: bool = false,
         };
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return Self{
-                .handles = std.ArrayList(TaskEntry).init(allocator),
+                .entries = .empty,
                 .allocator = allocator,
             };
         }
 
         pub fn deinit(self: *Self) void {
-            self.handles.deinit();
-        }
-
-        /// Spawn a task and add to the set
-        pub fn spawn(self: *Self, comptime func: anytype, args: anytype) !u64 {
-            const id = @as(u64, @intCast(self.handles.items.len));
-            try self.handles.append(.{ .id = id });
-
-            // Execute the task
-            const result = @call(.auto, func, args);
-            if (self.handles.items.len > id) {
-                self.handles.items[id].result = result;
-                self.handles.items[id].completed = true;
+            // Join any remaining threads
+            self.joinAll();
+            // Free all task entries
+            for (self.entries.items) |entry| {
+                self.allocator.destroy(entry);
             }
-            return id;
+            self.entries.deinit(self.allocator);
         }
 
-        /// Wait for all tasks to complete
+        /// Spawn a task on a new thread
+        pub fn spawn(self: *Self, comptime func: anytype, args: anytype) !usize {
+            // Heap-allocate entry for pointer stability
+            const entry = try self.allocator.create(TaskEntry);
+            entry.* = TaskEntry{};
+
+            const idx = self.entries.items.len;
+            try self.entries.append(self.allocator, entry);
+
+            // Wrapper to capture result and signal completion
+            const Wrapper = struct {
+                fn run(task_entry: *TaskEntry, set: *Self, func_args: anytype) void {
+                    const result = @call(.auto, func, func_args);
+                    task_entry.result = result;
+                    task_entry.completed.store(true, .release);
+                    _ = set.completed_count.fetchAdd(1, .release);
+                    set.completed_cond.signal();
+                }
+            };
+
+            entry.thread = try std.Thread.spawn(.{}, Wrapper.run, .{ entry, self, args });
+            return idx;
+        }
+
+        /// Spawn a task that may return an error
+        pub fn spawnErrorable(self: *Self, comptime func: anytype, args: anytype) !usize {
+            const entry = try self.allocator.create(TaskEntry);
+            entry.* = TaskEntry{};
+
+            const idx = self.entries.items.len;
+            try self.entries.append(self.allocator, entry);
+
+            const Wrapper = struct {
+                fn run(task_entry: *TaskEntry, set: *Self, func_args: anytype) void {
+                    if (@call(.auto, func, func_args)) |result| {
+                        task_entry.result = result;
+                    } else |err| {
+                        task_entry.err = err;
+                    }
+                    task_entry.completed.store(true, .release);
+                    _ = set.completed_count.fetchAdd(1, .release);
+                    set.completed_cond.signal();
+                }
+            };
+
+            entry.thread = try std.Thread.spawn(.{}, Wrapper.run, .{ entry, self, args });
+            return idx;
+        }
+
+        /// Wait for all tasks to complete and join threads
         pub fn joinAll(self: *Self) void {
-            // In synchronous mode, tasks are already complete
-            _ = self;
+            for (self.entries.items) |entry| {
+                if (!entry.joined) {
+                    if (entry.thread) |thread| {
+                        thread.join();
+                        entry.thread = null;
+                    }
+                    entry.joined = true;
+                }
+            }
         }
 
-        /// Get number of pending tasks
+        /// Wait for any task to complete and return its result
+        /// Returns null if no tasks remain
+        pub fn joinNext(self: *Self) ?JoinResult {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            // Find a completed but not-yet-joined task
+            for (self.entries.items, 0..) |entry, idx| {
+                if (entry.completed.load(.acquire) and !entry.joined) {
+                    if (entry.thread) |thread| {
+                        thread.join();
+                        entry.thread = null;
+                    }
+                    entry.joined = true;
+
+                    if (entry.err) |err| {
+                        return JoinResult{ .idx = idx, .value = .{ .err = err } };
+                    } else {
+                        return JoinResult{ .idx = idx, .value = .{ .ok = entry.result } };
+                    }
+                }
+            }
+
+            // Check if any tasks are still running
+            var has_pending = false;
+            for (self.entries.items) |entry| {
+                if (!entry.joined) {
+                    has_pending = true;
+                    break;
+                }
+            }
+            if (!has_pending) return null;
+
+            // Wait for completion signal
+            self.completed_cond.wait(&self.mutex);
+
+            // Try again after wakeup
+            for (self.entries.items, 0..) |entry, idx| {
+                if (entry.completed.load(.acquire) and !entry.joined) {
+                    if (entry.thread) |thread| {
+                        thread.join();
+                        entry.thread = null;
+                    }
+                    entry.joined = true;
+
+                    if (entry.err) |err| {
+                        return JoinResult{ .idx = idx, .value = .{ .err = err } };
+                    } else {
+                        return JoinResult{ .idx = idx, .value = .{ .ok = entry.result } };
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// Get number of pending (not yet joined) tasks
         pub fn len(self: *const Self) usize {
             var pending: usize = 0;
-            for (self.handles.items) |entry| {
-                if (!entry.completed) pending += 1;
+            for (self.entries.items) |entry| {
+                if (!entry.joined) pending += 1;
             }
             return pending;
         }
 
-        /// Check if all tasks are complete
+        /// Check if all tasks have been joined
         pub fn isEmpty(self: *const Self) bool {
             return self.len() == 0;
         }
+
+        pub const JoinResult = struct {
+            idx: usize,
+            value: union(enum) {
+                ok: ?T,
+                err: anyerror,
+            },
+        };
     };
 }
 
 /// Broadcast channel - multiple producers, multiple consumers
-/// Each message is delivered to all consumers
+/// Each message is delivered to all consumers with configurable capacity.
 pub fn BroadcastChannel(comptime T: type) type {
     return struct {
         subscribers: std.ArrayList(*Subscriber),
         allocator: std.mem.Allocator,
+        capacity: usize,
         mutex: compat.Mutex = .{},
+        notify: compat.Condition = .{},
 
         const Self = @This();
+        pub const default_capacity: usize = 16;
 
         const Subscriber = struct {
             queue: std.ArrayList(T),
             allocator: std.mem.Allocator,
+            capacity: usize,
+            lagged: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+            mutex: compat.Mutex = .{},
 
-            pub fn init(allocator: std.mem.Allocator) Subscriber {
-                return .{ .queue = .empty, .allocator = allocator };
+            pub fn initWithCapacity(allocator: std.mem.Allocator, cap: usize) Subscriber {
+                return .{ .queue = .empty, .allocator = allocator, .capacity = cap };
             }
 
             pub fn deinit(self: *Subscriber) void {
                 self.queue.deinit(self.allocator);
             }
+
+            /// Check how many messages were dropped due to lag
+            pub fn lagCount(self: *Subscriber) usize {
+                return self.lagged.swap(0, .acquire);
+            }
+
+            /// Receive from this subscriber's queue (thread-safe, non-blocking)
+            pub fn recv(self: *Subscriber) ?T {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                if (self.queue.items.len > 0) {
+                    return self.queue.orderedRemove(0);
+                }
+                return null;
+            }
         };
 
         pub fn init(allocator: std.mem.Allocator) Self {
+            return initWithCapacity(allocator, default_capacity);
+        }
+
+        pub fn initWithCapacity(allocator: std.mem.Allocator, capacity: usize) Self {
             return Self{
                 .subscribers = .empty,
                 .allocator = allocator,
+                .capacity = capacity,
             };
         }
 
@@ -734,27 +854,75 @@ pub fn BroadcastChannel(comptime T: type) type {
             defer self.mutex.unlock();
 
             const sub = try self.allocator.create(Subscriber);
-            sub.* = Subscriber.init(self.allocator);
+            sub.* = Subscriber.initWithCapacity(self.allocator, self.capacity);
             try self.subscribers.append(self.allocator, sub);
             return sub;
         }
 
         /// Send a message to all subscribers
+        /// Slow receivers will have oldest messages dropped (lagged)
         pub fn send(self: *Self, value: T) !void {
             self.mutex.lock();
             defer self.mutex.unlock();
 
             for (self.subscribers.items) |sub| {
+                sub.mutex.lock();
+                defer sub.mutex.unlock();
+                // Drop oldest if at capacity
+                if (sub.queue.items.len >= sub.capacity) {
+                    _ = sub.queue.orderedRemove(0);
+                    _ = sub.lagged.fetchAdd(1, .monotonic);
+                }
                 try sub.queue.append(sub.allocator, value);
+            }
+            self.notify.broadcast();
+        }
+
+        /// Receive from a subscriber's queue (non-blocking, thread-safe)
+        /// Prefer using sub.recv() directly for cleaner code.
+        pub fn recv(sub: *Subscriber) ?T {
+            return sub.recv();
+        }
+
+        /// Blocking receive - waits for a message
+        pub fn recvBlocking(self: *Self, sub: *Subscriber) T {
+            self.mutex.lock();
+
+            while (true) {
+                sub.mutex.lock();
+                if (sub.queue.items.len > 0) {
+                    const item = sub.queue.orderedRemove(0);
+                    sub.mutex.unlock();
+                    self.mutex.unlock();
+                    return item;
+                }
+                sub.mutex.unlock();
+                self.notify.wait(&self.mutex);
             }
         }
 
-        /// Receive from a subscriber's queue
-        pub fn recv(sub: *Subscriber) ?T {
-            if (sub.queue.items.len > 0) {
-                return sub.queue.orderedRemove(0);
+        /// Unsubscribe and deallocate a subscriber
+        pub fn unsubscribe(self: *Self, sub: *Subscriber) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            // Find and remove from list
+            for (self.subscribers.items, 0..) |s, i| {
+                if (s == sub) {
+                    _ = self.subscribers.orderedRemove(i);
+                    break;
+                }
             }
-            return null;
+
+            sub.deinit();
+            self.allocator.destroy(sub);
+        }
+
+        /// Get subscriber count
+        pub fn subscriberCount(self: *Self) usize {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.subscribers.items.len;
         }
     };
 }
@@ -764,13 +932,50 @@ pub fn BroadcastChannel(comptime T: type) type {
 pub fn WatchChannel(comptime T: type) type {
     return struct {
         value: T,
-        version: u64 = 0,
+        version: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
         mutex: compat.Mutex = .{},
+        changed_cond: compat.Condition = .{},
 
         const Self = @This();
 
+        /// Watcher handle that tracks last seen version
+        pub const Watcher = struct {
+            channel: *Self,
+            last_seen: u64 = 0,
+
+            /// Get current value
+            pub fn borrow(self: *Watcher) T {
+                self.channel.mutex.lock();
+                defer self.channel.mutex.unlock();
+                self.last_seen = self.channel.version.load(.acquire);
+                return self.channel.value;
+            }
+
+            /// Check if value has changed since last borrow
+            pub fn hasChanged(self: *const Watcher) bool {
+                return self.channel.version.load(.acquire) != self.last_seen;
+            }
+
+            /// Wait for value to change (blocking)
+            pub fn changed(self: *Watcher) T {
+                self.channel.mutex.lock();
+                defer self.channel.mutex.unlock();
+
+                while (self.channel.version.load(.acquire) == self.last_seen) {
+                    self.channel.changed_cond.wait(&self.channel.mutex);
+                }
+                self.last_seen = self.channel.version.load(.acquire);
+                return self.channel.value;
+            }
+        };
+
         pub fn init(initial: T) Self {
             return Self{ .value = initial };
+        }
+
+        /// Create a watcher for this watch channel
+        pub fn subscribe(self: *Self) Watcher {
+            return Watcher{ .channel = self };
         }
 
         /// Send a new value (overwrites previous)
@@ -778,10 +983,11 @@ pub fn WatchChannel(comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
             self.value = value;
-            self.version += 1;
+            _ = self.version.fetchAdd(1, .release);
+            self.changed_cond.broadcast();
         }
 
-        /// Get current value
+        /// Get current value (for sender)
         pub fn borrow(self: *Self) T {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -790,16 +996,18 @@ pub fn WatchChannel(comptime T: type) type {
 
         /// Get current version
         pub fn getVersion(self: *Self) u64 {
-            return self.version;
+            return self.version.load(.acquire);
         }
     };
 }
 
 /// Notify - Simple task notification primitive (like tokio::sync::Notify)
-/// Allows one task to notify waiting tasks
+/// Allows one task to notify waiting tasks.
+/// Uses generation counter to ensure notifyAll() wakes all waiters.
 pub const Notify = struct {
     waiters: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    notified: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    generation: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    one_shot_pending: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     mutex: compat.Mutex = .{},
     cond: compat.Condition = .{},
 
@@ -811,8 +1019,8 @@ pub const Notify = struct {
 
     /// Wait until notified
     pub fn wait(self: *Self) void {
-        // Fast path - already notified
-        if (self.notified.swap(false, .acquire)) {
+        // Fast path - check for pending one-shot notification
+        if (self.one_shot_pending.swap(false, .acquire)) {
             return;
         }
 
@@ -822,21 +1030,28 @@ pub const Notify = struct {
         _ = self.waiters.fetchAdd(1, .monotonic);
         defer _ = self.waiters.fetchSub(1, .monotonic);
 
-        while (!self.notified.load(.acquire)) {
+        // Record current generation
+        const my_gen = self.generation.load(.acquire);
+
+        // Wait until generation changes (notifyAll) or one-shot is set (notifyOne)
+        while (self.generation.load(.acquire) == my_gen and !self.one_shot_pending.load(.acquire)) {
             self.cond.wait(&self.mutex);
         }
-        self.notified.store(false, .release);
+
+        // Consume one-shot if that's what woke us
+        _ = self.one_shot_pending.swap(false, .acquire);
     }
 
     /// Notify one waiting task
     pub fn notifyOne(self: *Self) void {
-        self.notified.store(true, .release);
+        self.one_shot_pending.store(true, .release);
         self.cond.signal();
     }
 
     /// Notify all waiting tasks
     pub fn notifyAll(self: *Self) void {
-        self.notified.store(true, .release);
+        // Increment generation to wake all waiters
+        _ = self.generation.fetchAdd(1, .release);
         self.cond.broadcast();
     }
 
@@ -945,6 +1160,11 @@ pub const CancellationToken = struct {
 
     pub fn deinit(self: *Self) void {
         if (self.initialized) {
+            // Recursively deinit and destroy all child tokens
+            for (self.children.items) |child_token| {
+                child_token.deinit();
+                self.allocator.destroy(child_token);
+            }
             self.children.deinit(self.allocator);
         }
     }
@@ -1120,14 +1340,14 @@ pub fn timeoutFn(comptime func: anytype, args: anytype, timeout_ms: u64) !@TypeO
 }
 
 // Version information
-pub const VERSION = "0.7.9";
+pub const VERSION = "0.8.0";
 pub const VERSION_MAJOR = 0;
-pub const VERSION_MINOR = 7;
-pub const VERSION_PATCH = 9;
+pub const VERSION_MINOR = 8;
+pub const VERSION_PATCH = 0;
 
 /// Print Zsync version and capabilities
 pub fn printVersion() void {
-    std.debug.print("🚀 Zsync v{s} - The Tokio of Zig\n", .{VERSION});
+    std.debug.print("zsync v{s} - async runtime for Zig\n", .{VERSION});
     std.debug.print("Core Features:\n", .{});
     std.debug.print("  ✅ Colorblind Async/Await\n", .{});
     std.debug.print("  ✅ Multiple Execution Models\n", .{});
@@ -1168,16 +1388,15 @@ pub fn helloWorld(_: std.mem.Allocator) !void {
     const HelloTask = struct {
         fn task(io: Io) !void {
             const messages = [_][]const u8{
-                "🚀 zsync - The Tokio of Zig\n",
-                "✨ Production-ready async in action!\n",
-                "🔥 Complete API coverage for all projects!\n",
-                "⚡ Zero-cost abstractions!\n",
+                "zsync - async runtime for Zig\n",
+                "colorblind async in action\n",
+                "blocking, thread_pool, and green_threads execution models\n",
             };
 
             // Demonstrate vectorized write
             var io_mut = io;
             var future = try io_mut.writev(&messages);
-            defer future.destroy(std.heap.page_allocator);
+            defer future.destroy();
             try future.await();
 
             std.debug.print("Execution mode: {}\n", .{io.getMode()});
@@ -1200,15 +1419,24 @@ test "zsync basic functionality" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Test runtime creation
-    var blocking_io_impl = createBlockingIo(allocator);
+    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
+    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
+        // Test execution model detection only if /dev/null not available
+        const model = detectOptimalModel();
+        try testing.expect(model != .auto);
+        return;
+    };
+    defer std.Io.Threaded.closeFd(null_fd);
+
+    // Test runtime creation with /dev/null as write target
+    var blocking_io_impl = BlockingIo.initWithFds(allocator, 4096, std.posix.STDIN_FILENO, null_fd);
     defer blocking_io_impl.deinit();
 
     var io = blocking_io_impl.io();
 
-    // Test colorblind async without producing extra debug output in passing tests.
+    // Test colorblind async write (to /dev/null, not stdout)
     var future = try io.write("Hello, zsync!");
-    defer future.destroy(io.getAllocator());
+    defer future.destroy();
     try future.await();
 
     // Test execution model detection
@@ -1220,20 +1448,33 @@ test "Future combinators" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var blocking_io_impl = createBlockingIo(allocator);
+    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
+    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
+        // Skip IO tests if /dev/null not available, just test timeout
+        const timeout_result = try timeoutFn(struct {
+            fn op() u8 {
+                return 1;
+            }
+        }.op, .{}, 1000);
+        try testing.expectEqual(@as(u8, 1), timeout_result);
+        return;
+    };
+    defer std.Io.Threaded.closeFd(null_fd);
+
+    var blocking_io_impl = BlockingIo.initWithFds(allocator, 4096, std.posix.STDIN_FILENO, null_fd);
     defer blocking_io_impl.deinit();
 
     var io = blocking_io_impl.io();
 
-    // Test concurrent operations without extra passing-test output.
+    // Test concurrent operations (to /dev/null, not stdout)
     var f1 = try io.write("Data 1");
-    defer f1.destroy(io.getAllocator());
+    defer f1.destroy();
     var f2 = try io.write("Data 2");
-    defer f2.destroy(io.getAllocator());
+    defer f2.destroy();
     try f1.await();
     try f2.await();
 
-    // Test timeout helper without extra passing-test output.
+    // Test timeout helper
     const timeout_result = try timeoutFn(struct {
         fn op() u8 {
             return 1;
@@ -1246,10 +1487,12 @@ test "Runtime with optimal configuration" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // For now, force blocking mode to avoid thread pool shutdown issues
+    // Thread pool shutdown is now fixed with proper condition-based waiting
+    // Use 2 workers for reasonable test speed
     const config = Config{
-        .execution_model = .blocking,
+        .execution_model = .thread_pool,
         .enable_debugging = false,
+        .thread_pool_threads = 2,
     };
 
     const runtime_instance = try Runtime.init(allocator, config);
@@ -1265,9 +1508,9 @@ test "Version information" {
     const testing = std.testing;
 
     try testing.expect(VERSION_MAJOR == 0);
-    try testing.expect(VERSION_MINOR == 7);
-    try testing.expect(VERSION_PATCH == 9);
-    try testing.expect(std.mem.eql(u8, VERSION, "0.7.9"));
+    try testing.expect(VERSION_MINOR == 8);
+    try testing.expect(VERSION_PATCH == 0);
+    try testing.expect(std.mem.eql(u8, VERSION, "0.8.0"));
 }
 
 /// Legacy compatibility function
@@ -1346,6 +1589,73 @@ test "Tokio-style CancellationToken" {
     try testing.expect(token.isCancelled());
 }
 
+test "CancellationToken with child tokens (memory lifecycle)" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Test parent + multiple children - allocator will catch leaks
+    var parent = CancellationToken.init(allocator);
+    defer parent.deinit();
+
+    const child1 = try parent.child();
+    const child2 = try parent.child();
+    const child3 = try parent.child();
+
+    // Children should not be cancelled yet
+    try testing.expect(!child1.isCancelled());
+    try testing.expect(!child2.isCancelled());
+    try testing.expect(!child3.isCancelled());
+
+    // Cancel parent - should propagate to children
+    parent.cancel();
+    try testing.expect(parent.isCancelled());
+    try testing.expect(child1.isCancelled());
+    try testing.expect(child2.isCancelled());
+    try testing.expect(child3.isCancelled());
+
+    // Parent deinit should recursively clean up all children (no leaks)
+}
+
+test "CancellationToken nested children" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Test grandchildren - three levels deep
+    var root = CancellationToken.init(allocator);
+    defer root.deinit();
+
+    const level1 = try root.child();
+    const level2 = try level1.child();
+    const level3 = try level2.child();
+
+    // None cancelled
+    try testing.expect(!root.isCancelled());
+    try testing.expect(!level1.isCancelled());
+    try testing.expect(!level2.isCancelled());
+    try testing.expect(!level3.isCancelled());
+
+    // Cancel root - propagates down
+    root.cancel();
+    try testing.expect(level1.isCancelled());
+    try testing.expect(level2.isCancelled());
+    try testing.expect(level3.isCancelled());
+}
+
+test "CancellationToken child inherits cancelled state" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var token = CancellationToken.init(allocator);
+    defer token.deinit();
+
+    // Cancel first
+    token.cancel();
+
+    // Child created after cancellation should inherit cancelled state
+    const child = try token.child();
+    try testing.expect(child.isCancelled());
+}
+
 test "Tokio-style RuntimeBuilder" {
     const testing = std.testing;
     const allocator = testing.allocator;
@@ -1404,4 +1714,10 @@ test "Channel trySend/tryRecv fast paths" {
     try testing.expect(ch.tryRecv().? == 42);
     try testing.expect(ch.tryRecv().? == 43);
     try testing.expect(ch.tryRecv() == null);
+}
+
+// Include tests from imported modules
+test {
+    _ = @import("sync.zig");
+    _ = @import("compat/thread.zig");
 }

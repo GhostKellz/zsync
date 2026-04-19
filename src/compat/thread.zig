@@ -1,5 +1,5 @@
 //! Compatibility layer for std.Thread.Mutex, std.Thread.Condition, and std.time.Instant
-//! These were removed in Zig 0.16.0-dev.2535+ and moved to std.Io
+//! Maintains a stable blocking API across recent Zig dev stdlib churn.
 //! This module provides blocking versions that don't require an Io parameter
 
 const std = @import("std");
@@ -10,7 +10,7 @@ extern "kernel32" fn QueryPerformanceFrequency(lpFrequency: *i64) callconv(.c) w
 const windows = std.os.windows;
 const windows_infinite: u32 = 0xffff_ffff;
 
-/// Compatibility shim for std.time.Instant which was removed in Zig 0.16
+/// Compatibility shim for monotonic time access used across zsync.
 pub const Instant = struct {
     timestamp: i128,
 
@@ -59,7 +59,7 @@ pub fn instantDiff(a: Instant, b: Instant) u64 {
     return a.since(b);
 }
 
-/// Compatibility shim for std.posix.CLOCK which was removed in Zig 0.16
+/// Compatibility shim for clock constants used by zsync.
 pub const CLOCK = struct {
     pub const REALTIME = std.os.linux.CLOCK.REALTIME;
     pub const MONOTONIC = std.os.linux.CLOCK.MONOTONIC;
@@ -68,7 +68,7 @@ pub const CLOCK = struct {
 /// Compatibility shim for timespec
 pub const timespec = std.os.linux.timespec;
 
-/// Compatibility shim for std.posix.clock_gettime which was removed in Zig 0.16
+/// Compatibility shim for `clock_gettime` used by zsync internals.
 pub fn clock_gettime(clock_id: std.os.linux.CLOCK) error{}!timespec {
     var ts: timespec = undefined;
     switch (builtin.os.tag) {
@@ -82,7 +82,7 @@ pub fn clock_gettime(clock_id: std.os.linux.CLOCK) error{}!timespec {
     return ts;
 }
 
-/// Compatibility sleep helper for Zig 0.16-dev stdlib churn.
+/// Compatibility sleep helper for current Zig dev stdlib layouts.
 pub fn sleepNanos(ns: u64) void {
     switch (builtin.os.tag) {
         .linux => {
@@ -181,7 +181,8 @@ pub const Condition = struct {
 
     pub fn broadcast(self: *Condition) void {
         _ = self.state.fetchAdd(1, .release);
-        futexWake(&self.state.raw, std.math.maxInt(u32));
+        // Use maxInt(i32) - kernel expects signed int, u32 max becomes -1 causing EINVAL
+        futexWake(&self.state.raw, @intCast(std.math.maxInt(i32)));
     }
 };
 
@@ -244,4 +245,43 @@ fn futexWake(ptr: *const u32, max_waiters: u32) void {
             // Fallback: nothing to do for spin-wait
         },
     }
+}
+
+test "Condition broadcast wakes all waiters" {
+    var mutex = Mutex{};
+    var cond = Condition{};
+    var ready: u32 = 0;
+    var done: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
+    var threads: [4]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, struct {
+            fn run(m: *Mutex, c: *Condition, r: *u32, d: *std.atomic.Value(u32)) void {
+                m.lock();
+                r.* += 1;
+                while (r.* < 4) {
+                    c.wait(m);
+                }
+                m.unlock();
+                _ = d.fetchAdd(1, .release);
+            }
+        }.run, .{ &mutex, &cond, &ready, &done });
+    }
+
+    // Wait for all threads to be waiting
+    while (true) {
+        mutex.lock();
+        const r = ready;
+        mutex.unlock();
+        if (r == 4) break;
+        std.Thread.yield() catch {};
+    }
+
+    // Broadcast should wake all 4 threads
+    cond.broadcast();
+
+    for (threads) |t| t.join();
+
+    // All 4 threads should have completed
+    try std.testing.expectEqual(@as(u32, 4), done.load(.acquire));
 }

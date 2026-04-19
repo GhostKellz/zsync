@@ -1,21 +1,21 @@
-//! zsync- Simple Demo
+//! zsync Simple Demo
 //! Showcasing the core functionality without complex features
 
 const std = @import("std");
 const Zsync = @import("zsync");
 
 pub fn main() !void {
-    std.debug.print("🚀 zsync - The Tokio of Zig\n\n", .{});
-    
+    std.debug.print("zsync - async runtime for Zig\n\n", .{});
+
     // Simple demo task
     const DemoTask = struct {
         fn task(io: Zsync.Io) !void {
-            std.debug.print("✨ Colorblind async in action!\n", .{});
-            
+            std.debug.print("colorblind async in action\n", .{});
+
             // This code works in ANY execution model!
             var io_mut = io;
             var future = try io_mut.write("Hello from zsync!\n");
-            defer future.destroy(io.getAllocator());
+            defer future.destroy();
             
             try future.await();
             
@@ -37,7 +37,7 @@ test "simple zsync test" {
         fn task(io: Zsync.Io) !void {
             var io_mut = io;
             var future = try io_mut.write("Test passed!");
-            defer future.destroy(io.getAllocator());
+            defer future.destroy();
             try future.await();
         }
     };

@@ -117,7 +117,7 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                 if (self.io_ring) |ring| {
                     _ = ring.wait(1000) catch {}; // 1ms timeout
                 } else {
-                    std.time.sleep(1000); // 1μs
+                    compat.sleepNanos(1000); // 1μs
                 }
             }
 
@@ -148,7 +148,7 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
                 if (self.io_ring) |ring| {
                     _ = ring.wait(1000) catch {}; // 1ms timeout
                 } else {
-                    std.time.sleep(1000); // 1μs
+                    compat.sleepNanos(1000); // 1μs
                 }
             }
 
@@ -377,7 +377,7 @@ pub const WorkStealingExecutor = struct {
                 }
             } else {
                 // No work found, yield
-                std.time.sleep(1000); // 1μs
+                compat.sleepNanos(1000); // 1μs
             }
         }
     }
@@ -451,7 +451,7 @@ pub fn LockFreeConcurrentFuture(comptime T: type, comptime n: usize) type {
                 }
 
                 // Use exponential backoff
-                std.time.sleep(1000);
+                compat.sleepNanos(1000);
             }
         }
     };
@@ -543,5 +543,5 @@ test "work stealing executor" {
     try executor.submit(work_item);
 
     // Give workers time to process
-    std.time.sleep(10_000_000); // 10ms
+    compat.sleepNanos(10_000_000); // 10ms
 }

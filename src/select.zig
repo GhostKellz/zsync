@@ -53,14 +53,14 @@ pub fn selectTimeout(
         return error.NoFutures;
     }
 
-    const ts_start = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
-    const start: i64 = @intCast(@divTrunc((@as(i128, ts_start.sec) * std.time.ns_per_s + ts_start.nsec), std.time.ns_per_ms));
-    const deadline = start + @as(i64, @intCast(timeout_ms));
+    // Use cross-platform compat.Instant for timing
+    const start = compat.Instant.now() catch return error.ClockUnavailable;
+    const timeout_ns: u64 = timeout_ms * std.time.ns_per_ms;
 
     while (true) {
-        const ts_now = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
-        const now: i64 = @intCast(@divTrunc((@as(i128, ts_now.sec) * std.time.ns_per_s + ts_now.nsec), std.time.ns_per_ms));
-        if (now >= deadline) break;
+        const now = compat.Instant.now() catch return error.ClockUnavailable;
+        if (now.since(start) >= timeout_ns) break;
+
         for (futures) |fut| {
             const poll_result = fut.poll();
             if (poll_result == .ready) {
@@ -78,7 +78,7 @@ pub fn selectTimeout(
         }
 
         // Small sleep to avoid busy-waiting
-        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+        compat.sleepNanos(1 * std.time.ns_per_ms);
     }
 
     // Timeout - cancel all futures

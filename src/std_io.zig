@@ -1,5 +1,5 @@
 //! zsync - std.Io Compatible Interface
-//! Implements Zig 0.16's std.Io VTable pattern for seamless integration
+//! Implements std.Io VTable pattern for seamless integration
 //! Provides real threaded concurrency with worker pool
 
 const std = @import("std");
@@ -581,7 +581,7 @@ pub const Threaded = struct {
 
     fn threadedSleep(userdata: ?*anyopaque, nanoseconds: u64) void {
         _ = userdata;
-        std.time.sleep(nanoseconds);
+        compat.sleepNanos(nanoseconds);
     }
 };
 
@@ -683,7 +683,7 @@ pub const Blocking = struct {
 
     fn blockingSleep(userdata: ?*anyopaque, nanoseconds: u64) void {
         _ = userdata;
-        std.time.sleep(nanoseconds);
+        compat.sleepNanos(nanoseconds);
     }
 };
 

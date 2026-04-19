@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const thread = @import("thread.zig");
 
 // Future-proof wrappers for Zig's upcoming async builtins
 // When Zig 0.16 lands, these can be replaced with:
@@ -217,7 +218,7 @@ pub fn AsyncCall(comptime Func: type) type {
         pub fn await(self: *Self) !@typeInfo(Func).Fn.return_type.? {
             while (self.frame.state != .completed and self.frame.state != .cancelled) {
                 // In real implementation, this would yield to scheduler
-                std.time.sleep(1);
+                thread.sleepNanos(1);
             }
             
             if (self.frame.state == .cancelled) {

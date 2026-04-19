@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 const io_interface = @import("io_interface.zig");
 
 const Io = io_interface.Io;
@@ -174,7 +175,7 @@ const GreenThreadFuture = struct {
     };
     
     pub fn toFuture(self: *Self) Future {
-        return Future.init(&vtable, self);
+        return Future.init(self.allocator, &vtable, self);
     }
 };
 
@@ -244,7 +245,7 @@ pub const GreenThreadsIo = struct {
         const ReadOp = struct {
             fn execute(buf: []u8) IoError!IoResult {
                 // Simulate async read with cooperative yielding
-                std.time.sleep(1000_000); // 1ms cooperative yield
+                compat.sleepNanos(1000_000); // 1ms cooperative yield
                 
                 const bytes_read = std.posix.read(std.posix.STDIN_FILENO, buf) catch |err| {
                     return IoResult{
@@ -276,7 +277,7 @@ pub const GreenThreadsIo = struct {
         const WriteOp = struct {
             fn execute(data_buf: []const u8) IoError!IoResult {
                 // Simulate async write with cooperative yielding
-                std.time.sleep(1000_000); // 1ms cooperative yield
+                compat.sleepNanos(1000_000); // 1ms cooperative yield
                 
                 const bytes_written = std.posix.write(std.posix.STDOUT_FILENO, data_buf) catch |err| {
                     return IoResult{
@@ -308,7 +309,7 @@ pub const GreenThreadsIo = struct {
             fn execute(bufs: []IoBuffer) IoError!IoResult {
                 var total_read: usize = 0;
                 for (bufs) |*buffer| {
-                    std.time.sleep(500_000); // 0.5ms per buffer
+                    compat.sleepNanos(500_000); // 0.5ms per buffer
                     
                     const bytes_read = std.posix.read(std.posix.STDIN_FILENO, buffer.available()) catch break;
                     if (bytes_read == 0) break; // EOF
@@ -335,7 +336,7 @@ pub const GreenThreadsIo = struct {
             fn execute(bufs: []const []const u8) IoError!IoResult {
                 var total_written: usize = 0;
                 for (bufs) |data| {
-                    std.time.sleep(500_000); // 0.5ms per buffer
+                    compat.sleepNanos(500_000); // 0.5ms per buffer
                     
                     const bytes_written = std.posix.write(std.posix.STDOUT_FILENO, data) catch break;
                     total_written += bytes_written;
@@ -361,7 +362,7 @@ pub const GreenThreadsIo = struct {
             
             fn execute(args: Args) IoError!IoResult {
                 // Simulate sendfile with cooperative yielding
-                std.time.sleep(2000_000); // 2ms for file operations
+                compat.sleepNanos(2000_000); // 2ms for file operations
                 
                 const bytes_sent = if (builtin.os.tag == .linux) blk: {
                     _ = args.offset; // Silence unused warning
@@ -374,7 +375,7 @@ pub const GreenThreadsIo = struct {
                     var remaining = args.count;
                     
                     while (remaining > 0 and total_copied < args.count) {
-                        std.time.sleep(100_000); // Yield every 8KB
+                        compat.sleepNanos(100_000); // Yield every 8KB
                         
                         const to_read = @min(remaining, buffer.len);
                         const bytes_read = std.posix.pread(args.src_fd, buffer[0..to_read], args.offset + total_copied) catch break;
@@ -409,7 +410,7 @@ pub const GreenThreadsIo = struct {
             const Args = struct { src_fd: std.posix.fd_t, dst_fd: std.posix.fd_t, count: u64 };
             
             fn execute(args: Args) IoError!IoResult {
-                std.time.sleep(2000_000); // 2ms for file operations
+                compat.sleepNanos(2000_000); // 2ms for file operations
                 
                 const bytes_copied = if (builtin.os.tag == .linux) blk: {
                     const src_offset: u64 = 0;
@@ -422,7 +423,7 @@ pub const GreenThreadsIo = struct {
                     var remaining = args.count;
                     
                     while (remaining > 0) {
-                        std.time.sleep(100_000); // Yield every 64KB
+                        compat.sleepNanos(100_000); // Yield every 64KB
                         
                         const to_read = @min(remaining, buffer.len);
                         const bytes_read = std.posix.read(args.src_fd, buffer[0..to_read]) catch break;
@@ -456,7 +457,7 @@ pub const GreenThreadsIo = struct {
         const AcceptOp = struct {
             fn execute(fd: std.posix.fd_t) IoError!IoResult {
                 // Cooperative yielding for network operations
-                std.time.sleep(1500_000); // 1.5ms
+                compat.sleepNanos(1500_000); // 1.5ms
                 
                 var client_addr: std.posix.sockaddr = undefined;
                 var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
@@ -485,24 +486,16 @@ pub const GreenThreadsIo = struct {
         return future.toFuture();
     }
     
-    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: *const std.posix.sockaddr) IoError!Future {
+    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: *const std.posix.sockaddr, addr_len: std.posix.socklen_t) IoError!Future {
         const self: *Self = @ptrCast(@alignCast(context));
 
         const ConnectOp = struct {
-            const Args = struct { fd: std.posix.fd_t, address: *const std.posix.sockaddr };
+            const Args = struct { fd: std.posix.fd_t, address: *const std.posix.sockaddr, addr_len: std.posix.socklen_t };
 
             fn execute(args: Args) IoError!IoResult {
-                std.time.sleep(1500_000); // 1.5ms for network ops
+                compat.sleepNanos(1500_000); // 1.5ms for network ops
 
-                // Determine address length from family
-                const addr_len: std.posix.socklen_t = switch (args.address.family) {
-                    std.posix.AF.INET => @sizeOf(std.posix.sockaddr.in),
-                    std.posix.AF.INET6 => @sizeOf(std.posix.sockaddr.in6),
-                    std.posix.AF.UNIX => @sizeOf(std.posix.sockaddr.un),
-                    else => @sizeOf(std.posix.sockaddr),
-                };
-
-                std.posix.connect(args.fd, args.address, addr_len) catch |err| {
+                std.posix.connect(args.fd, args.address, args.addr_len) catch |err| {
                     return IoResult{
                         .bytes_transferred = 0,
                         .error_code = switch (err) {
@@ -522,7 +515,7 @@ pub const GreenThreadsIo = struct {
             }
         };
 
-        const thread = try self.spawnIoThread(ConnectOp.execute, ConnectOp.Args{ .fd = fd, .address = address });
+        const thread = try self.spawnIoThread(ConnectOp.execute, ConnectOp.Args{ .fd = fd, .address = address, .addr_len = addr_len });
         const future = try GreenThreadFuture.init(self.allocator, thread, &self.scheduler);
         return future.toFuture();
     }

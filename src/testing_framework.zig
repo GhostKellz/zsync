@@ -639,7 +639,7 @@ fn concurrentTestTask(io: Zsync.Io, name: []const u8) !void {
     _ = io;
     _ = name;
     // Simulate concurrent work
-    std.time.sleep(1 * std.time.ns_per_ms); // 1ms
+    compat.sleepNanos(1 * std.time.ns_per_ms); // 1ms
 }
 
 fn cpuBoundTask(io: Zsync.Io, task_id: usize) !void {
@@ -742,7 +742,7 @@ fn stacklessTestTask(io: Zsync.Io, name: []const u8) !void {
         const operations = 1000;
         
         // Simulate high concurrency test
-        std.time.sleep(10 * std.time.ns_per_ms); // 10ms simulation
+        compat.sleepNanos(10 * std.time.ns_per_ms); // 10ms simulation
         
         const end_time = compat.Instant.now() catch unreachable;
         const duration_s = @as(f64, @floatFromInt(end_time - start_time)) / 1e9;
@@ -919,7 +919,7 @@ fn stacklessTestTask(io: Zsync.Io, name: []const u8) !void {
 
 fn testLongAsyncFunction() !void {
     // Long running async function for cancellation testing
-    std.time.sleep(100 * std.time.ns_per_ms);
+    compat.sleepNanos(100 * std.time.ns_per_ms);
 }
 
 /// Run the comprehensive test suite

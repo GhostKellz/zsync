@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - LSP Server Abstractions
+//! zsync LSP Server Abstractions
 //! JSON-RPC based Language Server Protocol implementation for Grim/Grove
 
 const std = @import("std");

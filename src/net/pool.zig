@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Connection Pool
+//! zsync Connection Pool
 //! Generic connection pool with health checks and auto-reconnect
 
 const std = @import("std");
@@ -91,7 +91,7 @@ pub fn ConnectionPool(comptime T: type) type {
                     }
 
                     conn.in_use = true;
-                    const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
+                    const ts = compat.clock_gettime(std.os.linux.CLOCK.MONOTONIC) catch unreachable;
                     const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
                     conn.last_used = millis;
                     return conn.connection;
@@ -101,7 +101,7 @@ pub fn ConnectionPool(comptime T: type) type {
             // Create new connection if below max
             if (self.connections.items.len < self.config.max_connections) {
                 const conn = try self.factory(self.allocator);
-                const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
+                const ts = compat.clock_gettime(std.os.linux.CLOCK.MONOTONIC) catch unreachable;
                 const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 
                 try self.connections.append(self.allocator, PooledConnection{
@@ -118,26 +118,32 @@ pub fn ConnectionPool(comptime T: type) type {
             return error.NoConnectionsAvailable;
         }
 
-        /// Release a connection back to the pool
-        pub fn release(self: *Self, connection: T) void {
+        /// Release a connection back to the pool.
+        /// Returns error.ConnectionNotFromPool if the connection is not recognized.
+        /// IMPORTANT: Callers must handle this error to avoid semaphore permit leaks.
+        pub fn release(self: *Self, connection: T) error{ConnectionNotFromPool}!void {
             self.mutex.lock();
             defer self.mutex.unlock();
 
             for (self.connections.items) |*conn| {
                 if (conn.connection == connection) {
                     conn.in_use = false;
-                    const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
+                    const ts = compat.clock_gettime(std.os.linux.CLOCK.MONOTONIC) catch unreachable;
                     const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
                     conn.last_used = millis;
                     self.available.release();
                     return;
                 }
             }
+
+            // Connection was not found in pool - this indicates a bug in caller code.
+            // Returning error instead of silently leaking permits.
+            return error.ConnectionNotFromPool;
         }
 
         /// Ensure minimum number of connections exist
         fn ensureMinConnections(self: *Self) !void {
-            const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
+            const ts = compat.clock_gettime(std.os.linux.CLOCK.MONOTONIC) catch unreachable;
             const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
 
             while (self.connections.items.len < self.config.min_connections) {
@@ -157,7 +163,7 @@ pub fn ConnectionPool(comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            const ts = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
+            const ts = compat.clock_gettime(std.os.linux.CLOCK.MONOTONIC) catch unreachable;
             const now: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
             const timeout = @as(i64, @intCast(self.config.idle_timeout_ms));
 
@@ -256,8 +262,12 @@ test "connection pool basic" {
     const conn1 = try pool.acquire();
     try testing.expect(conn1.id > 0);
 
-    pool.release(conn1);
+    try pool.release(conn1);
 
     const stats2 = pool.getStats();
     try testing.expectEqual(0, stats2.in_use);
+
+    // Test that releasing unknown connection returns error
+    const unknown_conn = MockConn{ .id = 9999 };
+    try testing.expectError(error.ConnectionNotFromPool, pool.release(unknown_conn));
 }

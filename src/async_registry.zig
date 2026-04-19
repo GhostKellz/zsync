@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat/thread.zig");
 
 // Generic async function registry for dynamic dispatch
 pub const AsyncRegistry = struct {
@@ -188,7 +189,7 @@ pub const AsyncHandle = struct {
     pub fn await(self: *AsyncHandle, comptime T: type) !T {
         // Wait for completion
         while (self.state == .running) {
-            std.time.sleep(1);
+            compat.sleepNanos(1);
         }
         
         if (self.state == .cancelled) return error.Cancelled;

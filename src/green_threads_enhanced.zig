@@ -1,4 +1,15 @@
 //! zsync- Enhanced Green Threads with Advanced io_uring
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module is a prototype implementation with known limitations:
+//! - Scheduler loops forever even when idle
+//! - read/write futures return immediate ready placeholders
+//! - Most I/O operations return NotSupported
+//! - Capability flags report actual implemented features only
+//!
+//! Do NOT use in production until these issues are resolved.
+//!
 //! High-performance cooperative multitasking with SQPOLL, buffer rings, and advanced features
 
 const std = @import("std");
@@ -551,7 +562,7 @@ pub const EnhancedGreenThreadsIo = struct {
         const future = try self.allocator.create(ReadFuture);
         future.* = ReadFuture{};
         
-        return Future.init(&ReadFuture.vtable_impl, future);
+        return Future.init(self.allocator, &ReadFuture.vtable_impl, future);
     }
     
     fn write(context: *anyopaque, data: []const u8) IoError!Future {
@@ -581,7 +592,7 @@ pub const EnhancedGreenThreadsIo = struct {
         const future = try self.allocator.create(WriteFuture);
         future.* = WriteFuture{};
         
-        return Future.init(&WriteFuture.vtable_impl, future);
+        return Future.init(self.allocator, &WriteFuture.vtable_impl, future);
     }
     
     // Simplified implementations for other I/O operations
@@ -619,10 +630,11 @@ pub const EnhancedGreenThreadsIo = struct {
         return IoError.NotSupported;
     }
     
-    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: std.net.Address) IoError!Future {
+    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: *const std.posix.sockaddr, addr_len: std.posix.socklen_t) IoError!Future {
         _ = context;
         _ = fd;
         _ = address;
+        _ = addr_len;
         return IoError.NotSupported;
     }
     
@@ -642,11 +654,13 @@ pub const EnhancedGreenThreadsIo = struct {
     }
     
     fn supportsVectorized(_: *anyopaque) bool {
-        return true;
+        // NOTE: readv/writev return NotSupported
+        return false;
     }
-    
+
     fn supportsZeroCopy(_: *anyopaque) bool {
-        return true;
+        // NOTE: Zero-copy ops return NotSupported
+        return false;
     }
     
     fn getAllocator(context: *anyopaque) std.mem.Allocator {

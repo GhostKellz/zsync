@@ -151,7 +151,7 @@ pub const BenchmarkSuite = struct {
         }
         
         // Cooldown
-        std.time.sleep(self.config.cooldown_ms * std.time.ns_per_ms);
+        compat.sleepNanos(self.config.cooldown_ms * std.time.ns_per_ms);
         
         // Run actual benchmark
         const start_time = compat.Instant.now() catch unreachable;
@@ -472,7 +472,7 @@ pub const BenchmarkSuite = struct {
         std.debug.print("   Average speedup: {d:.2}x\n", .{avg_speedup});
         std.debug.print("   Average memory efficiency: {d:.2}x\n", .{avg_memory_efficiency});
         std.debug.print("   Platform: {s} {s}\n", .{ @tagName(builtin.target.os.tag), @tagName(builtin.target.cpu.arch) });
-        std.debug.print("\n🚀 zsync delivers production-ready performance!\n");
+        std.debug.print("\nzsync benchmark complete\n");
         std.debug.print("=" ** 60 ++ "\n");
     }
 };

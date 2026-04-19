@@ -5,12 +5,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const compat = @import("compat/thread.zig");
 
-/// Sleep for specified seconds and nanoseconds using syscall
+/// Sleep for specified seconds and nanoseconds using cross-platform compat layer
 fn nanosleepNs(sec: isize, nsec: isize) void {
-    if (builtin.os.tag == .linux) {
-        const ts = std.os.linux.timespec{ .sec = sec, .nsec = nsec };
-        _ = std.os.linux.nanosleep(&ts, null);
-    }
+    const total_ns: u64 = @intCast(@as(i128, sec) * std.time.ns_per_s + nsec);
+    compat.sleepNanos(total_ns);
 }
 
 /// Timer handle for managing scheduled timeouts
@@ -74,9 +72,9 @@ pub const TimerWheel = struct {
         self.sorted_timers.deinit(self.allocator);
     }
 
-    /// Get current time in milliseconds since runtime start
+    /// Get current time in milliseconds since runtime start (monotonic)
     fn getCurrentTimeMs() u64 {
-        const ts = compat.clock_gettime(compat.CLOCK.REALTIME) catch unreachable;
+        const ts = compat.clock_gettime(compat.CLOCK.MONOTONIC) catch unreachable;
         return @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));
     }
 

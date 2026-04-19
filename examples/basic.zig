@@ -31,7 +31,7 @@ pub fn main() !void {
 
     // Vectorized write - writes multiple buffers efficiently
     var future = try io.writev(&messages);
-    defer future.destroy(allocator);
+    defer future.destroy();
 
     // Colorblind await - adapts to execution context
     try future.await();

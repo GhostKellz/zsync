@@ -453,7 +453,7 @@ pub const RealtimeStream = struct {
                 if (self.config.real_time_priority) {
                     std.Thread.yield() catch {};
                 } else {
-                    std.time.sleep(100); // 100 microseconds
+                    compat.sleepNanos(100); // 100 microseconds
                 }
             }
         }

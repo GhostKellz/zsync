@@ -75,11 +75,54 @@ pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*Ta
         .allocator = allocator,
     };
 
-    // For now, execute synchronously on the calling thread
-    // TODO: Implement true async spawning with thread pool integration
     const io = runtime.getIo();
 
-    // Execute task and capture result
+    // Check if we can use thread pool for async execution
+    if (runtime.isThreadPoolMode()) {
+        // Create task context that captures everything needed for async execution
+        // This wrapper is self-owned: it frees itself after the task completes
+        const TaskWrapper = struct {
+            task_handle: *TaskHandle,
+            task_io: Io,
+            task_args: @TypeOf(args),
+            wrapper_allocator: std.mem.Allocator,
+
+            fn execute(ctx: *anyopaque) void {
+                const wrapper: *@This() = @ptrCast(@alignCast(ctx));
+                const alloc = wrapper.wrapper_allocator;
+
+                // Execute task and capture result
+                executeTaskWrapper(task_fn, wrapper.task_args, wrapper.task_io) catch |err| {
+                    wrapper.task_handle.result = .{ .err = err };
+                    wrapper.task_handle.completed.store(true, .release);
+                    alloc.destroy(wrapper);
+                    return;
+                };
+
+                wrapper.task_handle.result = .{ .ok = {} };
+                wrapper.task_handle.completed.store(true, .release);
+                alloc.destroy(wrapper);
+            }
+        };
+
+        const wrapper = try allocator.create(TaskWrapper);
+        wrapper.* = TaskWrapper{
+            .task_handle = handle,
+            .task_io = io,
+            .task_args = args,
+            .wrapper_allocator = allocator,
+        };
+
+        // Submit self-owned task to thread pool
+        // - The TaskWrapper frees itself after execution
+        // - The thread pool frees the internal WorkItem after execution
+        try runtime.submitSelfOwnedTask(&TaskWrapper.execute, wrapper);
+
+        return handle;
+    }
+
+    // Fallback: execute synchronously on the calling thread
+    // (for blocking mode or when thread pool isn't available)
     const result = executeTaskWrapper(task_fn, args, io) catch |err| {
         handle.result = .{ .err = err };
         handle.completed.store(true, .release);
@@ -155,5 +198,45 @@ test "spawn basic task" {
     defer handle.deinit();
 
     try handle.await();
+    try testing.expect(handle.poll());
+}
+
+test "spawn with thread pool" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Use thread pool execution model
+    const config = runtime_mod.Config{
+        .execution_model = .thread_pool,
+        .thread_pool_threads = 2,
+    };
+
+    const rt = try Runtime.init(allocator, config);
+    defer rt.deinit();
+
+    rt.setGlobal();
+    defer {
+        runtime_mod.global_runtime_mutex.lock();
+        runtime_mod.global_runtime = null;
+        runtime_mod.global_runtime_mutex.unlock();
+    }
+
+    // Shared state to verify task ran
+    var task_ran = std.atomic.Value(bool).init(false);
+
+    const TestTask = struct {
+        fn task(_: Io, ran_flag: *std.atomic.Value(bool)) !void {
+            ran_flag.store(true, .release);
+        }
+    };
+
+    const handle = try spawnOn(rt, TestTask.task, .{&task_ran});
+    defer handle.deinit();
+
+    // Wait for completion
+    try handle.await();
+
+    // Verify task actually executed
+    try testing.expect(task_ran.load(.acquire));
     try testing.expect(handle.poll());
 }

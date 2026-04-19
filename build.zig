@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    // Test suite
+    // Test suite - main module tests
     const tests = b.addTest(.{
         .root_module = zsync_mod,
     });

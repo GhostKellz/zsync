@@ -622,7 +622,7 @@ pub fn tryWithRecovery(
                     },
                     .retry_with_backoff => {
                         if (retries < recovery_hint.retry_count) {
-                            std.time.sleep(recovery_hint.backoff_ms * std.time.ns_per_ms);
+                            compat.sleepNanos(recovery_hint.backoff_ms * std.time.ns_per_ms);
                             retries += 1;
                             continue;
                         }

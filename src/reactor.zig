@@ -100,15 +100,22 @@ const EpollBackend = struct {
     events: []std.os.linux.epoll_event,
     event_count: u32,
     event_index: u32,
+    // Track user_data separately since epoll_data is a union (can hold fd OR ptr, not both)
+    fd_user_data: std.AutoHashMap(std.posix.fd_t, usize),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         return Self.initWithConfig(allocator, .{});
     }
-    
+
     pub fn initWithConfig(allocator: std.mem.Allocator, config: ReactorConfig) !Self {
-        const epoll_fd = try std.posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC);
+        const rc = std.os.linux.epoll_create1(std.os.linux.EPOLL.CLOEXEC);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCreateFailed;
+        }
+        const epoll_fd: i32 = @intCast(rc);
         const events = try allocator.alloc(std.os.linux.epoll_event, config.max_events);
 
         return Self{
@@ -117,41 +124,69 @@ const EpollBackend = struct {
             .events = events,
             .event_count = 0,
             .event_index = 0,
+            .fd_user_data = std.AutoHashMap(std.posix.fd_t, usize).init(allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
         std.Io.Threaded.closeFd(self.epoll_fd);
         self.allocator.free(self.events);
+        self.fd_user_data.deinit();
     }
 
     pub fn register(self: *Self, interest: Interest) !void {
+        // Store fd in epoll_data for consistent retrieval in nextEvent
         var event = std.os.linux.epoll_event{
             .events = self.ioEventToEpoll(interest.events),
-            .data = std.os.linux.epoll_data{ .ptr = interest.user_data },
+            .data = std.os.linux.epoll_data{ .fd = interest.fd },
         };
 
-        try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, interest.fd, &event);
+        const rc = std.os.linux.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, interest.fd, &event);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCtlFailed;
+        }
+
+        // Store user_data in separate map
+        try self.fd_user_data.put(interest.fd, interest.user_data);
     }
 
     pub fn modify(self: *Self, interest: Interest) !void {
         var event = std.os.linux.epoll_event{
             .events = self.ioEventToEpoll(interest.events),
-            .data = std.os.linux.epoll_data{ .ptr = interest.user_data },
+            .data = std.os.linux.epoll_data{ .fd = interest.fd },
         };
 
-        try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, interest.fd, &event);
+        const rc = std.os.linux.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, interest.fd, &event);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCtlFailed;
+        }
+
+        // Update user_data in map
+        try self.fd_user_data.put(interest.fd, interest.user_data);
     }
 
     pub fn unregister(self: *Self, fd: std.posix.fd_t) !void {
         // Note: event parameter is ignored in CTL_DEL but required by the API
         var dummy_event: std.os.linux.epoll_event = undefined;
-        try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, &dummy_event);
+        const rc = std.os.linux.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, &dummy_event);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollCtlFailed;
+        }
+
+        // Remove user_data from map
+        _ = self.fd_user_data.remove(fd);
     }
 
     pub fn poll(self: *Self, timeout_ms: i32) !u32 {
-        const count = std.posix.epoll_wait(self.epoll_fd, self.events, timeout_ms);
-        self.event_count = @intCast(count);
+        const rc = std.os.linux.epoll_wait(self.epoll_fd, self.events.ptr, @intCast(self.events.len), timeout_ms);
+        const errno = std.posix.errno(rc);
+        if (errno != .SUCCESS) {
+            return error.EpollWaitFailed;
+        }
+        self.event_count = @intCast(rc);
         self.event_index = 0;
         return self.event_count;
     }
@@ -164,10 +199,13 @@ const EpollBackend = struct {
         const epoll_event = self.events[self.event_index];
         self.event_index += 1;
 
+        const fd = epoll_event.data.fd;
+        const user_data = self.fd_user_data.get(fd) orelse 0;
+
         return Event{
-            .fd = @intCast(epoll_event.data.fd),
+            .fd = fd,
             .events = try self.epollToIoEvent(epoll_event.events),
-            .user_data = epoll_event.data.ptr,
+            .user_data = user_data,
         };
     }
 
@@ -462,4 +500,47 @@ test "io event conversion" {
     const testing = std.testing;
     try testing.expect(event.readable);
     try testing.expect(!event.writable);
+}
+
+test "reactor register and poll round-trip" {
+    if (builtin.os.tag != .linux) return;
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var reactor = try Reactor.init(allocator);
+    defer reactor.deinit();
+
+    // Create a pipe for testing using low-level Linux syscall
+    var pipe_fds: [2]i32 = undefined;
+    const rc = std.os.linux.pipe(&pipe_fds);
+    if (std.posix.errno(rc) != .SUCCESS) return;
+    defer {
+        std.Io.Threaded.closeFd(pipe_fds[0]);
+        std.Io.Threaded.closeFd(pipe_fds[1]);
+    }
+
+    // Register read end for readable events
+    const interest = Interest{
+        .fd = pipe_fds[0],
+        .events = .{ .readable = true },
+        .user_data = 0x1234,
+    };
+    try reactor.register(interest);
+
+    // Write to pipe to trigger readable event
+    const test_data = "test";
+    const write_rc = std.os.linux.write(pipe_fds[1], test_data.ptr, test_data.len);
+    if (std.posix.errno(write_rc) != .SUCCESS) return;
+
+    // Poll should return the readable event with correct fd and user_data
+    const count = try reactor.poll(100);
+    try testing.expect(count > 0);
+
+    const event = try reactor.nextEvent();
+    try testing.expect(event != null);
+    if (event) |ev| {
+        try testing.expect(ev.fd == pipe_fds[0]);
+        try testing.expect(ev.events.readable);
+        try testing.expect(ev.user_data == 0x1234);
+    }
 }

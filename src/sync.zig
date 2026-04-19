@@ -49,10 +49,16 @@ pub const Semaphore = struct {
         return true;
     }
 
-    /// Release a permit
+    /// Release a permit. Does nothing if already at max permits.
     pub fn release(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
+
+        const current = self.permits.load(.monotonic);
+        // Don't exceed max_permits - silently ignore over-release
+        if (current >= @as(isize, @intCast(self.max_permits))) {
+            return;
+        }
 
         _ = self.permits.fetchAdd(1, .release);
         self.condition.signal();
@@ -69,22 +75,16 @@ pub const Semaphore = struct {
 /// Barrier for synchronizing multiple tasks
 pub const Barrier = struct {
     count: usize,
-    waiting: std.atomic.Value(usize),
-    generation: std.atomic.Value(usize),
-    mutex: compat.Mutex,
-    condition: compat.Condition,
+    waiting: usize = 0,
+    generation: u32 = 0,
+    mutex: compat.Mutex = .{},
+    cond: compat.Condition = .{},
 
     const Self = @This();
 
     /// Create a new barrier for N tasks
     pub fn init(count: usize) Self {
-        return Self{
-            .count = count,
-            .waiting = std.atomic.Value(usize).init(0),
-            .generation = std.atomic.Value(usize).init(0),
-            .mutex = .{},
-            .condition = .{},
-        };
+        return Self{ .count = count };
     }
 
     /// Wait at the barrier until all tasks arrive
@@ -92,18 +92,16 @@ pub const Barrier = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const gen = self.generation.load(.monotonic);
-        const new_waiting = self.waiting.fetchAdd(1, .monotonic) + 1;
+        const gen = self.generation;
+        self.waiting += 1;
 
-        if (new_waiting == self.count) {
-            // Last task to arrive - release everyone
-            self.waiting.store(0, .release);
-            _ = self.generation.fetchAdd(1, .release);
-            self.condition.broadcast();
+        if (self.waiting == self.count) {
+            self.waiting = 0;
+            self.generation +%= 1;
+            self.cond.broadcast();
         } else {
-            // Wait for everyone to arrive
-            while (self.generation.load(.acquire) == gen) {
-                self.condition.wait(&self.mutex);
+            while (self.generation == gen) {
+                self.cond.wait(&self.mutex);
             }
         }
     }
@@ -349,6 +347,27 @@ test "semaphore tryAcquire" {
     try testing.expect(sem.tryAcquire());
 }
 
+test "semaphore over-release is bounded" {
+    const testing = std.testing;
+
+    var sem = Semaphore.init(2);
+    try testing.expectEqual(2, sem.availablePermits());
+
+    // Extra releases should not exceed max_permits
+    sem.release();
+    try testing.expectEqual(2, sem.availablePermits());
+
+    sem.release();
+    try testing.expectEqual(2, sem.availablePermits());
+
+    // Normal acquire/release still works
+    sem.acquire();
+    try testing.expectEqual(1, sem.availablePermits());
+
+    sem.release();
+    try testing.expectEqual(2, sem.availablePermits());
+}
+
 test "latch countdown" {
     const testing = std.testing;
 
@@ -364,4 +383,94 @@ test "latch countdown" {
 
     latch.countDown();
     try testing.expectEqual(0, latch.getCount());
+}
+
+test "AsyncMutex contention" {
+    const testing = std.testing;
+
+    var mutex = AsyncMutex.init();
+    var counter: u32 = 0;
+
+    var threads: [4]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, struct {
+            fn run(m: *AsyncMutex, c: *u32) void {
+                for (0..100) |_| {
+                    m.lock();
+                    defer m.unlock();
+                    c.* += 1;
+                }
+            }
+        }.run, .{ &mutex, &counter });
+    }
+
+    for (threads) |t| t.join();
+    try testing.expectEqual(@as(u32, 400), counter);
+}
+
+test "AsyncRwLock concurrent reads" {
+    const testing = std.testing;
+
+    var rwlock = AsyncRwLock.init();
+    var shared_value: u32 = 42;
+
+    var threads: [4]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, struct {
+            fn run(rw: *AsyncRwLock, val: *u32) void {
+                for (0..10) |_| {
+                    rw.lockRead();
+                    defer rw.unlockRead();
+                    std.debug.assert(val.* == 42);
+                }
+            }
+        }.run, .{ &rwlock, &shared_value });
+    }
+
+    for (threads) |t| t.join();
+    try testing.expectEqual(@as(u32, 42), shared_value);
+}
+
+test "Barrier synchronization" {
+    const testing = std.testing;
+
+    var barrier = Barrier.init(4);
+    var arrivals: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
+    var threads: [4]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, struct {
+            fn run(b: *Barrier, a: *std.atomic.Value(u32)) void {
+                _ = a.fetchAdd(1, .monotonic);
+                b.wait();
+                // After barrier, all 4 threads arrived
+                std.debug.assert(a.load(.monotonic) == 4);
+            }
+        }.run, .{ &barrier, &arrivals });
+    }
+
+    for (threads) |t| t.join();
+    try testing.expectEqual(@as(u32, 4), arrivals.load(.monotonic));
+}
+
+test "WaitGroup add and done" {
+    const testing = std.testing;
+
+    var wg = WaitGroup.init();
+    var completed: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+
+    wg.add(4);
+
+    var threads: [4]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, struct {
+            fn run(w: *WaitGroup, c: *std.atomic.Value(u32)) void {
+                defer w.done();
+                _ = c.fetchAdd(1, .release);
+            }
+        }.run, .{ &wg, &completed });
+    }
+
+    wg.wait();
+    try testing.expectEqual(@as(u32, 4), completed.load(.acquire));
 }

@@ -5,10 +5,9 @@ const std = @import("std");
 const io_interface = @import("io_interface.zig");
 const compat = @import("compat/thread.zig");
 
-/// Sleep for specified seconds and nanoseconds using syscall
-fn nanosleepNs(sec: isize, nsec: isize) void {
-    const ts = std.os.linux.timespec{ .sec = sec, .nsec = nsec };
-    _ = std.os.linux.nanosleep(&ts, null);
+/// Sleep for specified nanoseconds using compat layer
+fn sleepNs(ns: u64) void {
+    compat.sleepNanos(ns);
 }
 const runtime_mod = @import("runtime.zig");
 
@@ -73,14 +72,16 @@ pub const Nursery = struct {
     pub fn wait(self: *Self) !void {
         // Poll all tasks until complete
         while (self.completed_count.load(.acquire) < self.total_count) {
+            // Process tasks under mutex to avoid race with spawn()
             self.mutex.lock();
-            const tasks_snapshot = self.tasks.items;
-            self.mutex.unlock();
+            const task_count = self.tasks.items.len;
 
-            for (tasks_snapshot, 0..) |*entry, i| {
+            var i: usize = 0;
+            while (i < task_count) : (i += 1) {
+                const entry = &self.tasks.items[i];
                 if (entry.completed.load(.acquire)) continue;
 
-                // Poll the future
+                // Poll the future (safe to do under mutex since poll is non-blocking)
                 switch (entry.future.poll()) {
                     .ready => {
                         entry.completed.store(true, .release);
@@ -90,6 +91,7 @@ pub const Nursery = struct {
                         entry.completed.store(true, .release);
                         entry.result = e;
                         _ = self.completed_count.fetchAdd(1, .release);
+                        self.mutex.unlock();
 
                         // Cancel all other tasks on error
                         self.cancelAll();
@@ -101,11 +103,11 @@ pub const Nursery = struct {
                     },
                     .pending => {},
                 }
-                _ = i;
             }
+            self.mutex.unlock();
 
             // Small yield to avoid busy-waiting
-            nanosleepNs(0, 100_000); // 100μs
+            sleepNs(100_000); // 100μs
         }
 
         // Check if any task failed
@@ -142,9 +144,9 @@ pub const Nursery = struct {
 
         self.mutex.lock();
 
-        // Destroy futures
+        // Destroy futures using proper cleanup path (handles cancel_token)
         for (self.tasks.items) |*entry| {
-            entry.future.vtable.destroy(entry.future.context, self.allocator);
+            entry.future.destroy();
         }
 
         self.tasks.deinit(self.allocator);
@@ -209,11 +211,11 @@ test "nursery basic spawn and wait" {
 
     // Spawn some tasks
     const Task = struct {
-        fn task1() !void {
-            std.posix.nanosleep(0, 10_000_000); // 10ms
+        fn task1(_: io_interface.Io) !void {
+            compat.sleepNanos(10_000_000); // 10ms
         }
-        fn task2() !void {
-            std.posix.nanosleep(0, 5_000_000); // 5ms
+        fn task2(_: io_interface.Io) !void {
+            compat.sleepNanos(5_000_000); // 5ms
         }
     };
 
@@ -246,8 +248,8 @@ test "nursery with RAII pattern" {
     const TestFunc = struct {
         fn runTasks(n: *Nursery) !void {
             const Task = struct {
-                fn task() !void {
-                    std.posix.nanosleep(0, 1_000_000); // 1ms
+                fn task(_: io_interface.Io) !void {
+                    compat.sleepNanos(1_000_000); // 1ms
                 }
             };
 

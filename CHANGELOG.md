@@ -2,6 +2,93 @@
 
 All notable changes to zsync will be documented in this file.
 
+
+## [v0.8.0] - 2026-04-19 🔧 **Zig 0.17 Compatibility Release**
+
+### Supported Surface
+
+This release provides stability guarantees for the following modules:
+
+**Core Runtime (Supported):**
+- `zsync.Runtime` - Main async runtime
+- `zsync.Io` - Unified I/O interface
+- `zsync.Future` - Async result handle
+- `zsync.BlockingIo` - Synchronous I/O backend
+- `zsync.ThreadPoolIo` - Thread pool backend (Linux, macOS, Windows)
+- `src/reactor.zig`, `src/async_runtime.zig`, `src/sleep.zig`
+
+**Experimental (No Stability Guarantees):**
+- `future_combinators.zig` - Combinator execution unimplemented
+- `network_integration.zig` - Mock HTTP responses
+- `kernel_events_async.zig` - Simulated kernel events
+- `stackless_io.zig` - Mock @async builtins
+- `green_threads.zig`, `green_threads_enhanced.zig` - Incomplete I/O paths
+- `task_management.zig` - Context lifecycle leaks
+- `async_file_ops.zig` - Type safety issues
+- `wasm/async.zig`, `syscall_async.zig`, `zerocopy_async.zig`, `multithread.zig`
+
+### Added
+- Native Windows I/O using `ReadFile`/`WriteFile` for files and `recv`/`send` for sockets.
+- Descriptor-kind aware close (`CloseHandle` for files, `closesocket` for sockets).
+- `spawn.zig` now properly uses thread pool for async task execution (was previously a synchronous stub).
+- `ThreadPoolIo.submitSelfOwned()` for fire-and-forget CPU-bound tasks with automatic cleanup.
+- `ThreadPoolIo.submitCustom()` for Future-tracked custom task submission.
+- `Runtime.submitSelfOwnedTask()` for spawning CPU-bound work on the pool.
+- Cross-platform timeout support in `select.zig` using `compat.Instant`.
+- Cross-platform POSIX I/O in `BlockingIo` (Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFlyBSD).
+- `JoinSet` now provides true concurrent execution with thread spawning and `joinNext()` for awaiting results.
+- `BroadcastChannel` now supports capacity limits, lag tracking, and blocking receive.
+- `WatchChannel` now has `Watcher` type with `changed()` blocking wait for value changes.
+- Documentation for task spawning API in `api-reference.md` and `architecture.md`.
+- Comprehensive Tokio-style primitives documentation in `docs/tokio-primitives.md`.
+
+### Fixed
+- Fixed `io_uring.poll()` to use kernel-backed timeout via `IORING_OP_TIMEOUT` and `IORING_ENTER_GETEVENTS` instead of 100µs cooperative polling; reduces CPU spin during long waits.
+- Fixed `runtime_factory` fallback handling so `AsyncRuntime.io()` no longer fabricates `Io` values backed by stack-local blocking state.
+- Fixed `runtime_factory` Windows fallback to use proper thread count (was incorrectly passing 4096 as thread count).
+- Fixed synchronous `Io.readSync()` and `Io.writeSync()` helpers to destroy futures with the owning I/O allocator.
+- Fixed timeout combinator cleanup so wrapped futures are destroyed with their original allocator.
+- Fixed detached task lifetime handling in `runtime.spawn()` by joining spawned worker threads during future teardown.
+- Hardened thread-pool future cleanup so work items are not freed before workers finish touching them.
+- Fixed Windows IOCP backend to use real platform IOCP instead of stubs.
+- Fixed `ThreadPoolIo` to use condition-based waiting instead of busy-polling.
+- Fixed `Runtime.spawn()` to inject `Io` parameter matching `run()` contract.
+- Fixed `select.zig` to use cross-platform timing instead of Linux-specific `clock_gettime`.
+- Fixed `nursery.zig` race condition where `tasks_snapshot` could become invalid during concurrent spawn.
+- Fixed `nursery.zig` to use cross-platform `compat.sleepNanos` instead of Linux-specific `nanosleep`.
+- Fixed `timer.zig` to use `CLOCK.MONOTONIC` for timer bookkeeping (was incorrectly using `REALTIME`).
+- Fixed `.stackless` execution model to return `RuntimeError.PlatformUnsupported` at init instead of allowing unreachable.
+- Fixed `BlockingIo.readv()` and `writev()` to return `IoError.NotSupported` on non-POSIX (was silent false-success).
+
+### Changed
+- Release metadata now targets `v0.8.0` and Zig `0.17.0-dev.27+0dd99c37c`.
+- Updated core docs and examples to describe Zig 0.17 dev compatibility as the current baseline.
+- Aligned public version constants and tests with `v0.8.0`.
+- Updated README examples to match the current channel and future-combinator APIs.
+- Experimental modules now carry clear WARNING banners in their docstrings.
+- `green_threads.zig` and `green_threads_enhanced.zig` now report accurate capability flags.
+- Channel API consolidated: `bounded()` and `unbounded()` now point to simpler `channels.zig` ring-buffer implementation.
+- Removed duplicate `boundedChannel`/`unboundedChannel` exports (use `bounded`/`unbounded` instead).
+- Tokio-style primitives upgraded from partial to functional (JoinSet, BroadcastChannel, WatchChannel).
+- `main_cross.zig` now explicitly documented as backend maturity demo, not a supported API surface.
+
+### Known Limitations
+- Non-POSIX platforms (WASM, Windows for file I/O) return `IoError.NotSupported` from `BlockingIo` operations.
+- Cross-platform demo (`main_cross.zig`) is a backend maturity demonstration, not a supported API surface.
+
+### Verification
+- `zig build` - Native Linux build
+- `zig build test --summary all` - 54/54 tests pass
+- `zig build examples --summary all` - 9/9 steps pass
+- `zig build cross-compile --summary all` - 11/11 targets pass
+  - Native Linux x86_64
+  - WASM32 freestanding
+  - AArch64 Linux
+  - AArch64 macOS
+  - Windows x86_64 GNU
+
+---
+
 ## [v0.7.9] - 2026-04-12 🔧 **Current Zig Dev Compatibility And Release Polish**
 
 ### Fixed
@@ -38,6 +125,9 @@ All notable changes to zsync will be documented in this file.
 - `zig build cross-compile --summary all`
 
 ---
+
+
+
 
 ## [v0.7.7] - 2025-03-16 🔧 **Zig 0.16.0-dev.2736+ Compatibility**
 

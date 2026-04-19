@@ -188,7 +188,7 @@ pub const AsyncSyscallExecutor = struct {
             };
             
             // Small delay to prevent busy waiting
-            std.time.sleep(100_000); // 100μs
+            compat.sleepNanos(100_000); // 100μs
         }
     }
     

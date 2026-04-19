@@ -434,10 +434,10 @@ pub const ZeroCopyNetworkInterface = struct {
             };
             
             // Brief yield to prevent busy waiting
-            std.time.sleep(1000);
+            compat.sleepNanos(1000);
         }
     }
-    
+
     fn txWorker(self: *Self, worker_id: usize) void {
         _ = worker_id;
         
@@ -447,10 +447,10 @@ pub const ZeroCopyNetworkInterface = struct {
             };
             
             // Brief yield to prevent busy waiting
-            std.time.sleep(1000);
+            compat.sleepNanos(1000);
         }
     }
-    
+
     fn processRxQueue(self: *Self) !void {
         // Simulate packet reception from hardware
         var batch_packets: [64]PacketDescriptor = undefined;

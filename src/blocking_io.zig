@@ -1,10 +1,77 @@
 //! zsync- Modern Blocking I/O Implementation
 //! Zero-overhead blocking I/O with colorblind async support
 //! Perfect for CPU-bound workloads and simple use cases
+//! Cross-platform: Linux, macOS, BSD (POSIX systems)
 
 const std = @import("std");
 const builtin = @import("builtin");
 const io_interface = @import("io_interface.zig");
+
+/// Check if we're on a POSIX-compatible platform
+const is_posix = switch (builtin.os.tag) {
+    .linux, .macos, .freebsd, .openbsd, .netbsd, .dragonfly => true,
+    else => false,
+};
+
+/// Cross-platform POSIX write wrapper (mirrors std.posix.read pattern)
+fn posixWrite(fd: std.posix.fd_t, data: []const u8) IoError!usize {
+    if (!is_posix) return IoError.NotSupported;
+    if (data.len == 0) return 0;
+
+    const max_count: usize = switch (builtin.os.tag) {
+        .linux => 0x7ffff000,
+        .macos => @intCast(std.math.maxInt(i32)),
+        else => @intCast(std.math.maxInt(isize)),
+    };
+
+    while (true) {
+        const rc = std.posix.system.write(fd, data.ptr, @min(data.len, max_count));
+        const errno = std.posix.errno(rc);
+        switch (errno) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+            .AGAIN => return IoError.WouldBlock,
+            .CONNRESET => return IoError.ConnectionReset,
+            .PIPE => return IoError.BrokenPipe,
+            else => return IoError.Unexpected,
+        }
+    }
+}
+
+/// Cross-platform POSIX accept wrapper
+fn posixAccept(listener_fd: std.posix.fd_t) IoError!std.posix.fd_t {
+    if (!is_posix) return IoError.NotSupported;
+
+    while (true) {
+        const rc = std.posix.system.accept(listener_fd, null, null);
+        const errno = std.posix.errno(rc);
+        switch (errno) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+            .AGAIN => return IoError.WouldBlock,
+            .CONNABORTED => return IoError.ConnectionReset,
+            else => return IoError.Unexpected,
+        }
+    }
+}
+
+/// Cross-platform POSIX connect wrapper
+fn posixConnect(fd: std.posix.fd_t, addr: *const std.posix.sockaddr, addr_len: std.posix.socklen_t) IoError!void {
+    if (!is_posix) return IoError.NotSupported;
+
+    while (true) {
+        const rc = std.posix.system.connect(fd, addr, addr_len);
+        const errno = std.posix.errno(rc);
+        switch (errno) {
+            .SUCCESS => return,
+            .INTR => continue,
+            .AGAIN, .INPROGRESS => return IoError.WouldBlock,
+            .CONNREFUSED => return IoError.ConnectionReset,
+            .CONNRESET => return IoError.ConnectionReset,
+            else => return IoError.Unexpected,
+        }
+    }
+}
 
 const Io = io_interface.Io;
 const IoMode = io_interface.IoMode;
@@ -17,6 +84,8 @@ pub const BlockingIo = struct {
     allocator: std.mem.Allocator,
     buffer_size: usize,
     metrics: Metrics,
+    read_fd: std.posix.fd_t,
+    write_fd: std.posix.fd_t,
 
     const Self = @This();
 
@@ -47,12 +116,30 @@ pub const BlockingIo = struct {
         }
     };
 
-    /// Initialize blocking I/O with specified buffer size
+    /// Initialize blocking I/O with specified buffer size (defaults to stdin/stdout)
+    /// Note: BlockingIo is POSIX-only. On Windows, use WindowsIocpIo instead.
     pub fn init(allocator: std.mem.Allocator, buffer_size: usize) Self {
+        // On Windows, fd_t is *anyopaque (HANDLE), so we use undefined as placeholder
+        // since all operations return NotSupported anyway
+        const read_fd: std.posix.fd_t = if (is_posix) std.posix.STDIN_FILENO else undefined;
+        const write_fd: std.posix.fd_t = if (is_posix) std.posix.STDOUT_FILENO else undefined;
         return Self{
             .allocator = allocator,
             .buffer_size = buffer_size,
             .metrics = Metrics{},
+            .read_fd = read_fd,
+            .write_fd = write_fd,
+        };
+    }
+
+    /// Initialize blocking I/O with specific file descriptors
+    pub fn initWithFds(allocator: std.mem.Allocator, buffer_size: usize, read_fd: std.posix.fd_t, write_fd: std.posix.fd_t) Self {
+        return Self{
+            .allocator = allocator,
+            .buffer_size = buffer_size,
+            .metrics = Metrics{},
+            .read_fd = read_fd,
+            .write_fd = write_fd,
         };
     }
 
@@ -127,16 +214,31 @@ pub const BlockingIo = struct {
                 const read_ctx: *@This() = @ptrCast(@alignCast(ctx));
                 allocator.destroy(read_ctx);
             }
+
+            fn getResult(ctx: *anyopaque) ?io_interface.IoResult {
+                const read_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                const bytes_read = read_ctx.result catch return null;
+                return .{ .bytes_transferred = bytes_read };
+            }
         };
 
         const read_context = try self.allocator.create(ReadContext);
 
-        // Perform actual read (simplified - would use real syscalls)
-        const bytes_read = @min(buffer.len, 1024); // Simulate reading data
-        @memset(buffer[0..bytes_read], 'A'); // Fill with test data
+        // Perform actual blocking read using POSIX syscall (Linux, macOS, BSD)
+        const result: IoError!usize = blk: {
+            if (is_posix) {
+                break :blk std.posix.read(self.read_fd, buffer) catch |err| switch (err) {
+                    error.WouldBlock => IoError.WouldBlock,
+                    error.ConnectionResetByPeer => IoError.ConnectionReset,
+                    else => IoError.Unexpected,
+                };
+            } else {
+                break :blk IoError.NotSupported;
+            }
+        };
 
         read_context.* = ReadContext{
-            .result = bytes_read,
+            .result = result,
             .self_ref = self,
         };
 
@@ -144,9 +246,10 @@ pub const BlockingIo = struct {
             .poll = ReadContext.poll,
             .cancel = ReadContext.cancel,
             .destroy = ReadContext.destroy,
+            .get_result = ReadContext.getResult,
         };
 
-        return Future.init(&read_vtable, read_context);
+        return Future.init(self.allocator, &read_vtable, read_context);
     }
 
     /// Blocking write operation that completes immediately
@@ -176,12 +279,21 @@ pub const BlockingIo = struct {
                 const write_ctx: *@This() = @ptrCast(@alignCast(ctx));
                 allocator.destroy(write_ctx);
             }
+
+            fn getResult(ctx: *anyopaque) ?io_interface.IoResult {
+                const write_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                const bytes_written = write_ctx.result catch return null;
+                return .{ .bytes_transferred = bytes_written };
+            }
         };
 
         const write_context = try self.allocator.create(WriteContext);
 
+        // Perform actual blocking write using POSIX syscall (Linux, macOS, BSD)
+        const result: IoError!usize = posixWrite(self.write_fd, data);
+
         write_context.* = WriteContext{
-            .result = data.len,
+            .result = result,
             .self_ref = self,
         };
 
@@ -189,13 +301,15 @@ pub const BlockingIo = struct {
             .poll = WriteContext.poll,
             .cancel = WriteContext.cancel,
             .destroy = WriteContext.destroy,
+            .get_result = WriteContext.getResult,
         };
 
-        return Future.init(&write_vtable, write_context);
+        return Future.init(self.allocator, &write_vtable, write_context);
     }
 
     /// Vectorized read - optimal implementation for blocking I/O
     fn readv(context: *anyopaque, buffers: []IoBuffer) IoError!Future {
+        if (!is_posix) return IoError.NotSupported;
         if (buffers.len == 0) return IoError.BufferTooSmall;
 
         const self: *Self = @ptrCast(@alignCast(context));
@@ -222,15 +336,14 @@ pub const BlockingIo = struct {
         const readv_context = try self.allocator.create(ReadvContext);
         var total_bytes: usize = 0;
 
-        // Simulate reading into all buffers
+        // Perform real blocking reads into all buffers
         for (buffers) |*buffer| {
             const available = buffer.available();
             if (available.len > 0) {
-                // Simulate reading data (in real implementation, this would be actual I/O)
-                const bytes_to_read = @min(available.len, 1024); // Simulate partial read
-                @memset(available[0..bytes_to_read], 'B'); // 'B' for Blocking vectorized
-                buffer.advance(bytes_to_read);
-                total_bytes += bytes_to_read;
+                const bytes_read = std.posix.read(self.read_fd, available) catch break;
+                if (bytes_read == 0) break; // EOF
+                buffer.advance(bytes_read);
+                total_bytes += bytes_read;
             }
         }
 
@@ -245,11 +358,13 @@ pub const BlockingIo = struct {
             .destroy = ReadvContext.destroy,
         };
 
-        return Future.init(&readv_vtable, readv_context);
+        return Future.init(self.allocator, &readv_vtable, readv_context);
     }
 
     /// Vectorized write - optimal implementation for blocking I/O
     fn writev(context: *anyopaque, data: []const []const u8) IoError!Future {
+        if (!is_posix) return IoError.NotSupported;
+
         const self: *Self = @ptrCast(@alignCast(context));
 
         const WritevContext = struct {
@@ -274,9 +389,16 @@ pub const BlockingIo = struct {
         const writev_context = try self.allocator.create(WritevContext);
         var total_bytes: usize = 0;
 
-        // Account for all data segments without emitting debug output.
+        // Perform real blocking writes for all segments
         for (data) |segment| {
-            total_bytes += segment.len;
+            var written: usize = 0;
+            while (written < segment.len) {
+                const remaining = segment[written..];
+                const bytes_written = posixWrite(self.write_fd, remaining) catch break;
+                if (bytes_written == 0) break;
+                written += bytes_written;
+            }
+            total_bytes += written;
         }
 
         writev_context.* = WritevContext{
@@ -290,7 +412,7 @@ pub const BlockingIo = struct {
             .destroy = WritevContext.destroy,
         };
 
-        return Future.init(&writev_vtable, writev_context);
+        return Future.init(self.allocator, &writev_vtable, writev_context);
     }
 
     /// Zero-copy file transfer using sendfile() on Linux
@@ -324,10 +446,11 @@ pub const BlockingIo = struct {
 
         // Perform zero-copy file transfer using sendfile()
         var offset_val: i64 = @intCast(offset);
-        const result = std.os.linux.sendfile(std.posix.STDOUT_FILENO, src_fd, &offset_val, count);
+        const result = std.os.linux.sendfile(self.write_fd, src_fd, &offset_val, count);
+        const bytes_transferred: usize = if (std.posix.errno(result) == .SUCCESS) result else 0;
 
         sendfile_context.* = SendFileContext{
-            .bytes_transferred = result,
+            .bytes_transferred = bytes_transferred,
             .self_ref = self,
         };
 
@@ -337,7 +460,7 @@ pub const BlockingIo = struct {
             .destroy = SendFileContext.destroy,
         };
 
-        return Future.init(&sendfile_vtable, sendfile_context);
+        return Future.init(self.allocator, &sendfile_vtable, sendfile_context);
     }
 
     /// Zero-copy file range copy using copy_file_range() on Linux
@@ -394,22 +517,108 @@ pub const BlockingIo = struct {
             .destroy = CopyFileRangeContext.destroy,
         };
 
-        return Future.init(&copy_vtable, copy_context);
+        return Future.init(self.allocator, &copy_vtable, copy_context);
     }
 
-    /// Accept connection (simplified implementation)
+    /// Accept connection on POSIX systems
     fn accept(context: *anyopaque, listener_fd: std.posix.fd_t) IoError!Future {
-        _ = context;
-        _ = listener_fd;
-        return IoError.NotSupported; // Would implement real socket operations
+        const self: *Self = @ptrCast(@alignCast(context));
+
+        if (!is_posix) {
+            return IoError.NotSupported;
+        }
+
+        const AcceptContext = struct {
+            result: IoError!std.posix.fd_t,
+            self_ref: *Self,
+
+            fn poll(ctx: *anyopaque) Future.PollResult {
+                const accept_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                accept_ctx.self_ref.metrics.incrementOps();
+                if (accept_ctx.result) |_| {
+                    return .ready;
+                } else |err| {
+                    accept_ctx.self_ref.metrics.incrementErrors();
+                    return .{ .err = err };
+                }
+            }
+
+            fn cancel(_: *anyopaque) void {}
+
+            fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
+                const accept_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                allocator.destroy(accept_ctx);
+            }
+        };
+
+        const accept_context = try self.allocator.create(AcceptContext);
+        accept_context.* = AcceptContext{
+            .result = posixAccept(listener_fd),
+            .self_ref = self,
+        };
+
+        const accept_vtable = Future.FutureVTable{
+            .poll = AcceptContext.poll,
+            .cancel = AcceptContext.cancel,
+            .destroy = AcceptContext.destroy,
+        };
+
+        return Future.init(self.allocator, &accept_vtable, accept_context);
     }
 
-    /// Connect to address (simplified implementation)
-    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: if (builtin.target.cpu.arch == .wasm32) []const u8 else *const std.posix.sockaddr) IoError!Future {
-        _ = context;
-        _ = fd;
-        _ = address;
-        return IoError.NotSupported; // Would implement real socket operations
+    /// Connect to address on POSIX systems
+    fn connect(context: *anyopaque, fd: std.posix.fd_t, address: if (builtin.target.cpu.arch == .wasm32) []const u8 else *const std.posix.sockaddr, addr_len: std.posix.socklen_t) IoError!Future {
+        const self: *Self = @ptrCast(@alignCast(context));
+
+        if (!is_posix) {
+            return IoError.NotSupported;
+        }
+
+        const ConnectContext = struct {
+            result: IoError!void,
+            self_ref: *Self,
+
+            fn poll(ctx: *anyopaque) Future.PollResult {
+                const connect_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                connect_ctx.self_ref.metrics.incrementOps();
+                if (connect_ctx.result) |_| {
+                    return .ready;
+                } else |err| {
+                    connect_ctx.self_ref.metrics.incrementErrors();
+                    return .{ .err = err };
+                }
+            }
+
+            fn cancel(_: *anyopaque) void {}
+
+            fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
+                const connect_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                allocator.destroy(connect_ctx);
+            }
+        };
+
+        const connect_context = try self.allocator.create(ConnectContext);
+
+        const result: IoError!void = blk: {
+            if (builtin.target.cpu.arch == .wasm32) {
+                break :blk IoError.NotSupported;
+            } else {
+                break :blk posixConnect(fd, address, addr_len);
+            }
+        };
+
+        connect_context.* = ConnectContext{
+            .result = result,
+            .self_ref = self,
+        };
+
+        const connect_vtable = Future.FutureVTable{
+            .poll = ConnectContext.poll,
+            .cancel = ConnectContext.cancel,
+            .destroy = ConnectContext.destroy,
+        };
+
+        return Future.init(self.allocator, &connect_vtable, connect_context);
     }
 
     /// Close file descriptor
@@ -445,7 +654,7 @@ pub const BlockingIo = struct {
             .destroy = CloseContext.destroy,
         };
 
-        return Future.init(&close_vtable, close_context);
+        return Future.init(self.allocator, &close_vtable, close_context);
     }
 
     /// Shutdown I/O operations
@@ -482,11 +691,11 @@ pub fn createSimpleBlockingIo(allocator: std.mem.Allocator) BlockingIo {
 }
 
 /// Example of colorblind async function using BlockingIo
-pub fn exampleBlockingOperation(allocator: std.mem.Allocator, io: Io, data: []const u8) !void {
+pub fn exampleBlockingOperation(_: std.mem.Allocator, io: Io, data: []const u8) !void {
     // This function works identically with ANY Io implementation!
     var io_mut = io;
     var write_future = try io_mut.write(data);
-    defer write_future.destroy(allocator);
+    defer write_future.destroy();
 
     // Colorblind await - works in sync or async context
     try write_future.await();
@@ -497,15 +706,21 @@ test "BlockingIo basic operations" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var blocking_io = BlockingIo.init(allocator, 1024);
-    defer blocking_io.deinit();
+    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
+    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
+        return; // Skip test if /dev/null not available
+    };
+    defer std.Io.Threaded.closeFd(null_fd);
 
-    const io = blocking_io.io();
+    var blocking_io_inst = BlockingIo.initWithFds(allocator, 1024, std.posix.STDIN_FILENO, null_fd);
+    defer blocking_io_inst.deinit();
 
-    // Test write operation
+    const io = blocking_io_inst.io();
+
+    // Test write operation (to /dev/null)
     var io_mut = io;
     var write_future = try io_mut.write("Hello, zsync!");
-    defer write_future.destroy(allocator);
+    defer write_future.destroy();
 
     try testing.expect(write_future.poll() == .ready);
     try testing.expect(write_future.isCompleted());
@@ -520,20 +735,26 @@ test "BlockingIo vectorized write" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var blocking_io = BlockingIo.init(allocator, 1024);
-    defer blocking_io.deinit();
+    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
+    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
+        return; // Skip test if /dev/null not available
+    };
+    defer std.Io.Threaded.closeFd(null_fd);
 
-    const io = blocking_io.io();
+    var blocking_io_inst = BlockingIo.initWithFds(allocator, 1024, std.posix.STDIN_FILENO, null_fd);
+    defer blocking_io_inst.deinit();
+
+    const io = blocking_io_inst.io();
 
     const data = [_][]const u8{ "Hello", " ", "World", "!" };
     var io_mut = io;
     var writev_future = try io_mut.writev(&data);
-    defer writev_future.destroy(allocator);
+    defer writev_future.destroy();
 
     try testing.expect(writev_future.poll() == .ready);
 
     // Check metrics
-    const metrics = blocking_io.getMetrics();
+    const metrics = blocking_io_inst.getMetrics();
     try testing.expect(metrics.operations_completed.load(.monotonic) > 0);
     try testing.expect(metrics.bytes_written.load(.monotonic) > 0);
 }
@@ -542,11 +763,18 @@ test "colorblind async example" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    var blocking_io = BlockingIo.init(allocator, 1024);
-    defer blocking_io.deinit();
+    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
+    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
+        // Skip test if /dev/null not available
+        return;
+    };
+    defer std.Io.Threaded.closeFd(null_fd);
 
-    const io = blocking_io.io();
+    var blocking_io_inst = BlockingIo.initWithFds(allocator, 1024, std.posix.STDIN_FILENO, null_fd);
+    defer blocking_io_inst.deinit();
 
-    // This function works with ANY Io implementation
+    const io = blocking_io_inst.io();
+
+    // This function works with ANY Io implementation (writes to /dev/null)
     try exampleBlockingOperation(allocator, io, "Colorblind async works!");
 }

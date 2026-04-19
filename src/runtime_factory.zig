@@ -90,6 +90,14 @@ pub const RuntimeFactory = struct {
 
     /// Create blocking I/O fallback runtime
     fn createFallbackRuntime(self: *Self) !AsyncRuntime {
+        // On Windows, use IOCP backend as fallback (fd_t is void on Windows)
+        if (builtin.os.tag == .windows) {
+            // Use reasonable thread count based on CPU cores (min 2, max 16)
+            const cpu_count = std.Thread.getCpuCount() catch 4;
+            const thread_count: u32 = @intCast(@min(16, @max(2, cpu_count)));
+            const runtime = try windows_iocp_io.WindowsIocpIo.init(self.allocator, thread_count);
+            return AsyncRuntime{ .windows_iocp = runtime };
+        }
         const runtime = blocking_io.BlockingIo.init(self.allocator, 4096);
         return AsyncRuntime{ .blocking = runtime };
     }
@@ -134,34 +142,29 @@ pub const AsyncRuntime = union(enum) {
     const Self = @This();
 
     /// Get unified I/O interface for any runtime
+    /// Panics if called on a placeholder variant that was never properly constructed.
+    /// All valid AsyncRuntime instances are created via RuntimeFactory.createAsyncRuntime(),
+    /// which only produces linux_io_uring, windows_iocp, or blocking variants.
     pub fn io(self: *Self) io_interface.Io {
         return switch (self.*) {
             .linux_io_uring => |*runtime| {
-                if (builtin.os.tag == .linux) {
-                    return runtime.io();
-                } else {
-                    // This should never happen due to factory logic, but provide fallback
-                    var simple_runtime = blocking_io.createSimpleBlockingIo(std.heap.page_allocator);
-                    return simple_runtime.io();
-                }
+                if (builtin.os.tag == .linux) return runtime.io();
+                unreachable;
             },
             .blocking => |*runtime| runtime.io(),
             .windows_iocp => |*runtime| {
-                if (builtin.os.tag == .windows and windows_iocp != void) {
-                    return runtime.io();
-                } else {
-                    // Fallback to simple blocking I/O
-                    var simple_runtime = blocking_io.createSimpleBlockingIo(std.heap.page_allocator);
-                    return simple_runtime.io();
-                }
+                if (builtin.os.tag == .windows and windows_iocp != void) return runtime.io();
+                unreachable;
             },
-
-            // Other platforms return blocking I/O interface for now
-            inline else => {
-                // This creates a minimal blocking I/O interface
-                var simple_runtime = blocking_io.createSimpleBlockingIo(std.heap.page_allocator);
-                return simple_runtime.io();
-            },
+            // Placeholder variants - these are never constructed by the factory
+            // If reached, it means manual construction of an invalid AsyncRuntime
+            .linux_epoll,
+            .windows_select,
+            .macos_kqueue,
+            .macos_poll,
+            .wasm_promise,
+            .wasm_stackless,
+            => @panic("AsyncRuntime: unimplemented backend variant - use RuntimeFactory.createAsyncRuntime()"),
         };
     }
 
@@ -182,6 +185,30 @@ pub const AsyncRuntime = union(enum) {
             inline else => {
                 // No cleanup needed for unimplemented runtimes
             },
+        }
+    }
+
+    /// Register a descriptor known to be a socket with the active backend.
+    pub fn registerSocket(self: *Self, fd: std.posix.fd_t) !void {
+        switch (self.*) {
+            .windows_iocp => |*runtime| {
+                if (builtin.os.tag == .windows and windows_iocp != void) {
+                    try runtime.registerSocket(fd);
+                }
+            },
+            inline else => {},
+        }
+    }
+
+    /// Register a descriptor known to be a file with the active backend.
+    pub fn registerFile(self: *Self, fd: std.posix.fd_t) !void {
+        switch (self.*) {
+            .windows_iocp => |*runtime| {
+                if (builtin.os.tag == .windows and windows_iocp != void) {
+                    try runtime.registerFile(fd);
+                }
+            },
+            inline else => {},
         }
     }
 

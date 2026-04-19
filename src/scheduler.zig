@@ -1,5 +1,5 @@
-//! Advanced task scheduler with proper async frame management
-//! Uses zsync runtime patterns (Zig 0.16 removed language-level async)
+//! Advanced task scheduler with cooperative frame management
+//! Uses zsync runtime patterns (Zig removed language-level async in 0.14)
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -24,6 +24,9 @@ pub const AsyncFrame = struct {
     allocator: std.mem.Allocator,
     waker: ?*Waker = null,
     result: ?anyerror = null,
+    // Type-erased function to execute the task
+    run_fn: ?*const fn (*anyopaque) void = null,
+    run_context: ?*anyopaque = null,
 
     const Self = @This();
 
@@ -35,6 +38,15 @@ pub const AsyncFrame = struct {
             .frame_size = frame_size,
             .allocator = allocator,
         };
+    }
+
+    /// Execute the task function if set
+    pub fn execute(self: *Self) void {
+        if (self.run_fn) |run_fn| {
+            if (self.run_context) |ctx| {
+                run_fn(ctx);
+            }
+        }
     }
 
     /// Resume an async frame
@@ -158,10 +170,10 @@ const TaskQueue = struct {
 
     pub fn pop(self: *Self) ?ScheduledTask {
         if (self.items.items.len == 0) return null;
-        
+
         const result = self.items.items[0];
         const last = self.items.pop();
-        
+
         if (self.items.items.len > 0) {
             self.items.items[0] = last.?;
             // Bubble down
@@ -171,13 +183,15 @@ const TaskQueue = struct {
                 const right = 2 * i + 2;
                 var largest = i;
 
-                if (left < self.items.items.len and 
-                    self.items.items[left].priority.compare(self.items.items[largest].priority) == .gt) {
+                if (left < self.items.items.len and
+                    self.items.items[left].priority.compare(self.items.items[largest].priority) == .gt)
+                {
                     largest = left;
                 }
 
-                if (right < self.items.items.len and 
-                    self.items.items[right].priority.compare(self.items.items[largest].priority) == .gt) {
+                if (right < self.items.items.len and
+                    self.items.items[right].priority.compare(self.items.items[largest].priority) == .gt)
+                {
                     largest = right;
                 }
 
@@ -265,64 +279,93 @@ pub const AsyncScheduler = struct {
         defer self.mutex.unlock();
 
         const frame_id = self.nextFrameId();
-        
+
+        // Type-erased closure to hold args and call the function
+        const Args = @TypeOf(args);
+        const Closure = struct {
+            fn_args: Args,
+            allocator: std.mem.Allocator,
+
+            fn run(ctx: *anyopaque) void {
+                const closure: *@This() = @ptrCast(@alignCast(ctx));
+                // Call the actual user function
+                const result = @call(.auto, func, closure.fn_args);
+                // Handle error union return types
+                if (@typeInfo(@TypeOf(result)) == .error_union) {
+                    _ = result catch |err| {
+                        std.debug.print("Task failed with error: {}\n", .{err});
+                    };
+                }
+                // Clean up the closure after execution
+                closure.allocator.destroy(closure);
+            }
+        };
+
+        // Allocate closure on heap to persist after spawn returns
+        const closure = try self.allocator.create(Closure);
+        errdefer self.allocator.destroy(closure);
+        closure.* = Closure{
+            .fn_args = args,
+            .allocator = self.allocator,
+        };
+
         // Create async frame with proper memory management
         const frame = try self.allocator.create(AsyncFrame);
         errdefer self.allocator.destroy(frame);
-        
+
         // Initialize frame with allocated memory for function call
         frame.* = AsyncFrame.init(frame_id, @ptrCast(frame), @sizeOf(AsyncFrame), self.allocator);
-        
+        frame.run_fn = Closure.run;
+        frame.run_context = @ptrCast(closure);
+
         // Store frame in pool for lifecycle management
         try self.frame_pool.append(self.allocator, frame);
 
-        const ts_task = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
-        const timestamp: u64 = @intCast(@divTrunc((@as(i128, ts_task.sec) * std.time.ns_per_s + ts_task.nsec), std.time.ns_per_ms));
+        const timestamp: u64 = @intCast(@divTrunc((compat.Instant.now() catch .{ .timestamp = 0 }).timestamp, std.time.ns_per_ms));
         const task = ScheduledTask.init(frame.*, priority, timestamp);
         try self.ready_queue.push(task);
-
-        // In a full async implementation, this would start the async function
-        // For now, we create a task wrapper that will execute when scheduled
-        const TaskWrapper = struct {
-            pub fn run() !void {
-                @call(.auto, func, args) catch |err| {
-                    std.debug.print("Task failed with error: {}\n", .{err});
-                };
-            }
-        };
-        _ = TaskWrapper;
 
         return frame_id;
     }
 
     /// Process ready tasks
     pub fn tick(self: *Self) !u32 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
         var processed: u32 = 0;
         const max_tasks_per_tick = 10; // Prevent starvation
 
-        while (processed < max_tasks_per_tick and !self.ready_queue.isEmpty()) {
-            if (self.ready_queue.pop()) |task| {
-                processed += 1;
-                
-                // Find the corresponding frame in the pool
-                for (self.frame_pool.items, 0..) |frame, i| {
-                    if (frame.id == task.frame.id) {
-                        // Update frame state
-                        frame.state = .running;
-                        
-                        // In real implementation, this would resume the async frame
-                        // For now, mark as completed
-                        frame.complete(null);
-                        
-                        // Remove completed frame from pool
-                        _ = self.frame_pool.swapRemove(i);
-                        self.allocator.destroy(frame);
-                        break;
-                    }
+        while (processed < max_tasks_per_tick) {
+            // Lock to pop task from queue
+            self.mutex.lock();
+            const maybe_task = self.ready_queue.pop();
+            self.mutex.unlock();
+
+            const task = maybe_task orelse break;
+            processed += 1;
+
+            // Find the corresponding frame in the pool (lock held briefly)
+            self.mutex.lock();
+            var found_frame: ?*AsyncFrame = null;
+            var found_index: usize = 0;
+            for (self.frame_pool.items, 0..) |frame, i| {
+                if (frame.id == task.frame.id) {
+                    frame.state = .running;
+                    found_frame = frame;
+                    found_index = i;
+                    break;
                 }
+            }
+            self.mutex.unlock();
+
+            // Execute user function WITHOUT holding mutex
+            if (found_frame) |frame| {
+                frame.execute();
+
+                // Lock to update state and cleanup
+                self.mutex.lock();
+                frame.complete(null);
+                const removed = self.frame_pool.swapRemove(found_index);
+                self.allocator.destroy(removed);
+                self.mutex.unlock();
             }
         }
 
@@ -338,8 +381,7 @@ pub const AsyncScheduler = struct {
             frame.state = .ready;
 
             // Move from suspended to ready queue
-            const ts_resume = compat.clock_gettime(std.os.linux.CLOCK.REALTIME) catch unreachable;
-            const timestamp_resume: u64 = @intCast(@divTrunc((@as(i128, ts_resume.sec) * std.time.ns_per_s + ts_resume.nsec), std.time.ns_per_ms));
+            const timestamp_resume: u64 = @intCast(@divTrunc((compat.Instant.now() catch .{ .timestamp = 0 }).timestamp, std.time.ns_per_ms));
             const task = ScheduledTask.init(frame.*, .normal, timestamp_resume);
             self.ready_queue.push(task) catch return; // Ignore error for now
 
@@ -357,16 +399,16 @@ pub const AsyncScheduler = struct {
             if (frame.id == frame_id) {
                 frame.state = .suspended;
                 frame.waker = waker;
-                
+
                 // Move frame to suspended collection
                 try self.suspended_frames.put(frame_id, frame);
-                
+
                 // Remove from ready queue if present
                 // In real implementation, this would @suspend() the actual frame
                 return;
             }
         }
-        
+
         return error.FrameNotFound;
     }
 
@@ -394,7 +436,7 @@ pub const AsyncScheduler = struct {
 
 /// Helper function to yield execution (compatibility version)
 pub fn yield() void {
-    std.posix.nanosleep(0, 1000); // 1μs yield
+    compat.sleepNanos(1000); // 1μs yield
 }
 
 /// Helper to create async task with default priority
@@ -411,10 +453,10 @@ pub fn spawnUrgentTask(scheduler: *AsyncScheduler, comptime func: anytype, args:
 test "async scheduler creation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var scheduler = try AsyncScheduler.init(allocator);
     defer scheduler.deinit();
-    
+
     try testing.expect(!scheduler.hasPendingWork());
     try testing.expect(scheduler.queueLength() == 0);
 }
@@ -422,27 +464,27 @@ test "async scheduler creation" {
 test "task priority queue" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var queue = TaskQueue.init(allocator);
     defer queue.deinit();
-    
+
     // Create test frames
     const frame1 = AsyncFrame.init(1, undefined, 0, allocator);
     const frame2 = AsyncFrame.init(2, undefined, 0, allocator);
     const frame3 = AsyncFrame.init(3, undefined, 0, allocator);
-    
+
     // Add tasks with different priorities
     try queue.push(ScheduledTask.init(frame1, .low, 0));
     try queue.push(ScheduledTask.init(frame2, .high, 0));
     try queue.push(ScheduledTask.init(frame3, .normal, 0));
-    
+
     // Should pop high priority first
     const task1 = queue.pop().?;
     try testing.expect(task1.priority == .high);
-    
+
     const task2 = queue.pop().?;
     try testing.expect(task2.priority == .normal);
-    
+
     const task3 = queue.pop().?;
     try testing.expect(task3.priority == .low);
 }
@@ -450,13 +492,13 @@ test "task priority queue" {
 test "frame ID generation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var scheduler = try AsyncScheduler.init(allocator);
     defer scheduler.deinit();
-    
+
     const id1 = scheduler.nextFrameId();
     const id2 = scheduler.nextFrameId();
-    
+
     try testing.expect(id1 != id2);
     try testing.expect(id2 > id1);
 }
@@ -464,10 +506,10 @@ test "frame ID generation" {
 test "waker creation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     var scheduler = try AsyncScheduler.init(allocator);
     defer scheduler.deinit();
-    
+
     const waker = scheduler.createWaker(42);
     try testing.expect(waker.frame_id == 42);
     try testing.expect(waker.scheduler == &scheduler);

@@ -2,6 +2,7 @@
 //! Async PTY I/O and concurrent rendering pipeline for terminal emulators like ghostty
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const future_combinators = @import("future_combinators.zig");
 const task_management = @import("task_management.zig");
 const async_file_ops = @import("async_file_ops.zig");
@@ -470,14 +471,14 @@ fn ptyReaderWorker(pty: *AsyncPTY) !void {
     while (!pty.isCancelled()) {
         const bytes_read = std.posix.read(pty.pty_fd, &buffer) catch |err| switch (err) {
             error.WouldBlock => {
-                std.time.sleep(1 * std.time.ns_per_ms);
+                compat.sleepNanos(1 * std.time.ns_per_ms);
                 continue;
             },
             else => return err,
         };
-        
+
         if (bytes_read == 0) {
-            std.time.sleep(1 * std.time.ns_per_ms);
+            compat.sleepNanos(1 * std.time.ns_per_ms);
             continue;
         }
         
@@ -491,7 +492,7 @@ fn ptyReaderWorker(pty: *AsyncPTY) !void {
 fn ptyWriterWorker(pty: *AsyncPTY) !void {
     while (!pty.isCancelled()) {
         if (pty.input_buffer.items.len == 0) {
-            std.time.sleep(1 * std.time.ns_per_ms);
+            compat.sleepNanos(1 * std.time.ns_per_ms);
             continue;
         }
         

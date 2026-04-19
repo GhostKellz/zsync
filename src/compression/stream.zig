@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Async Compression Streaming
+//! zsync Async Compression Streaming
 //! Async wrapper for compression libraries like zpack
 
 const std = @import("std");
@@ -262,8 +262,8 @@ pub fn decompressFileAsync(
 test "async compressor init" {
     const testing = std.testing;
 
-    var config = @import("../runtime.zig").Config.optimal();
-    var runtime = try @import("../runtime.zig").Runtime.init(testing.allocator, &config);
+    const config = @import("../runtime.zig").Config.optimal();
+    const runtime = try @import("../runtime.zig").Runtime.init(testing.allocator, config);
     defer runtime.deinit();
 
     var compressor = try AsyncCompressor.init(

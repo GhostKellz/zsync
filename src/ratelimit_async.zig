@@ -551,8 +551,8 @@ pub const AsyncRateLimiter = struct {
             self.processRequestQueue() catch |err| {
                 std.log.err("Rate limiter worker error: {}", .{err});
             };
-            
-            std.time.sleep(1_000_000); // 1ms
+
+            compat.sleepNanos(1_000_000); // 1ms
         }
     }
     
@@ -875,7 +875,7 @@ test "token bucket rate limiting" {
     try std.testing.expect(!bucket.tryConsume(1.0));
     
     // Wait for refill (simplified test)
-    std.time.sleep(200_000_000); // 200ms
+    compat.sleepNanos(200_000_000); // 200ms
     try std.testing.expect(bucket.tryConsume(1.0));
 }
 

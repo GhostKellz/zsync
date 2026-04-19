@@ -1,8 +1,20 @@
 //! zsync- Network Integration Layer
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module is a prototype with known limitations:
+//! - StdHttpAdapter returns mock/placeholder responses (line 475)
+//! - awaitAllRequests uses busy-wait loops (line 299-306)
+//! - raceExecute leaves cancellation as TODO (line 363)
+//! - fastestFirstExecute delegates to batch (not intelligent)
+//!
+//! Do NOT use in production - HTTP requests return fake data.
+//!
 //! Coordinates external HTTP/QUIC clients with zsync's async scheduler
 //! Perfect for Reaper (AUR helper) and ghostnet integration
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 const future_combinators = @import("future_combinators.zig");
 const task_management = @import("task_management.zig");
 const io_v2 = @import("io_v2.zig");
@@ -296,7 +308,7 @@ pub const NetworkPool = struct {
         // Wait for all to complete
         for (futures) |*future| {
             while (!future.completed.load(.acquire)) {
-                std.time.sleep(1 * std.time.ns_per_ms);
+                compat.sleepNanos(1 * std.time.ns_per_ms);
                 
                 // Check for cancellation
                 if (self.cancel_token.isCancelled()) {
@@ -374,8 +386,8 @@ pub const NetworkPool = struct {
                 }
             }
             
-            std.time.sleep(1 * std.time.ns_per_ms);
-            
+            compat.sleepNanos(1 * std.time.ns_per_ms);
+
             if (self.cancel_token.isCancelled()) {
                 return error.OperationCancelled;
             }

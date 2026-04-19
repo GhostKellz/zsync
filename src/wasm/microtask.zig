@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Microtask Queue for WASM
+//! zsync Microtask Queue for WASM
 //! Browser-compatible microtask queue for async operations in WASM
 
 const std = @import("std");

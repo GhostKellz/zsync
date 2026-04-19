@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - Script Runtime Integration
+//! zsync Script Runtime Integration
 //! Helpers for integrating Ghostlang and other script engines with zsync async
 
 const std = @import("std");
@@ -269,7 +269,7 @@ pub const ScriptTimer = struct {
     /// Start timer
     pub fn start(self: *Self) !void {
         while (self.active.load(.acquire)) {
-            std.posix.nanosleep(0, self.interval_ms * std.time.ns_per_ms);
+            compat.sleepNanos(self.interval_ms * std.time.ns_per_ms);
 
             try self.callback();
 

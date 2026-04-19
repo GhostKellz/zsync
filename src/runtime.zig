@@ -1,6 +1,6 @@
-//! zsync - The Tokio of Zig
-//! Production-ready colorblind async runtime with comprehensive platform support
-//! True colorblind async: same code works across all execution models
+//! zsync - Async runtime for Zig
+//! Colorblind async: same code works across multiple execution models
+//! Supported models: blocking (direct syscalls), thread_pool (OS threads), green_threads (io_uring)
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -64,35 +64,19 @@ pub const ExecutionModel = enum {
     }
 
     /// Detect optimal model for Linux distributions
+    /// Defaults to thread_pool for stability; green_threads available via explicit config
     fn detectLinuxOptimal() ExecutionModel {
         const caps = platform_detect.detectSystemCapabilities();
-        const settings = platform_detect.getDistroOptimalSettings(caps.distro);
 
-        // Distribution-specific optimizations
+        // Distribution-specific defaults
         switch (caps.distro) {
-            .arch, .fedora, .gentoo, .nixos => {
-                // Cutting-edge distributions with latest kernels
-                if (settings.prefer_io_uring and caps.has_io_uring) {
-                    return .green_threads; // Use io_uring for maximum performance
-                }
-                return .thread_pool;
-            },
-            .debian, .ubuntu => {
-                // Conservative, stability-focused distributions
-                if (caps.kernel_version.major >= 5 and caps.kernel_version.minor >= 15) {
-                    // Use io_uring on recent stable kernels (5.15+)
-                    if (settings.prefer_io_uring and caps.has_io_uring) {
-                        return .green_threads;
-                    }
-                }
-                return .thread_pool;
-            },
             .alpine => {
-                // Minimal distribution, prefer lighter threading
+                // Minimal distribution, prefer simpler blocking model
                 return .blocking;
             },
             else => {
-                // Unknown distribution, use safe defaults
+                // Default to thread_pool for stability on all Linux distributions
+                // Users who want io_uring-based green threads can explicitly configure it
                 return .thread_pool;
             },
         }
@@ -271,7 +255,7 @@ pub const RuntimeError = error{
     SystemResourceExhausted,
     ConfigurationError,
     PlatformUnsupported,
-    // v0.7 New specific errors
+    // Additional specific errors
     ThreadPoolExhausted,
     TaskQueueFull,
     FutureAlreadyAwaited,
@@ -345,10 +329,10 @@ pub const RuntimeMetrics = struct {
 };
 
 /// Global runtime instance (singleton pattern)
-var global_runtime: ?*Runtime = null;
-var global_runtime_mutex = compat.Mutex{};
+pub var global_runtime: ?*Runtime = null;
+pub var global_runtime_mutex = compat.Mutex{};
 
-/// zsync - The Tokio of Zig - Production-Ready Async Runtime
+/// zsync async runtime - colorblind async execution
 pub const Runtime = struct {
     allocator: std.mem.Allocator,
     config: Config,
@@ -419,6 +403,10 @@ pub const Runtime = struct {
                     return RuntimeError.ConfigurationError;
                 }
             },
+            .stackless => {
+                // Stackless execution model is not yet implemented
+                return RuntimeError.PlatformUnsupported;
+            },
             else => {},
         }
     }
@@ -429,8 +417,8 @@ pub const Runtime = struct {
             .blocking => IoImplementation{ .blocking = blocking_io.BlockingIo.init(allocator, config.buffer_size) },
             .thread_pool => IoImplementation{ .thread_pool = try thread_pool.ThreadPoolIo.init(allocator, config.thread_pool_threads, config.buffer_size) },
             .green_threads => IoImplementation{ .green_threads = if (green_threads != void) try green_threads.createGreenThreadsIo(allocator, config.queue_depth orelse 256) else {} },
-            .stackless => IoImplementation{ .stackless = {} }, // TODO
-            .auto => unreachable, // Should be resolved above
+            .stackless => unreachable, // Rejected by validateConfig
+            .auto => unreachable, // Resolved by resolveExecutionModel
         };
     }
 
@@ -443,8 +431,7 @@ pub const Runtime = struct {
             .blocking => |*blocking| blocking.deinit(),
             .thread_pool => |*tp| tp.deinit(),
             .green_threads => |*impl| if (green_threads != void) impl.deinit(),
-            .stackless => {}, // TODO
-            .auto => {},
+            .stackless, .auto => unreachable, // Never constructed
         }
 
         if (self.cancel_token) |token| {
@@ -474,8 +461,7 @@ pub const Runtime = struct {
             .blocking => |*blocking| blocking.io(),
             .thread_pool => |*tp| tp.io(),
             .green_threads => |*impl| if (green_threads != void) impl.io() else unreachable,
-            .stackless => unreachable, // TODO
-            .auto => unreachable,
+            .stackless, .auto => unreachable, // Never constructed
         };
     }
 
@@ -505,10 +491,9 @@ pub const Runtime = struct {
 
         const model_name = @tagName(self.execution_model);
         if (self.config.enable_debugging) {
-            logInfo("🚀 zsync - The Tokio of Zig - starting with {s} execution model", .{model_name});
+            logInfo("zsync starting with {s} execution model", .{model_name});
         }
 
-        // Note: Zig 0.16 uses Instant.now() instead of nanoTimestamp()
         const start_instant = compat.Instant.now() catch unreachable;
 
         // Execute main task with colorblind async
@@ -564,8 +549,13 @@ pub const Runtime = struct {
     }
 
     /// Spawn a new task for concurrent execution
+    /// Tasks spawned via this method receive Io as their first argument,
+    /// matching the contract of run() and executeTask().
     pub fn spawn(self: *Self, comptime task_fn: anytype, args: anytype) !Future {
         self.metrics.incrementFutures();
+
+        // Get Io for this runtime to pass to spawned tasks
+        const io = self.getIo();
 
         // Create task context
         const TaskContext = struct {
@@ -573,6 +563,8 @@ pub const Runtime = struct {
             state: std.atomic.Value(Future.State),
             result: ?anyerror,
             mutex: compat.Mutex,
+            thread: ?std.Thread,
+            joined: std.atomic.Value(bool),
 
             fn poll(ctx: *anyopaque) Future.PollResult {
                 const task_ctx: *@This() = @ptrCast(@alignCast(ctx));
@@ -591,8 +583,18 @@ pub const Runtime = struct {
                 task_ctx.state.store(.cancelled, .release);
             }
 
+            fn joinIfNeeded(task_ctx: *@This()) void {
+                if (task_ctx.thread) |thread| {
+                    if (!task_ctx.joined.swap(true, .acq_rel)) {
+                        thread.join();
+                        task_ctx.thread = null;
+                    }
+                }
+            }
+
             fn destroy(ctx: *anyopaque, allocator: std.mem.Allocator) void {
                 const task_ctx: *@This() = @ptrCast(@alignCast(ctx));
+                task_ctx.joinIfNeeded();
                 allocator.destroy(task_ctx);
             }
 
@@ -609,24 +611,64 @@ pub const Runtime = struct {
             .state = std.atomic.Value(Future.State).init(.pending),
             .result = null,
             .mutex = .{},
+            .thread = null,
+            .joined = std.atomic.Value(bool).init(false),
+        };
+
+        // Helper to call task with the same signature adaptation used by executeTask.
+        const callTaskWithIo = struct {
+            fn call(task_io: Io, func: @TypeOf(task_fn), task_args: @TypeOf(args)) !void {
+                const fn_info = @typeInfo(@TypeOf(func)).@"fn";
+                const param_count = fn_info.params.len;
+
+                switch (param_count) {
+                    0 => return @call(.auto, func, .{}),
+                    1 => {
+                        if (@TypeOf(task_args) == void) {
+                            return @call(.auto, func, .{task_io});
+                        }
+
+                        switch (@typeInfo(@TypeOf(task_args))) {
+                            .@"struct" => |struct_info| {
+                                if (struct_info.fields.len == 0) {
+                                    return @call(.auto, func, .{task_io});
+                                }
+                            },
+                            else => {},
+                        }
+
+                        return @call(.auto, func, .{task_args});
+                    },
+                    else => {
+                        if (@TypeOf(task_args) == void) {
+                            return @call(.auto, func, .{task_io});
+                        }
+
+                        switch (@typeInfo(@TypeOf(task_args))) {
+                            .@"struct" => return @call(.auto, func, .{task_io} ++ task_args),
+                            else => return @call(.auto, func, .{ task_io, task_args }),
+                        }
+                    },
+                }
+            }
         };
 
         // Execute task based on execution model
         switch (self.execution_model) {
             .blocking => {
-                // Execute synchronously in blocking mode
-                @call(.auto, task_fn, args) catch |err| {
+                // Execute synchronously in blocking mode with Io injected
+                callTaskWithIo.call(io, task_fn, args) catch |err| {
                     task_ctx.result = err;
                     task_ctx.state.store(.error_state, .release);
-                    return Future.init(&TaskContext.vtable, task_ctx);
+                    return Future.init(self.allocator, &TaskContext.vtable, task_ctx);
                 };
                 task_ctx.state.store(.ready, .release);
             },
             .thread_pool => {
                 // Submit to thread pool for async execution
                 const ThreadTask = struct {
-                    fn run(ctx: *TaskContext, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
-                        @call(.auto, func, task_args) catch |err| {
+                    fn run(ctx: *TaskContext, task_io: Io, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
+                        callTaskWithIo.call(task_io, func, task_args) catch |err| {
                             ctx.result = err;
                             ctx.state.store(.error_state, .release);
                             return;
@@ -635,16 +677,15 @@ pub const Runtime = struct {
                     }
                 };
 
-                // Create a thread to run the task
-                const thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, task_fn, args });
-                thread.detach();
+                // Create a thread to run the task with Io
+                task_ctx.thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, io, task_fn, args });
             },
             .green_threads => {
                 // Use green thread scheduler for cooperative multitasking
                 // For now, spawn a lightweight thread until green thread scheduler is fully integrated
                 const ThreadTask = struct {
-                    fn run(ctx: *TaskContext, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
-                        @call(.auto, func, task_args) catch |err| {
+                    fn run(ctx: *TaskContext, task_io: Io, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
+                        callTaskWithIo.call(task_io, func, task_args) catch |err| {
                             ctx.result = err;
                             ctx.state.store(.error_state, .release);
                             return;
@@ -652,21 +693,20 @@ pub const Runtime = struct {
                         ctx.state.store(.ready, .release);
                     }
                 };
-                const thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, task_fn, args });
-                thread.detach();
+                task_ctx.thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, io, task_fn, args });
             },
             else => {
-                // For stackless, auto - fall back to blocking for now
-                @call(.auto, task_fn, args) catch |err| {
+                // For stackless, auto - fall back to blocking for now with Io injected
+                callTaskWithIo.call(io, task_fn, args) catch |err| {
                     task_ctx.result = err;
                     task_ctx.state.store(.error_state, .release);
-                    return Future.init(&TaskContext.vtable, task_ctx);
+                    return Future.init(self.allocator, &TaskContext.vtable, task_ctx);
                 };
                 task_ctx.state.store(.ready, .release);
             },
         }
 
-        return Future.init(&TaskContext.vtable, task_ctx);
+        return Future.init(self.allocator, &TaskContext.vtable, task_ctx);
     }
 
     /// Create a timeout future
@@ -685,6 +725,67 @@ pub const Runtime = struct {
     pub fn all(self: *Self, futures: []Future) !Future {
         self.metrics.incrementFutures();
         return Combinators.all(self.allocator, futures);
+    }
+
+    /// Submit a raw function to the thread pool for execution
+    /// This is the low-level API for CPU-bound work - no Io argument is passed
+    /// Returns a Future that completes when the function finishes
+    /// Only works when using thread_pool execution model
+    pub fn submitTask(
+        self: *Self,
+        func: *const fn (*anyopaque) void,
+        context: *anyopaque,
+    ) !Future {
+        switch (self.io_impl) {
+            .thread_pool => |*tp| {
+                self.metrics.incrementFutures();
+                return tp.submitCustom(func, context);
+            },
+            else => {
+                // For non-thread-pool models, execute synchronously
+                func(context);
+                // Return an immediately-ready future
+                const ReadyFuture = struct {
+                    fn poll(_: *anyopaque) Future.PollResult {
+                        return .ready;
+                    }
+                    fn cancel(_: *anyopaque) void {}
+                    fn destroy(_: *anyopaque, _: std.mem.Allocator) void {}
+                };
+                const vtable = Future.FutureVTable{
+                    .poll = ReadyFuture.poll,
+                    .cancel = ReadyFuture.cancel,
+                    .destroy = ReadyFuture.destroy,
+                };
+                return Future.init(self.allocator, &vtable, undefined);
+            },
+        }
+    }
+
+    /// Check if the runtime is using thread pool execution model
+    pub fn isThreadPoolMode(self: *const Self) bool {
+        return self.execution_model == .thread_pool;
+    }
+
+    /// Submit a self-owned task to the thread pool
+    /// The func is responsible for freeing its own context
+    /// The thread pool will free the internal WorkItem after execution
+    /// Only works when using thread_pool execution model; otherwise executes synchronously
+    pub fn submitSelfOwnedTask(
+        self: *Self,
+        func: *const fn (*anyopaque) void,
+        context: *anyopaque,
+    ) !void {
+        switch (self.io_impl) {
+            .thread_pool => |*tp| {
+                self.metrics.incrementFutures();
+                try tp.submitSelfOwned(func, context);
+            },
+            else => {
+                // For non-thread-pool models, execute synchronously
+                func(context);
+            },
+        }
     }
 
     /// Request runtime shutdown
@@ -876,17 +977,31 @@ test "Runtime basic operations" {
 }
 
 test "Colorblind async example" {
-    const TestTask = struct {
-        fn task(io: Io) !void {
-            const data = "Hello, zsync - The Tokio of Zig!";
-            var io_mut = io;
-            var future = try io_mut.write(data);
-            defer future.destroy(io.getAllocator());
-            try future.await();
-        }
-    };
+    const testing = std.testing;
 
-    try runBlocking(TestTask.task, {});
+    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
+    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
+        // Skip test if /dev/null not available
+        return;
+    };
+    defer std.Io.Threaded.closeFd(null_fd);
+
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = debug_allocator.deinit();
+
+    // Create blocking IO with /dev/null as write target
+    var blocking_io_impl = blocking_io.BlockingIo.initWithFds(debug_allocator.allocator(), 4096, std.posix.STDIN_FILENO, null_fd);
+    defer blocking_io_impl.deinit();
+
+    var io = blocking_io_impl.io();
+
+    // Test colorblind async write (to /dev/null)
+    const data = "Hello from zsync!";
+    var future = try io.write(data);
+    defer future.destroy();
+    try future.await();
+
+    try testing.expect(io.getMode() == .blocking);
 }
 
 test "Runtime metrics" {

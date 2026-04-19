@@ -2,6 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const windows = std.os.windows;
 
+// Windows wait result constants
+pub const WAIT_OBJECT_0: u32 = 0;
+pub const WAIT_TIMEOUT: u32 = 258;
+
 pub const OVERLAPPED = extern struct {
     Internal: usize = 0,
     InternalHigh: usize = 0,
@@ -61,9 +65,9 @@ extern "kernel32" fn SetThreadAffinityMask(thread: windows.HANDLE, mask: usize) 
 
 extern "kernel32" fn GetCurrentThread() callconv(.c) windows.HANDLE;
 
-extern "kernel32" fn GetLastError() callconv(.c) windows.WIN32_ERROR;
+extern "kernel32" fn GetLastError() callconv(.c) windows.Win32Error;
 
-extern "kernel32" fn ReadFile(
+pub extern "kernel32" fn ReadFile(
     file_handle: windows.HANDLE,
     buffer: ?*anyopaque,
     bytes_to_read: u32,
@@ -71,13 +75,69 @@ extern "kernel32" fn ReadFile(
     overlapped: ?*OVERLAPPED,
 ) callconv(.c) windows.BOOL;
 
-extern "kernel32" fn WriteFile(
+pub extern "kernel32" fn WriteFile(
     file_handle: windows.HANDLE,
     buffer: ?*const anyopaque,
     bytes_to_write: u32,
     bytes_written: ?*u32,
     overlapped: ?*OVERLAPPED,
 ) callconv(.c) windows.BOOL;
+
+pub extern "kernel32" fn CloseHandle(handle: windows.HANDLE) callconv(.c) windows.BOOL;
+
+pub extern "kernel32" fn SetFilePointerEx(
+    file_handle: windows.HANDLE,
+    distance_to_move: i64,
+    new_file_pointer: ?*i64,
+    move_method: u32,
+) callconv(.c) windows.BOOL;
+
+// SetFilePointerEx move methods
+pub const FILE_BEGIN: u32 = 0;
+pub const FILE_CURRENT: u32 = 1;
+pub const FILE_END: u32 = 2;
+
+// Winsock2 socket functions for synchronous I/O
+pub extern "ws2_32" fn recv(
+    socket: windows.HANDLE,
+    buf: [*]u8,
+    len: c_int,
+    flags: c_int,
+) callconv(.c) c_int;
+
+pub extern "ws2_32" fn send(
+    socket: windows.HANDLE,
+    buf: [*]const u8,
+    len: c_int,
+    flags: c_int,
+) callconv(.c) c_int;
+
+pub extern "ws2_32" fn closesocket(socket: windows.HANDLE) callconv(.c) c_int;
+
+pub extern "ws2_32" fn accept(
+    socket: windows.HANDLE,
+    addr: ?*sockaddr,
+    addrlen: ?*c_int,
+) callconv(.c) windows.HANDLE;
+
+pub extern "ws2_32" fn connect(
+    socket: windows.HANDLE,
+    addr: *const sockaddr,
+    addrlen: c_int,
+) callconv(.c) c_int;
+
+pub extern "ws2_32" fn WSAGetLastError() callconv(.c) c_int;
+
+// Socket address structure for accept/connect
+pub const sockaddr = extern struct {
+    family: u16,
+    data: [14]u8,
+};
+
+// Socket error codes
+pub const SOCKET_ERROR: c_int = -1;
+pub const INVALID_SOCKET: windows.HANDLE = @ptrFromInt(~@as(usize, 0));
+pub const WSAEWOULDBLOCK: c_int = 10035;
 
 // Windows IOCP (I/O Completion Ports) implementation
 pub const IOCP = struct {
@@ -125,7 +185,7 @@ pub const IOCP = struct {
             timeout_ms,
         );
 
-        if (result == 0) {
+        if (result == .FALSE) {
             const err = GetLastError();
             if (err == .WAIT_TIMEOUT) {
                 return false; // Timeout, no completion
@@ -149,7 +209,7 @@ pub const IOCP = struct {
             overlapped,
         );
 
-        if (result == 0) {
+        if (result == .FALSE) {
             return error.PostCompletionStatusFailed;
         }
     }
@@ -271,8 +331,8 @@ pub const Timer = struct {
     pub fn wait(self: *Timer, timeout_ms: u32) !bool {
         const result = WaitForSingleObject(self.handle, timeout_ms);
         return switch (result) {
-            windows.WAIT_OBJECT_0 => true,
-            windows.WAIT_TIMEOUT => false,
+            WAIT_OBJECT_0 => true,
+            WAIT_TIMEOUT => false,
             else => error.WaitFailed,
         };
     }

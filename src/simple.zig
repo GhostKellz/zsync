@@ -1,6 +1,7 @@
 //! Simplified working version of Zsync for initial demonstration
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Simplified runtime for basic demonstration
 pub const SimpleRuntime = struct {
@@ -28,7 +29,7 @@ pub const SimpleRuntime = struct {
     }
 
     pub fn sleep(duration_ms: u64) void {
-        std.time.sleep(duration_ms * std.time.ns_per_ms);
+        compat.sleepNanos(duration_ms * std.time.ns_per_ms);
     }
 };
 

@@ -1,3 +1,16 @@
+//! zsync- Kernel Events Async Integration
+//!
+//! WARNING: EXPERIMENTAL/INCOMPLETE MODULE
+//!
+//! This module SIMULATES kernel events - it does NOT interact with the real kernel:
+//! - inotify_fd is hardcoded to 3 (fake descriptor)
+//! - epoll_fd is hardcoded to 5 (fake descriptor)
+//! - signal_fd is hardcoded to 4 (fake descriptor)
+//! - readEventsAsync() fabricates simulated events
+//! - All kernel syscalls are mocked
+//!
+//! Do NOT use in production - events are fake.
+//!
 const std = @import("std");
 const compat = @import("compat/thread.zig");
 const Allocator = std.mem.Allocator;
@@ -624,10 +637,10 @@ pub const AsyncKernelEventManager = struct {
             };
             
             // Small delay to prevent busy waiting
-            std.time.sleep(1_000_000); // 1ms
+            compat.sleepNanos(1_000_000); // 1ms
         }
     }
-    
+
     fn processEvents(self: *Self) !void {
         // This would be a proper I/O context in a real implementation
         var dummy_io_context: io.Io = undefined;
@@ -848,7 +861,7 @@ pub const AsyncInterruptMonitor = struct {
                     std.log.err("Interrupt handling failed: {}", .{err});
                 };
             } else {
-                std.time.sleep(1000);
+                compat.sleepNanos(1000);
             }
         }
     }
@@ -1256,7 +1269,7 @@ pub const EnhancedRealTimeScheduler = struct {
                 };
             } else {
                 // No tasks available, sleep briefly
-                std.time.sleep(100_000); // 100μs
+                compat.sleepNanos(100_000); // 100μs
             }
         }
     }
@@ -1583,7 +1596,7 @@ pub const DeviceDriverCallbacks = struct {
                     std.log.err("Callback processing failed: {}", .{err});
                 };
             } else {
-                std.time.sleep(1000); // 1μs
+                compat.sleepNanos(1000); // 1μs
             }
         }
     }

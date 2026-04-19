@@ -1,4 +1,4 @@
-//! Zsync v0.6.0 - PTY (Pseudo-Terminal) Support
+//! zsync PTY (Pseudo-Terminal) Support
 //! Async PTY operations for Ghostshell terminal emulator
 
 const std = @import("std");

@@ -258,7 +258,7 @@ pub const BenchmarkSuite = struct {
                 if (timer_wheel.popExpired()) |_| {
                     expired_count += 1;
                 }
-                std.time.sleep(1 * std.time.ns_per_ms);
+                compat.sleepNanos(1 * std.time.ns_per_ms);
             }
             
             times[i] = bench_timer.elapsed();
@@ -351,10 +351,10 @@ pub const BenchmarkSuite = struct {
             
             try mt_runtime.start();
             defer mt_runtime.stop();
-            
+
             // Simulate work
-            std.time.sleep(1 * std.time.ns_per_ms);
-            
+            compat.sleepNanos(1 * std.time.ns_per_ms);
+
             times[i] = bench_timer.elapsed();
         }
         
@@ -447,9 +447,9 @@ pub fn runBenchmarks(allocator: std.mem.Allocator) !void {
 // Tests
 test "benchmark timer" {
     const testing = std.testing;
-    
+
     const bench_timer = BenchmarkTimer.start();
-    std.time.sleep(1 * std.time.ns_per_ms);
+    compat.sleepNanos(1 * std.time.ns_per_ms);
     const elapsed = bench_timer.elapsed();
     
     try testing.expect(elapsed >= 1_000_000); // At least 1ms

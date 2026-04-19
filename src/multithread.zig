@@ -182,7 +182,7 @@ pub const Worker = struct {
                 if (self.reactor_instance) |*react| {
                     _ = react.poll(1) catch 0; // 1ms timeout
                 } else {
-                    std.time.sleep(1 * std.time.ns_per_ms); // 1ms yield
+                    compat.sleepNanos(1 * std.time.ns_per_ms); // 1ms yield
                 }
             }
 
