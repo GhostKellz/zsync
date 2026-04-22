@@ -3,6 +3,58 @@
 All notable changes to zsync will be documented in this file.
 
 
+## [v0.8.1] - 2026-04-22 - Full Async API Alignment with Zig std.Io
+
+### Breaking Changes
+- **No more automatic Io injection anywhere** - both `run()` and `spawn()` pass args directly
+- Task functions receive args exactly as passed by the caller
+- Tasks needing Io must acquire it explicitly via `zsync.getGlobalIo()`
+- Aligns fully with Zig 0.17.0-dev `std.Io` explicit argument pattern
+
+**Migration:** Functions that previously expected auto-injected `Io` need updates:
+```zig
+// Before (v0.8.0) - Io was magically injected:
+fn task(io: Io) !void {
+    var future = try io.write("hello");
+    // ...
+}
+zsync.run(task, {});
+
+// After (v0.8.1) - explicit Io acquisition:
+fn task() !void {
+    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
+    var future = try io.write("hello");
+    // ...
+}
+zsync.run(task, .{});
+
+// With custom args:
+fn processFile(path: []const u8) !void {
+    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
+    // ...
+}
+zsync.run(processFile, .{"data.txt"});
+```
+
+### Fixed
+- Fixed `Runtime.spawn()` double-wrapping single-element tuples causing type mismatch errors
+- Fixed spawn for non-Io task functions (e.g., `fn handler(conn: *Connection) void`)
+- Fixed nursery test task signatures to match new API
+
+### Added
+- Regression tests for spawn argument passing (single ptr, two args, no args)
+- Dynamic versioning: `zsync.VERSION` now pulled from build.zig.zon at comptime
+
+### Changed
+- Removed Io injection from `executeTask()` in `runtime.zig`
+- Removed `callTaskWithIo` complexity (~35 lines of branching logic)
+- Removed `executeTaskWrapper` Io injection from `spawn.zig`
+- Simplified all task execution to direct `@call(.auto, task_fn, args)`
+- Updated main.zig, main_simple.zig, root.zig to use `getGlobalIo()`
+- Updated README and all docs/*.md to v0.8.1 with explicit Io pattern
+
+---
+
 ## [v0.8.0] - 2026-04-19 🔧 **Zig 0.17 Compatibility Release**
 
 ### Supported Surface

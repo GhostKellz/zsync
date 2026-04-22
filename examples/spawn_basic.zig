@@ -1,5 +1,5 @@
 //! Example: Basic Task Spawning
-//! Shows how to spawn and await tasks with zsync v0.6.0
+//! Shows how to spawn and await tasks with zsync
 
 const std = @import("std");
 const zsync = @import("zsync");
@@ -9,7 +9,7 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    std.debug.print("\n🚀 Zsync v0.6.0 - Task Spawning Example\n\n", .{});
+    std.debug.print("\n🚀 Zsync v{s} - Task Spawning Example\n\n", .{zsync.VERSION});
 
     // Initialize global runtime
     const config = zsync.Config.optimal();
@@ -18,7 +18,7 @@ pub fn main() !void {
 
     // Spawn a simple task
     const TestTask = struct {
-        fn task(_: zsync.Io) !void {
+        fn task() !void {
             std.debug.print("✓ Task 1 executing...\n", .{});
         }
     };

@@ -5,7 +5,7 @@ const std = @import("std");
 const zsync = @import("zsync");
 
 pub fn main() !void {
-    std.debug.print("\n🚦 Zsync v0.6.0 - Semaphore Example\n\n", .{});
+    std.debug.print("\n🚦 Zsync v{s} - Semaphore Example\n\n", .{zsync.VERSION});
 
     // Create semaphore with 3 permits (max 3 concurrent operations)
     var sem = zsync.Semaphore.init(3);

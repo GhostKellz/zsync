@@ -211,10 +211,10 @@ test "nursery basic spawn and wait" {
 
     // Spawn some tasks
     const Task = struct {
-        fn task1(_: io_interface.Io) !void {
+        fn task1() !void {
             compat.sleepNanos(10_000_000); // 10ms
         }
-        fn task2(_: io_interface.Io) !void {
+        fn task2() !void {
             compat.sleepNanos(5_000_000); // 5ms
         }
     };
@@ -248,7 +248,7 @@ test "nursery with RAII pattern" {
     const TestFunc = struct {
         fn runTasks(n: *Nursery) !void {
             const Task = struct {
-                fn task(_: io_interface.Io) !void {
+                fn task() !void {
                     compat.sleepNanos(1_000_000); // 1ms
                 }
             };

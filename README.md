@@ -33,7 +33,7 @@ Zsync is an async runtime for Zig with blocking, thread-pool, and Linux-focused 
 
 ### Supported vs Experimental
 
-**Supported (v0.8.0):** `Runtime`, `Io`, `Future`, `BlockingIo`, `ThreadPoolIo`, channels, timers, nursery.
+**Supported (v0.8.1):** `Runtime`, `Io`, `Future`, `BlockingIo`, `ThreadPoolIo`, channels, timers, nursery.
 
 **Experimental:** Future combinators (`race`, `all`, `timeout`), green threads, stackless I/O, network integration, and other warning-labeled prototype modules. See [CHANGELOG.md](CHANGELOG.md) for details.
 
@@ -90,7 +90,10 @@ exe.root_module.addImport("zsync", zsync.module("zsync"));
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn fileProcessor(io: zsync.Io) !void {
+fn fileProcessor() !void {
+    // Acquire Io explicitly - no magic injection
+    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
+
     // Vectorized I/O operations
     var buffers = [_]zsync.IoBuffer{
         zsync.IoBuffer.init(&buffer1),
@@ -110,7 +113,7 @@ fn fileProcessor(io: zsync.Io) !void {
 }
 
 pub fn main() !void {
-    try zsync.run(fileProcessor, {}); // Auto-detects best execution model
+    try zsync.run(fileProcessor, .{}); // Auto-detects best execution model
 }
 ```
 
@@ -123,7 +126,7 @@ Direct system calls with minimal overhead. Best for simple applications.
 True parallelism with work-stealing threads. Ideal for CPU-bound tasks.
 
 ### Green Thread Mode (Linux)
-Present in the repository, but not part of the supported `v0.8.0` release surface.
+Present in the repository, but not part of the supported `v0.8.1` release surface.
 
 ### Auto Mode
 Selects the best execution model based on platform capabilities.
@@ -149,7 +152,7 @@ zsync.yieldNow();  // Cooperative yield
 
 ### Future Combinators
 
-Future combinators are currently experimental for `v0.8.0`. Prefer the supported core runtime surface for stable downstream code.
+Future combinators are currently experimental for `v0.8.1`. Prefer the supported core runtime surface for stable downstream code.
 
 ## Platform Support
 

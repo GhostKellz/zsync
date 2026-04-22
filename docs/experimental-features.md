@@ -4,7 +4,7 @@ This document outlines experimental features in zsync that are functional but ma
 
 ## Windows IOCP Backend
 
-**Status:** Experimental (v0.8.0+)
+**Status:** Experimental (v0.8.1+)
 
 The Windows backend uses I/O Completion Ports (IOCP) with a worker thread pool model for synchronous I/O operations.
 

@@ -4,7 +4,7 @@ This document outlines planned improvements and features for zsync.
 
 ## Windows Native I/O
 
-### Phase 1: Current State (v0.8.0) ✓
+### Phase 1: Current State (v0.8.1) ✓
 
 - Worker thread pool with IOCP completion signaling
 - Synchronous I/O via `ReadFile`/`WriteFile` and `recv`/`send`
@@ -142,7 +142,7 @@ Ensure consistent behavior across platforms:
 
 | Version | Focus |
 |---------|-------|
-| v0.8.0 | Windows compiles, basic native I/O |
+| v0.8.1 | Windows compiles, basic native I/O |
 | v0.9.0 | Windows overlapped file I/O |
 | v1.0.0 | Windows overlapped socket I/O, macOS kqueue |
 | v1.1.0 | Performance optimization, zero-copy |

@@ -2,15 +2,23 @@
 //! Async Runtime for Zig
 
 const std = @import("std");
+const build_zon = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Build options - pass version from build.zig.zon
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", build_zon.version);
+
     // Zsync module
     const zsync_mod = b.addModule("zsync", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
+        .imports = &.{
+            .{ .name = "build_options", .module = options.createModule() },
+        },
     });
 
     // Main executable

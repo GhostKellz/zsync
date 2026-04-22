@@ -1,5 +1,5 @@
-//! Zsync v0.6.0 - HTTP/3, DoQ, and gRPC Examples
-//! Demonstrates the new protocol support added in v0.6.0
+//! Zsync - HTTP/3, DoQ, and gRPC Examples
+//! Demonstrates protocol support
 
 const std = @import("std");
 const zsync = @import("zsync");
@@ -9,7 +9,7 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    std.debug.print("=== Zsync v0.6.0 Protocol Examples ===\n\n", .{});
+    std.debug.print("=== Zsync v{s} Protocol Examples ===\n\n", .{zsync.VERSION});
 
     // Example 1: HTTP/3 over QUIC
     try http3Example(allocator);
@@ -129,7 +129,7 @@ fn grpcExample(allocator: std.mem.Allocator) !void {
     std.debug.print("[gRPC] Note: Full implementation requires zquic integration\n\n", .{});
 
     // Show available features
-    std.debug.print("=== Available v0.6.0 Protocol Features ===\n", .{});
+    std.debug.print("=== Available Protocol Features ===\n", .{});
     std.debug.print("✅ HTTP/3 over QUIC (RFC 9114)\n", .{});
     std.debug.print("✅ DNS over QUIC / DoQ (RFC 9250)\n", .{});
     std.debug.print("✅ gRPC over HTTP/2\n", .{});

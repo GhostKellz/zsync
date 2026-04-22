@@ -9,7 +9,7 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    std.debug.print("\n⚡ Zsync v0.6.0 - Executor Example\n\n", .{});
+    std.debug.print("\n⚡ Zsync v{s} - Executor Example\n\n", .{zsync.VERSION});
 
     // Create executor
     var executor = try zsync.Executor.init(allocator);
@@ -25,21 +25,21 @@ pub fn main() !void {
 
     // Define tasks
     const Task1 = struct {
-        fn task(_: zsync.Io) !void {
+        fn task() !void {
             std.debug.print("  Task 1: Starting...\n", .{});
             std.debug.print("  Task 1: Complete!\n", .{});
         }
     };
 
     const Task2 = struct {
-        fn task(_: zsync.Io) !void {
+        fn task() !void {
             std.debug.print("  Task 2: Starting...\n", .{});
             std.debug.print("  Task 2: Complete!\n", .{});
         }
     };
 
     const Task3 = struct {
-        fn task(_: zsync.Io) !void {
+        fn task() !void {
             std.debug.print("  Task 3: Starting...\n", .{});
             std.debug.print("  Task 3: Complete!\n", .{});
         }

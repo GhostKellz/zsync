@@ -1,4 +1,4 @@
-//! 🚀 Zsync v0.5.0 - High-Performance HTTP Server Demo
+//! 🚀 Zsync - High-Performance HTTP Server Demo
 //! Showcases the power of Zig's async runtime with real performance numbers
 //!
 //! Features:
@@ -138,7 +138,7 @@ const Connection = struct {
             \\Connection: keep-alive
             \\
             \\<!DOCTYPE html>
-            \\<html><head><title>🚀 Zsync v0.5.0 Demo</title></head>
+            \\<html><head><title>🚀 Zsync Demo</title></head>
             \\<body><h1>High-Performance Server</h1><p>Powered by Zsync - The Tokio of Zig!</p><a href="/stats">Stats</a></body></html>
         ;
     }
@@ -146,20 +146,13 @@ const Connection = struct {
     fn handleApiRequest(self: *Self, request: []const u8) []const u8 {
         _ = self;
         _ = request;
-        const json_response = 
-            \\{"message":"Hello from Zsync!","version":"0.5.0","timestamp":
-        ;
-        const timestamp = zsync.milliTime();
-        
-        // Simple JSON response (in production, use proper JSON library)
-        _ = timestamp;
         return 
             \\HTTP/1.1 200 OK
             \\Content-Type: application/json
             \\Content-Length: 78
             \\Connection: keep-alive
             \\
-            \\{"message":"Hello from Zsync!","version":"0.5.0","performance":"blazing_fast"}
+            \\{"message":"Hello from Zsync!","performance":"blazing_fast"}
         ;
     }
     
@@ -182,7 +175,7 @@ const Connection = struct {
             \\Content-Length: 156
             \\Connection: keep-alive
             \\
-            \\{"server":"Zsync v0.5.0","uptime_ms":30000,"requests_total":50000,"requests_per_second":1666,"connections_active":100,"memory_usage":"optimal"}
+            \\{"server":"Zsync","uptime_ms":30000,"requests_total":50000,"requests_per_second":1666,"connections_active":100,"memory_usage":"optimal"}
         ;
     }
 };
@@ -221,7 +214,7 @@ const HttpServer = struct {
     }
     
     pub fn start(self: *Self) !void {
-        std.debug.print("🚀 Zsync High-Performance Server v0.5.0\n", .{});
+        std.debug.print("🚀 Zsync High-Performance Server v{s}\n", .{zsync.VERSION});
         std.debug.print("📡 Listening on http://127.0.0.1:{}\n", .{self.config.port});
         std.debug.print("⚡ Ready for {} concurrent connections\n", .{self.config.max_connections});
         std.debug.print("🔥 Performance mode: MAXIMUM\n\n", .{});

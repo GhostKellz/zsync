@@ -3,10 +3,8 @@
 
 const std = @import("std");
 const runtime_mod = @import("runtime.zig");
-const io_interface = @import("io_interface.zig");
 
 const Runtime = runtime_mod.Runtime;
-const Io = io_interface.Io;
 
 /// Handle to a spawned task
 pub const TaskHandle = struct {
@@ -49,13 +47,6 @@ pub const TaskHandle = struct {
     }
 };
 
-/// Task context passed to spawned tasks
-const TaskContext = struct {
-    handle: *TaskHandle,
-    io: Io,
-    allocator: std.mem.Allocator,
-};
-
 /// Spawn a task on the global runtime
 pub fn spawn(comptime task_fn: anytype, args: anytype) !*TaskHandle {
     const runtime = Runtime.global() orelse return error.RuntimeNotInitialized;
@@ -63,6 +54,8 @@ pub fn spawn(comptime task_fn: anytype, args: anytype) !*TaskHandle {
 }
 
 /// Spawn a task on a specific runtime
+/// Task receives args directly as passed - no automatic Io injection.
+/// Aligns with Zig 0.17.0-dev std.Io async/concurrent pattern.
 pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*TaskHandle {
     const allocator = runtime.allocator;
 
@@ -75,15 +68,12 @@ pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*Ta
         .allocator = allocator,
     };
 
-    const io = runtime.getIo();
-
     // Check if we can use thread pool for async execution
     if (runtime.isThreadPoolMode()) {
         // Create task context that captures everything needed for async execution
         // This wrapper is self-owned: it frees itself after the task completes
         const TaskWrapper = struct {
             task_handle: *TaskHandle,
-            task_io: Io,
             task_args: @TypeOf(args),
             wrapper_allocator: std.mem.Allocator,
 
@@ -92,7 +82,7 @@ pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*Ta
                 const alloc = wrapper.wrapper_allocator;
 
                 // Execute task and capture result
-                executeTaskWrapper(task_fn, wrapper.task_args, wrapper.task_io) catch |err| {
+                executeTaskWrapper(task_fn, wrapper.task_args) catch |err| {
                     wrapper.task_handle.result = .{ .err = err };
                     wrapper.task_handle.completed.store(true, .release);
                     alloc.destroy(wrapper);
@@ -108,7 +98,6 @@ pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*Ta
         const wrapper = try allocator.create(TaskWrapper);
         wrapper.* = TaskWrapper{
             .task_handle = handle,
-            .task_io = io,
             .task_args = args,
             .wrapper_allocator = allocator,
         };
@@ -123,13 +112,12 @@ pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*Ta
 
     // Fallback: execute synchronously on the calling thread
     // (for blocking mode or when thread pool isn't available)
-    const result = executeTaskWrapper(task_fn, args, io) catch |err| {
+    executeTaskWrapper(task_fn, args) catch |err| {
         handle.result = .{ .err = err };
         handle.completed.store(true, .release);
         return handle;
     };
 
-    _ = result;
     handle.result = .{ .ok = {} };
     handle.completed.store(true, .release);
 
@@ -137,7 +125,9 @@ pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*Ta
 }
 
 /// Execute task with proper argument handling
-fn executeTaskWrapper(comptime task_fn: anytype, args: anytype, io: Io) !void {
+/// Task receives args directly - no automatic Io injection.
+/// Aligns with Zig 0.17.0-dev std.Io async/concurrent pattern.
+fn executeTaskWrapper(comptime task_fn: anytype, args: anytype) !void {
     const TaskType = @TypeOf(task_fn);
     const task_info = @typeInfo(TaskType);
 
@@ -145,20 +135,8 @@ fn executeTaskWrapper(comptime task_fn: anytype, args: anytype, io: Io) !void {
         @compileError("Task must be a function");
     }
 
-    // Call task with appropriate arguments
-    return switch (@typeInfo(@TypeOf(args))) {
-        .@"struct" => |struct_info| blk: {
-            if (struct_info.fields.len == 0) {
-                // No args, just pass io
-                break :blk task_fn(io);
-            } else {
-                // Pass io + args
-                break :blk @call(.auto, task_fn, .{io} ++ args);
-            }
-        },
-        .void => task_fn(io),
-        else => task_fn(io, args),
-    };
+    // Call task directly with provided arguments
+    return @call(.auto, task_fn, args);
 }
 
 /// Generate unique task ID
@@ -189,7 +167,7 @@ test "spawn basic task" {
     }
 
     const TestTask = struct {
-        fn task(_: Io) !void {
+        fn task() !void {
             // Simple task that completes immediately
         }
     };
@@ -225,7 +203,7 @@ test "spawn with thread pool" {
     var task_ran = std.atomic.Value(bool).init(false);
 
     const TestTask = struct {
-        fn task(_: Io, ran_flag: *std.atomic.Value(bool)) !void {
+        fn task(ran_flag: *std.atomic.Value(bool)) !void {
             ran_flag.store(true, .release);
         }
     };

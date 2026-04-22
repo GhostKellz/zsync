@@ -142,7 +142,7 @@ fn benchmarkZsync(allocator: std.mem.Allocator, config: BenchmarkConfig) !Benchm
     std.debug.print("  ✅ Zsync benchmark completed!     \n", .{});
     
     return BenchmarkResult{
-        .name = "Zsync v0.5.0",
+        .name = "Zsync v" ++ zsync.VERSION,
         .task_spawn_ns = total_spawn_time / config.iterations,
         .channel_throughput_msg_per_sec = total_throughput / config.iterations,
         .memory_usage_mb = 12.5, // Measured value - in real benchmark this would be measured

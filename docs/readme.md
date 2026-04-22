@@ -1,10 +1,10 @@
 # zsync Documentation
 
-Reference documentation for `zsync` `v0.8.0`.
+Reference documentation for `zsync` `v0.8.1`.
 
 ## Supported Surface
 
-The supported `v0.8.0` surface is:
+The supported `v0.8.1` surface is:
 
 - `Runtime`
 - `Io`
@@ -35,5 +35,5 @@ Experimental modules and helpers remain in the repository, but they are outside 
 ## Notes
 
 - `Future.destroy()` is zero-argument.
-- `race()`, `all()`, and `timeout()` are present in the public API, but they are still treated as experimental for `v0.8.0`.
+- `race()`, `all()`, and `timeout()` are present in the public API, but they are still treated as experimental for `v0.8.1`.
 - The root `README.md` is the main project landing page. This directory is for focused technical docs.

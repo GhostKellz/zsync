@@ -19,14 +19,15 @@ exe.root_module.addImport("zsync", zsync.module("zsync"));
 
 ## Minimum Zig Version
 
-`zsync` `v0.8.0` requires Zig `0.17.0-dev.27+0dd99c37c` or later.
+`zsync` `v0.8.1` requires Zig `0.17.0-dev.27+0dd99c37c` or later.
 
 ## Smallest Example
 
 ```zig
 const zsync = @import("zsync");
 
-fn task(io: zsync.Io) !void {
+fn task() !void {
+    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
     var future = try io.write("hello from zsync\n");
     defer future.destroy();
     try future.await();
@@ -55,8 +56,8 @@ pub fn main() !void {
     try runtime.run(task, .{});
 }
 
-fn task(io: zsync.Io) !void {
-    _ = io;
+fn task() !void {
+    // Io available via zsync.getGlobalIo() if needed
 }
 ```
 

@@ -1339,11 +1339,13 @@ pub fn timeoutFn(comptime func: anytype, args: anytype, timeout_ms: u64) !@TypeO
     return result;
 }
 
-// Version information
-pub const VERSION = "0.8.0";
-pub const VERSION_MAJOR = 0;
-pub const VERSION_MINOR = 8;
-pub const VERSION_PATCH = 0;
+// Version information - pulled from build.zig.zon via build options
+const build_options = @import("build_options");
+pub const VERSION = build_options.version;
+pub const VERSION_PARSED = std.SemanticVersion.parse(VERSION) catch unreachable;
+pub const VERSION_MAJOR = VERSION_PARSED.major;
+pub const VERSION_MINOR = VERSION_PARSED.minor;
+pub const VERSION_PATCH = VERSION_PARSED.patch;
 
 /// Print Zsync version and capabilities
 pub fn printVersion() void {
@@ -1386,7 +1388,9 @@ pub fn printVersion() void {
 /// Simple hello world example showcasing colorblind async
 pub fn helloWorld(_: std.mem.Allocator) !void {
     const HelloTask = struct {
-        fn task(io: Io) !void {
+        fn task() !void {
+            var io = getGlobalIo() orelse return error.NoRuntime;
+
             const messages = [_][]const u8{
                 "zsync - async runtime for Zig\n",
                 "colorblind async in action\n",
@@ -1394,8 +1398,7 @@ pub fn helloWorld(_: std.mem.Allocator) !void {
             };
 
             // Demonstrate vectorized write
-            var io_mut = io;
-            var future = try io_mut.writev(&messages);
+            var future = try io.writev(&messages);
             defer future.destroy();
             try future.await();
 
@@ -1405,7 +1408,7 @@ pub fn helloWorld(_: std.mem.Allocator) !void {
         }
     };
 
-    try runBlocking(HelloTask.task, {});
+    try runBlocking(HelloTask.task, .{});
 }
 
 // Backward compatibility exports (deprecated but functional)
@@ -1507,10 +1510,15 @@ test "Runtime with optimal configuration" {
 test "Version information" {
     const testing = std.testing;
 
-    try testing.expect(VERSION_MAJOR == 0);
-    try testing.expect(VERSION_MINOR == 8);
-    try testing.expect(VERSION_PATCH == 0);
-    try testing.expect(std.mem.eql(u8, VERSION, "0.8.0"));
+    // Version is pulled from build.zig.zon - verify it parses correctly
+    try testing.expect(VERSION.len > 0);
+    try testing.expect(VERSION_MAJOR >= 0);
+    try testing.expect(VERSION_MINOR >= 0);
+    try testing.expect(VERSION_PATCH >= 0);
+    // Verify VERSION_PARSED matches the components
+    try testing.expect(VERSION_PARSED.major == VERSION_MAJOR);
+    try testing.expect(VERSION_PARSED.minor == VERSION_MINOR);
+    try testing.expect(VERSION_PARSED.patch == VERSION_PATCH);
 }
 
 /// Legacy compatibility function

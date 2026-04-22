@@ -1,13 +1,14 @@
 # Examples
 
-Examples below stick to the supported `v0.8.0` surface.
+Examples below stick to the supported `v0.8.1` surface.
 
 ## Basic Write
 
 ```zig
 const zsync = @import("zsync");
 
-fn task(io: zsync.Io) !void {
+fn task() !void {
+    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
     var future = try io.write("example output\n");
     defer future.destroy();
     try future.await();
@@ -24,8 +25,8 @@ pub fn main() !void {
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn task(io: zsync.Io) !void {
-    _ = io;
+fn task() !void {
+    // Io available via zsync.getGlobalIo() if needed
     zsync.sleep(5);
 }
 

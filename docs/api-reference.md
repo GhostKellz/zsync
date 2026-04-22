@@ -1,6 +1,6 @@
 # API Reference
 
-This is a concise reference for the supported `v0.8.0` surface.
+This is a concise reference for the supported `v0.8.1` surface.
 
 ## Core Types
 
@@ -16,7 +16,7 @@ pub fn race(self: *Runtime, futures: []Future) !Future
 pub fn all(self: *Runtime, futures: []Future) !Future
 ```
 
-`race()`, `all()`, and `timeout()` are public, but still considered experimental for `v0.8.0`.
+`race()`, `all()`, and `timeout()` are public, but still considered experimental for `v0.8.1`.
 
 ### `Io`
 

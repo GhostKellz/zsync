@@ -1,5 +1,5 @@
 //! Example: Simple HTTP Server
-//! Shows how to build an HTTP server with zsync v0.6.0
+//! Shows how to build an HTTP server with zsync
 
 const std = @import("std");
 const zsync = @import("zsync");
@@ -16,7 +16,7 @@ fn handleRequest(req: *http.Request, res: *http.Response) !void {
             \\<html>
             \\<head><title>Zsync HTTP Server</title></head>
             \\<body>
-            \\  <h1>🚀 Zsync v0.6.0 HTTP Server</h1>
+            \\  <h1>🚀 Zsync HTTP Server</h1>
             \\  <p>High-performance async HTTP server built with zsync!</p>
             \\  <ul>
             \\    <li><a href="/api/status">API Status</a></li>
@@ -32,7 +32,7 @@ fn handleRequest(req: *http.Request, res: *http.Response) !void {
     } else if (std.mem.eql(u8, req.path, "/api/version")) {
         try res.status(200);
         try res.header("Content-Type", "application/json");
-        try res.write("{\"version\":\"0.6.0\",\"runtime\":\"zsync\"}");
+        try res.write("{\"runtime\":\"zsync\"}");
     } else {
         try res.status(404);
         try res.header("Content-Type", "text/plain");
@@ -47,7 +47,7 @@ pub fn main() !void {
 
     std.debug.print("\n", .{});
     std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
-    std.debug.print("  Zsync v0.6.0 HTTP Server Example\n", .{});
+    std.debug.print("  Zsync v{s} HTTP Server Example\n", .{zsync.VERSION});
     std.debug.print("═══════════════════════════════════════════════════════════\n", .{});
     std.debug.print("\n", .{});
 

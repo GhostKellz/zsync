@@ -30,7 +30,7 @@ defer runtime.deinit();
 
 ## Supported Surface
 
-For `v0.8.0`, the supported migration target is the core runtime surface:
+For `v0.8.1`, the supported migration target is the core runtime surface:
 
 - `Runtime`
 - `Io`

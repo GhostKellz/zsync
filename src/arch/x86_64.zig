@@ -50,8 +50,7 @@ pub const Context = extern struct {
 
 // Assembly context switching function
 pub fn swapContext(old_ctx: *Context, new_ctx: *Context) void {
-    // Simplified context switching for v0.5.1 - swap memory contents
-    // In production v0.6.0, this would use proper assembly with setjmp/longjmp-like behavior
+    // Swap memory contents between contexts
     const temp = old_ctx.*;
     old_ctx.* = new_ctx.*;
     new_ctx.* = temp;

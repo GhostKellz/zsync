@@ -108,7 +108,7 @@ test "executor spawn single task" {
     }
 
     const TestTask = struct {
-        fn task(_: runtime_mod.Io) !void {
+        fn task() !void {
             // Simple task
         }
     };
@@ -137,7 +137,7 @@ test "executor spawn multiple tasks" {
     }
 
     const TestTask = struct {
-        fn task(_: runtime_mod.Io) !void {
+        fn task() !void {
             // Simple task
         }
     };

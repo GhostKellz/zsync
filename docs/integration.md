@@ -1,6 +1,6 @@
 # Integration Guide
 
-This guide covers the supported `v0.8.0` integration patterns for downstream projects.
+This guide covers the supported `v0.8.1` integration patterns for downstream projects.
 
 ## Canonical Runtime Pattern
 
@@ -8,7 +8,8 @@ This guide covers the supported `v0.8.0` integration patterns for downstream pro
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn task(io: zsync.Io) !void {
+fn task() !void {
+    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
     var future = try io.write("hello from zsync\n");
     defer future.destroy();
     try future.await();
@@ -62,7 +63,7 @@ This guide assumes use of:
 - timers
 - nursery
 
-Experimental modules are intentionally excluded from the recommended integration path for `v0.8.0`.
+Experimental modules are intentionally excluded from the recommended integration path for `v0.8.1`.
 
 ## See Also
 

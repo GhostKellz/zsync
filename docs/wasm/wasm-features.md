@@ -14,6 +14,6 @@ Areas present in-tree include:
 
 ## Release Position
 
-These helpers are not part of the supported `v0.8.0` surface.
+These helpers are not part of the supported `v0.8.1` surface.
 
 Use them only if you are comfortable with experimental APIs and partial implementations.

@@ -496,9 +496,8 @@ pub const Runtime = struct {
 
         const start_instant = compat.Instant.now() catch unreachable;
 
-        // Execute main task with colorblind async
-        const io = self.getIo();
-        try self.executeTask(task_fn, args, io);
+        // Execute main task - Io available via zsync.getIo() if needed
+        try self.executeTask(task_fn, args);
 
         // CRITICAL FIX: Auto-shutdown after task completes
         // This signals thread pool workers to exit immediately
@@ -518,8 +517,11 @@ pub const Runtime = struct {
         }
     }
 
-    /// Execute a task with proper error handling and metrics
-    fn executeTask(self: *Self, comptime task_fn: anytype, args: anytype, io: Io) !void {
+    /// Execute a task directly with provided args.
+    /// No automatic Io injection - tasks acquire Io via zsync.getIo() if needed.
+    /// Aligns with Zig 0.17.0-dev std.Io explicit argument pattern.
+    fn executeTask(self: *Self, comptime task_fn: anytype, args: anytype) !void {
+        _ = self.getIo(); // Ensure Io is available via getIo() for tasks that need it
         self.metrics.incrementTasks();
         defer self.metrics.completeTasks();
 
@@ -530,32 +532,21 @@ pub const Runtime = struct {
             @compileError("Task must be a function");
         }
 
-        // Call task with appropriate arguments
-        const result = switch (@typeInfo(@TypeOf(args))) {
-            .@"struct" => |struct_info| blk: {
-                if (struct_info.fields.len == 0) {
-                    // No args, just pass io
-                    break :blk task_fn(io);
-                } else {
-                    // Pass io + args
-                    break :blk @call(.auto, task_fn, .{io} ++ args);
-                }
-            },
-            .void => task_fn(io),
-            else => task_fn(io, args),
-        };
-
-        return result;
+        // Call task directly with provided args
+        // Handle void args (from `{}`) as empty tuple
+        const ArgsType = @TypeOf(args);
+        if (ArgsType == void) {
+            return @call(.auto, task_fn, .{});
+        } else {
+            return @call(.auto, task_fn, args);
+        }
     }
 
     /// Spawn a new task for concurrent execution
-    /// Tasks spawned via this method receive Io as their first argument,
-    /// matching the contract of run() and executeTask().
+    /// Task receives args directly as passed - no automatic Io injection.
+    /// Aligns with Zig 0.17.0-dev std.Io async/concurrent pattern.
     pub fn spawn(self: *Self, comptime task_fn: anytype, args: anytype) !Future {
         self.metrics.incrementFutures();
-
-        // Get Io for this runtime to pass to spawned tasks
-        const io = self.getIo();
 
         // Create task context
         const TaskContext = struct {
@@ -615,93 +606,71 @@ pub const Runtime = struct {
             .joined = std.atomic.Value(bool).init(false),
         };
 
-        // Helper to call task with the same signature adaptation used by executeTask.
-        const callTaskWithIo = struct {
-            fn call(task_io: Io, func: @TypeOf(task_fn), task_args: @TypeOf(args)) !void {
-                const fn_info = @typeInfo(@TypeOf(func)).@"fn";
-                const param_count = fn_info.params.len;
+        // Helper to execute task and handle both error-union and void return types
+        const callTask = struct {
+            fn execute(func: @TypeOf(task_fn), task_args: @TypeOf(args)) ?anyerror {
+                const ReturnType = @typeInfo(@TypeOf(func)).@"fn".return_type.?;
+                const is_error_union = @typeInfo(ReturnType) == .error_union;
 
-                switch (param_count) {
-                    0 => return @call(.auto, func, .{}),
-                    1 => {
-                        if (@TypeOf(task_args) == void) {
-                            return @call(.auto, func, .{task_io});
-                        }
-
-                        switch (@typeInfo(@TypeOf(task_args))) {
-                            .@"struct" => |struct_info| {
-                                if (struct_info.fields.len == 0) {
-                                    return @call(.auto, func, .{task_io});
-                                }
-                            },
-                            else => {},
-                        }
-
-                        return @call(.auto, func, .{task_args});
-                    },
-                    else => {
-                        if (@TypeOf(task_args) == void) {
-                            return @call(.auto, func, .{task_io});
-                        }
-
-                        switch (@typeInfo(@TypeOf(task_args))) {
-                            .@"struct" => return @call(.auto, func, .{task_io} ++ task_args),
-                            else => return @call(.auto, func, .{ task_io, task_args }),
-                        }
-                    },
+                if (is_error_union) {
+                    @call(.auto, func, task_args) catch |err| {
+                        return err;
+                    };
+                } else {
+                    @call(.auto, func, task_args);
                 }
+                return null;
             }
         };
 
         // Execute task based on execution model
         switch (self.execution_model) {
             .blocking => {
-                // Execute synchronously in blocking mode with Io injected
-                callTaskWithIo.call(io, task_fn, args) catch |err| {
+                // Execute synchronously in blocking mode
+                if (callTask.execute(task_fn, args)) |err| {
                     task_ctx.result = err;
                     task_ctx.state.store(.error_state, .release);
                     return Future.init(self.allocator, &TaskContext.vtable, task_ctx);
-                };
+                }
                 task_ctx.state.store(.ready, .release);
             },
             .thread_pool => {
                 // Submit to thread pool for async execution
                 const ThreadTask = struct {
-                    fn run(ctx: *TaskContext, task_io: Io, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
-                        callTaskWithIo.call(task_io, func, task_args) catch |err| {
+                    fn run(ctx: *TaskContext, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
+                        if (callTask.execute(func, task_args)) |err| {
                             ctx.result = err;
                             ctx.state.store(.error_state, .release);
                             return;
-                        };
+                        }
                         ctx.state.store(.ready, .release);
                     }
                 };
 
-                // Create a thread to run the task with Io
-                task_ctx.thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, io, task_fn, args });
+                task_ctx.thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, task_fn, args });
             },
             .green_threads => {
                 // Use green thread scheduler for cooperative multitasking
                 // For now, spawn a lightweight thread until green thread scheduler is fully integrated
                 const ThreadTask = struct {
-                    fn run(ctx: *TaskContext, task_io: Io, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
-                        callTaskWithIo.call(task_io, func, task_args) catch |err| {
+                    fn run(ctx: *TaskContext, func: @TypeOf(task_fn), task_args: @TypeOf(args)) void {
+                        if (callTask.execute(func, task_args)) |err| {
                             ctx.result = err;
                             ctx.state.store(.error_state, .release);
                             return;
-                        };
+                        }
                         ctx.state.store(.ready, .release);
                     }
                 };
-                task_ctx.thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, io, task_fn, args });
+                task_ctx.thread = try std.Thread.spawn(.{}, ThreadTask.run, .{ task_ctx, task_fn, args });
             },
             else => {
-                // For stackless, auto - fall back to blocking for now with Io injected
-                callTaskWithIo.call(io, task_fn, args) catch |err| {
+                // For stackless, auto - fall back to blocking
+                if (callTask.execute(task_fn, args)) |err| {
                     task_ctx.result = err;
                     task_ctx.state.store(.error_state, .release);
                     return Future.init(self.allocator, &TaskContext.vtable, task_ctx);
-                };
+                }
                 task_ctx.state.store(.ready, .release);
             },
         }
@@ -1019,6 +988,88 @@ test "Runtime metrics" {
     const metrics = runtime.getMetrics();
     try testing.expect(metrics.tasks_spawned.load(.monotonic) == 0);
     try testing.expect(metrics.tasks_completed.load(.monotonic) == 0);
+}
+
+// Regression tests for spawn() argument passing - ensures args are passed directly without wrapping
+test "spawn with single pointer argument" {
+    const testing = std.testing;
+
+    const config = Config{ .execution_model = .blocking };
+    const runtime = try Runtime.init(testing.allocator, config);
+    defer runtime.deinit();
+
+    runtime.setGlobal();
+    defer {
+        global_runtime_mutex.lock();
+        global_runtime = null;
+        global_runtime_mutex.unlock();
+    }
+
+    var value: u32 = 0;
+    const Task = struct {
+        fn run(ptr: *u32) void {
+            ptr.* += 1;
+        }
+    };
+
+    var future = try runtime.spawn(Task.run, .{&value});
+    defer future.destroy();
+    try future.await();
+    try testing.expect(value == 1);
+}
+
+test "spawn with two arguments" {
+    const testing = std.testing;
+
+    const config = Config{ .execution_model = .blocking };
+    const runtime = try Runtime.init(testing.allocator, config);
+    defer runtime.deinit();
+
+    runtime.setGlobal();
+    defer {
+        global_runtime_mutex.lock();
+        global_runtime = null;
+        global_runtime_mutex.unlock();
+    }
+
+    var result: u32 = 0;
+    const Task = struct {
+        fn run(ptr: *u32, add: u32) void {
+            ptr.* += add;
+        }
+    };
+
+    var future = try runtime.spawn(Task.run, .{ &result, 42 });
+    defer future.destroy();
+    try future.await();
+    try testing.expect(result == 42);
+}
+
+test "spawn with no arguments" {
+    const testing = std.testing;
+
+    const config = Config{ .execution_model = .blocking };
+    const runtime = try Runtime.init(testing.allocator, config);
+    defer runtime.deinit();
+
+    runtime.setGlobal();
+    defer {
+        global_runtime_mutex.lock();
+        global_runtime = null;
+        global_runtime_mutex.unlock();
+    }
+
+    const Task = struct {
+        var called: bool = false;
+        fn run() void {
+            called = true;
+        }
+    };
+
+    var future = try runtime.spawn(Task.run, .{});
+    defer future.destroy();
+    try future.await();
+    try testing.expect(Task.called);
 }
 
 /// Runtime Builder for ergonomic configuration
