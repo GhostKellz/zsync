@@ -26,7 +26,7 @@ pub fn main() !void {
     }
 
     std.debug.print("zsync - Cross-Platform Async Runtime (Backend Demo)\n", .{});
-    std.debug.print("=" ** 60 ++ "\n", .{});
+    std.debug.print("============================================================\n", .{});
 
     // Create platform-optimized runtime factory
     var factory = try runtime_factory.RuntimeFactory.init(allocator);

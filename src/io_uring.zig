@@ -127,7 +127,7 @@ const IoUringParams = extern struct {
     sq_thread_idle: u32 = 0,
     features: u32 = 0,
     wq_fd: u32 = 0,
-    resv: [3]u32 = [_]u32{0} ** 3,
+    resv: [3]u32 = std.mem.zeroes([3]u32),
     sq_off: SqRingOffsets = .{},
     cq_off: CqRingOffsets = .{},
 };

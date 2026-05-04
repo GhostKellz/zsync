@@ -439,8 +439,8 @@ pub fn StacklessFrame(comptime FuncType: type) type {
         const LocalStorage = struct {
             // This would be generated based on the actual function's local variables
             // For now, we use a generic storage approach
-            data: [1024]u8 = [_]u8{0} ** 1024,
-            offsets: [32]usize = [_]usize{0} ** 32,
+            data: [1024]u8 = std.mem.zeroes([1024]u8),
+            offsets: [32]usize = std.mem.zeroes([32]usize),
             used_slots: usize = 0,
             
             /// Store a value in local storage

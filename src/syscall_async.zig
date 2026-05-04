@@ -45,7 +45,7 @@ pub const SyscallRequest = struct {
     pub fn init(syscall_number: usize) SyscallRequest {
         return SyscallRequest{
             .syscall_number = syscall_number,
-            .args = [_]usize{0} ** 6,
+            .args = std.mem.zeroes([6]usize),
             .arg_count = 0,
             .priority = 128, // Normal priority
             .timeout_ns = 5_000_000_000, // 5 seconds default

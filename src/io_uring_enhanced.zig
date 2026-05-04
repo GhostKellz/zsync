@@ -267,7 +267,7 @@ pub const EnhancedIoUring = struct {
             .sq_thread_idle = config.sq_thread_idle,
             .features = 0,
             .wq_fd = 0,
-            .resv = [_]u32{0} ** 3,
+            .resv = std.mem.zeroes([3]u32),
             .sq_off = std.mem.zeroes(linux.io_uring_params.SqRingOffsets),
             .cq_off = std.mem.zeroes(linux.io_uring_params.CqRingOffsets),
         };

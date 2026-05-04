@@ -15,7 +15,7 @@ pub fn compileTimeDeprecation(comptime message: []const u8) void {
 pub fn runtimeDeprecation(comptime call_site: []const u8, message: []const u8) void {
     const DeprecationTracker = struct {
         var warned_sites = std.atomic.Value(u64).init(0);
-        var site_hashes: [64]u64 = [_]u64{0} ** 64;
+        var site_hashes: [64]u64 = std.mem.zeroes([64]u64);
         var mutex = compat.Mutex{};
         
         fn shouldWarn(site_hash: u64) bool {

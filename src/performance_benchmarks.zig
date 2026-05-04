@@ -100,7 +100,7 @@ pub const BenchmarkSuite = struct {
     /// Run all benchmarks and compare against baselines
     pub fn runAllBenchmarks(self: *Self) !void {
         std.debug.print("🚀 zsync Performance Benchmark Suite\n");
-        std.debug.print("=" ** 60 ++ "\n\n");
+        std.debug.print("============================================================\n\n");
         
         // Basic operations benchmarks
         try self.runBasicOperationsBenchmarks();
@@ -187,7 +187,7 @@ pub const BenchmarkSuite = struct {
     /// Basic operations benchmarks
     fn runBasicOperationsBenchmarks(self: *Self) !void {
         std.debug.print("🔧 Basic Operations Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Task Creation", .basic_operations, benchmarkTaskCreation);
         try self.runBenchmark("Future Await", .basic_operations, benchmarkFutureAwait);
@@ -202,7 +202,7 @@ pub const BenchmarkSuite = struct {
     /// High concurrency benchmarks
     fn runHighConcurrencyBenchmarks(self: *Self) !void {
         std.debug.print("⚡ High Concurrency Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("1K Concurrent Tasks", .high_concurrency, benchmark1kConcurrentTasks);
         try self.runBenchmark("10K Concurrent Connections", .high_concurrency, benchmark10kConnections);
@@ -216,7 +216,7 @@ pub const BenchmarkSuite = struct {
     /// I/O intensive benchmarks
     fn runIoIntensiveBenchmarks(self: *Self) !void {
         std.debug.print("💾 I/O Intensive Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Sequential File Read", .io_intensive, benchmarkSequentialFileRead);
         try self.runBenchmark("Random File Access", .io_intensive, benchmarkRandomFileAccess);
@@ -229,7 +229,7 @@ pub const BenchmarkSuite = struct {
     /// CPU intensive benchmarks
     fn runCpuIntensiveBenchmarks(self: *Self) !void {
         std.debug.print("🔥 CPU Intensive Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Mathematical Computation", .cpu_intensive, benchmarkMathComputation);
         try self.runBenchmark("String Processing", .cpu_intensive, benchmarkStringProcessing);
@@ -242,7 +242,7 @@ pub const BenchmarkSuite = struct {
     /// Memory intensive benchmarks
     fn runMemoryIntensiveBenchmarks(self: *Self) !void {
         std.debug.print("🧠 Memory Intensive Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Large Data Structures", .memory_intensive, benchmarkLargeDataStructures);
         try self.runBenchmark("Memory Pool Operations", .memory_intensive, benchmarkMemoryPools);
@@ -255,7 +255,7 @@ pub const BenchmarkSuite = struct {
     /// Mixed workload benchmarks
     fn runMixedWorkloadBenchmarks(self: *Self) !void {
         std.debug.print("🎯 Mixed Workload Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Web Server Simulation", .mixed_workload, benchmarkWebServerSim);
         try self.runBenchmark("Game Server Simulation", .mixed_workload, benchmarkGameServerSim);
@@ -268,7 +268,7 @@ pub const BenchmarkSuite = struct {
     /// Scalability benchmarks
     fn runScalabilityBenchmarks(self: *Self) !void {
         std.debug.print("📈 Scalability Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Thread Scaling (1-32)", .scalability, benchmarkThreadScaling);
         try self.runBenchmark("Connection Scaling (100-100K)", .scalability, benchmarkConnectionScaling);
@@ -281,7 +281,7 @@ pub const BenchmarkSuite = struct {
     /// Latency sensitive benchmarks
     fn runLatencySensitiveBenchmarks(self: *Self) !void {
         std.debug.print("⏱️  Latency Sensitive Benchmarks\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         try self.runBenchmark("Sub-millisecond Response", .latency_sensitive, benchmarkSubMillisecondResponse);
         try self.runBenchmark("Real-time Processing", .latency_sensitive, benchmarkRealTimeProcessing);
@@ -294,7 +294,7 @@ pub const BenchmarkSuite = struct {
     /// Cross-runtime comparisons
     fn runCrossRuntimeComparisons(self: *Self) !void {
         std.debug.print("🏁 Cross-Runtime Comparisons\n");
-        std.debug.print("-" ** 30 ++ "\n");
+        std.debug.print("------------------------------\n");
         
         // Compare all Zsync I/O implementations
         try self.compareIoImplementations();
@@ -412,7 +412,7 @@ pub const BenchmarkSuite = struct {
     /// Print comprehensive benchmark results
     fn printBenchmarkResults(self: *Self) void {
         std.debug.print("📋 BENCHMARK RESULTS SUMMARY\n");
-        std.debug.print("=" ** 60 ++ "\n\n");
+        std.debug.print("============================================================\n\n");
         
         // Group results by category
         inline for (std.meta.fields(BenchmarkResult.BenchmarkCategory)) |field| {
@@ -473,7 +473,7 @@ pub const BenchmarkSuite = struct {
         std.debug.print("   Average memory efficiency: {d:.2}x\n", .{avg_memory_efficiency});
         std.debug.print("   Platform: {s} {s}\n", .{ @tagName(builtin.target.os.tag), @tagName(builtin.target.cpu.arch) });
         std.debug.print("\nzsync benchmark complete\n");
-        std.debug.print("=" ** 60 ++ "\n");
+        std.debug.print("============================================================\n");
     }
 };
 

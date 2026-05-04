@@ -3,6 +3,24 @@
 All notable changes to zsync will be documented in this file.
 
 
+## [v0.8.2] - 2026-05-04 - Zig Nightly Parser Compatibility
+
+### Fixed
+- Restored `zig build` compatibility on the current Zig `0.17.0-dev` nightly toolchain.
+- Replaced fragile repeat-expression patterns that the newer parser now rejects in default build paths.
+- Fixed the same parser-sensitive patterns in benchmark, cross-compilation, and support modules so release verification no longer fails after the first successful build.
+
+### Changed
+- Preserved the explicit `Io` acquisition model introduced in `v0.8.1`; this release is a compiler-compatibility follow-up, not an API change.
+- Kept versioning sourced from `build.zig.zon`, now updated to `0.8.2`.
+
+### Verification
+- `zig build`
+- `zig build test --summary all` (`57/57` passed)
+- `zig build examples --summary all`
+- `zig build cross-compile --summary all`
+
+
 ## [v0.8.1] - 2026-04-22 - Full Async API Alignment with Zig std.Io
 
 ### Breaking Changes

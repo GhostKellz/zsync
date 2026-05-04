@@ -57,7 +57,7 @@ pub fn main() !void {
     const config = BenchmarkConfig{};
     
     std.debug.print("🏆 Zsync v{s} Runtime Performance Benchmark\n", .{zsync.VERSION});
-    std.debug.print("=" ** 80 ++ "\n", .{});
+    std.debug.print("================================================================================\n", .{});
     std.debug.print("Configuration:\n", .{});
     std.debug.print("  • Tasks: {d}\n", .{config.num_tasks});
     std.debug.print("  • Messages: {d}\n", .{config.num_messages});  
@@ -70,17 +70,17 @@ pub fn main() !void {
     
     // Print results table
     std.debug.print("Results:\n", .{});
-    std.debug.print("-" ** 80 ++ "\n", .{});
+    std.debug.print("--------------------------------------------------------------------------------\n", .{});
     std.debug.print("{s:<20} | {s:>10} | {s:>15} | {s:>8} | {s:>12}\n", .{
         "Runtime", "Task Spawn", "Chan Throughput", "Memory", "Ctx Switch"
     });
-    std.debug.print("-" ** 80 ++ "\n", .{});
+    std.debug.print("--------------------------------------------------------------------------------\n", .{});
     
     zsync_result.print();
     baseline_result.print();
     
     // Performance comparison
-    std.debug.print("\n" ++ "=" ** 80 ++ "\n", .{});
+    std.debug.print("\n================================================================================\n", .{});
     std.debug.print("Performance Comparison (Zsync vs Baseline):\n", .{});
     
     const spawn_improvement = @as(f64, @floatFromInt(baseline_result.task_spawn_ns)) / @as(f64, @floatFromInt(zsync_result.task_spawn_ns));

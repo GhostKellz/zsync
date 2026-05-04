@@ -283,7 +283,7 @@ pub const HybridIo = struct {
 /// Smart execution model selector with machine learning-inspired heuristics
 pub const SmartSelector = struct {
     /// Historical performance data for each execution model
-    model_performance: [4]PerformanceHistory = [_]PerformanceHistory{PerformanceHistory{}} ** 4,
+    model_performance: [4]PerformanceHistory = std.mem.zeroes([4]PerformanceHistory),
     
     const PerformanceHistory = struct {
         avg_latency_ns: f64 = 0.0,

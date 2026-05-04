@@ -37,9 +37,9 @@ pub fn ConcurrentFuture(comptime T: type, comptime n: usize) type {
             var self = Self{
                 .contexts = undefined,
                 .stacks = undefined,
-                .results = [_]?T{null} ** n,
-                .errors = [_]?anyerror{null} ** n,
-                .states = [_]State{.pending} ** n,
+                .results = std.mem.zeroes([n]?T),
+                .errors = std.mem.zeroes([n]?anyerror),
+                .states = std.mem.zeroes([n]State),
                 .completion_count = std.atomic.Value(usize).init(0),
                 .completion_order = undefined,
                 .next_completion = std.atomic.Value(usize).init(0),

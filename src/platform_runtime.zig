@@ -309,7 +309,7 @@ pub const PlatformRuntime = struct {
     /// Print detailed platform information
     pub fn printPlatformInfo(self: *const Self) void {
         std.debug.print("\n🚀 zsync - Platform Runtime Information\n", .{});
-        std.debug.print("=" ** 50 ++ "\n", .{});
+        std.debug.print("==================================================\n", .{});
         std.debug.print("Platform: {s}\n", .{@tagName(builtin.os.tag)});
         std.debug.print("Architecture: {s}\n", .{@tagName(builtin.cpu.arch)});
         std.debug.print("Backend: {s}\n", .{self.getBackendName()});
@@ -342,7 +342,7 @@ pub const PlatformRuntime = struct {
         std.debug.print("  Threads: {}\n", .{config.thread_count});
         std.debug.print("  Queue Depth: {}\n", .{config.queue_depth});
         std.debug.print("  Buffer Size: {} bytes\n", .{config.buffer_size});
-        std.debug.print("=" ** 50 ++ "\n\n", .{});
+        std.debug.print("==================================================\n\n", .{});
     }
 };
 

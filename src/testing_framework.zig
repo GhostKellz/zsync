@@ -65,7 +65,7 @@ pub const TestResults = struct {
     
     pub const PerformanceMetrics = struct {
         operations_per_second: f64 = 0.0,
-        latency_percentiles: [5]f64 = [_]f64{0.0} ** 5, // 50th, 75th, 90th, 95th, 99th
+        latency_percentiles: [5]f64 = std.mem.zeroes([5]f64), // 50th, 75th, 90th, 95th, 99th
         throughput_mbps: f64 = 0.0,
         cpu_usage_percent: f64 = 0.0,
         memory_efficiency: f64 = 0.0,
