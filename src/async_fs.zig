@@ -1,67 +1,61 @@
 //! zsync - Async Filesystem Operations
-//! Non-blocking file I/O
+//! Filesystem helpers built on `std.Io`. These are thin convenience wrappers
+//! that carry an `std.Io` handle (and an allocator), performing their work
+//! through the runtime's I/O backend rather than blocking `std.fs` calls.
 
 const std = @import("std");
-const builtin = @import("builtin");
-const runtime_mod = @import("runtime.zig");
-const io_interface = @import("io_interface.zig");
-const buffer_pool_mod = @import("buffer_pool.zig");
 
-const Runtime = runtime_mod.Runtime;
-const Future = io_interface.Future;
-const BufferPool = buffer_pool_mod.BufferPool;
+const Io = std.Io;
+const Dir = std.Io.Dir;
+const File = std.Io.File;
 
-/// Async file handle
+/// Async file handle. Reads and writes track an internal cursor and are issued
+/// as positional operations through the supplied `std.Io`.
 pub const AsyncFile = struct {
-    file: std.fs.File,
-    runtime: *Runtime,
+    file: File,
+    io: Io,
     allocator: std.mem.Allocator,
+    pos: u64 = 0,
 
     const Self = @This();
 
-    /// Open file asynchronously
-    pub fn open(runtime: *Runtime, path: []const u8, flags: std.fs.File.OpenFlags) !Self {
-        // For now, use blocking open (io_uring support in future)
-        const file = try std.fs.cwd().openFile(path, flags);
-
-        return Self{
-            .file = file,
-            .runtime = runtime,
-            .allocator = runtime.allocator,
-        };
+    /// Open an existing file relative to the current working directory.
+    pub fn open(allocator: std.mem.Allocator, io: Io, path: []const u8, flags: Dir.OpenFileOptions) !Self {
+        const file = try Dir.cwd().openFile(io, path, flags);
+        return Self{ .file = file, .io = io, .allocator = allocator };
     }
 
-    /// Create file asynchronously
-    pub fn create(runtime: *Runtime, path: []const u8, flags: std.fs.File.CreateFlags) !Self {
-        const file = try std.fs.cwd().createFile(path, flags);
-
-        return Self{
-            .file = file,
-            .runtime = runtime,
-            .allocator = runtime.allocator,
-        };
+    /// Create (or truncate) a file relative to the current working directory.
+    pub fn create(allocator: std.mem.Allocator, io: Io, path: []const u8, flags: Dir.CreateFileOptions) !Self {
+        const file = try Dir.cwd().createFile(io, path, flags);
+        return Self{ .file = file, .io = io, .allocator = allocator };
     }
 
-    /// Read file contents into buffer
+    /// Read from the current cursor into `buffer`, advancing the cursor by the
+    /// number of bytes read. Returns the number of bytes read (0 at EOF).
     pub fn read(self: *Self, buffer: []u8) !usize {
-        // TODO: Use io_uring for true async on Linux
-        return self.file.read(buffer);
+        const n = try self.file.readPositionalAll(self.io, buffer, self.pos);
+        self.pos += n;
+        return n;
     }
 
-    /// Write buffer to file
+    /// Write `buffer` at the current cursor, advancing the cursor. Returns the
+    /// number of bytes written.
     pub fn write(self: *Self, buffer: []const u8) !usize {
-        return self.file.write(buffer);
+        try self.file.writePositionalAll(self.io, buffer, self.pos);
+        self.pos += buffer.len;
+        return buffer.len;
     }
 
-    /// Read entire file into allocated memory
+    /// Read the entire file into freshly allocated memory.
     pub fn readToEnd(self: *Self, allocator: std.mem.Allocator) ![]u8 {
-        const stat = try self.file.stat();
-        const size = stat.size;
+        const st = try self.file.stat(self.io);
+        const size = st.size;
 
         const buffer = try allocator.alloc(u8, size);
         errdefer allocator.free(buffer);
 
-        const bytes_read = try self.file.preadAll(buffer, 0);
+        const bytes_read = try self.file.readPositionalAll(self.io, buffer, 0);
         if (bytes_read != size) {
             return error.UnexpectedEof;
         }
@@ -69,175 +63,168 @@ pub const AsyncFile = struct {
         return buffer;
     }
 
-    /// Write all data to file
+    /// Write all of `buffer` at the current cursor, advancing the cursor.
     pub fn writeAll(self: *Self, buffer: []const u8) !void {
-        return self.file.writeAll(buffer);
+        try self.file.writePositionalAll(self.io, buffer, self.pos);
+        self.pos += buffer.len;
     }
 
-    /// Seek to position
-    pub fn seekTo(self: *Self, pos: u64) !void {
-        try self.file.seekTo(pos);
+    /// Move the read/write cursor to an absolute position.
+    pub fn seekTo(self: *Self, pos: u64) void {
+        self.pos = pos;
     }
 
-    /// Get current position
-    pub fn getPos(self: *Self) !u64 {
-        return self.file.getPos();
+    /// Get the current cursor position.
+    pub fn getPos(self: *Self) u64 {
+        return self.pos;
     }
 
-    /// Get file size
+    /// Get the file size in bytes.
     pub fn getSize(self: *Self) !u64 {
-        const stat = try self.file.stat();
-        return stat.size;
+        const st = try self.file.stat(self.io);
+        return st.size;
     }
 
-    /// Sync file to disk
+    /// Flush file contents to durable storage.
     pub fn sync(self: *Self) !void {
-        return self.file.sync();
+        return self.file.sync(self.io);
     }
 
-    /// Close file
+    /// Close the file handle.
     pub fn close(self: *Self) void {
-        self.file.close();
+        self.file.close(self.io);
     }
 };
 
-/// Async directory operations
+/// Async directory operations.
 pub const AsyncDir = struct {
-    dir: std.fs.Dir,
-    runtime: *Runtime,
+    dir: Dir,
+    io: Io,
     allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    /// Open directory
-    pub fn open(runtime: *Runtime, path: []const u8) !Self {
-        const dir = try std.fs.cwd().openDir(path, .{});
-
-        return Self{
-            .dir = dir,
-            .runtime = runtime,
-            .allocator = runtime.allocator,
-        };
+    /// Open a directory (with iteration enabled) relative to the cwd.
+    pub fn open(allocator: std.mem.Allocator, io: Io, path: []const u8) !Self {
+        const dir = try Dir.cwd().openDir(io, path, .{ .iterate = true });
+        return Self{ .dir = dir, .io = io, .allocator = allocator };
     }
 
-    /// Create directory
-    pub fn create(_: *Runtime, path: []const u8) !void {
-        try std.fs.cwd().makeDir(path);
+    /// Create a directory relative to the cwd.
+    pub fn create(io: Io, path: []const u8) !void {
+        try Dir.cwd().createDir(io, path, .default_dir);
     }
 
-    /// List directory contents
+    /// List directory contents. Caller owns the returned list and its items;
+    /// free items individually and `deinit(allocator)` the list.
     pub fn list(self: *Self, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-        var result = std.ArrayList([]const u8).init(allocator);
+        var result: std.ArrayList([]const u8) = .empty;
         errdefer {
             for (result.items) |item| {
                 allocator.free(item);
             }
-            result.deinit();
+            result.deinit(allocator);
         }
 
         var iter = self.dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(self.io)) |entry| {
             const name = try allocator.dupe(u8, entry.name);
-            try result.append(name);
+            try result.append(allocator, name);
         }
 
         return result;
     }
 
-    /// Check if path exists
+    /// Check if a path exists within this directory.
     pub fn exists(self: *Self, path: []const u8) bool {
-        self.dir.access(path, .{}) catch return false;
+        self.dir.access(self.io, path, .{}) catch return false;
         return true;
     }
 
-    /// Remove file
+    /// Remove a file within this directory.
     pub fn removeFile(self: *Self, path: []const u8) !void {
-        try self.dir.deleteFile(path);
+        try self.dir.deleteFile(self.io, path);
     }
 
-    /// Remove directory
+    /// Remove a sub-directory within this directory.
     pub fn removeDir(self: *Self, path: []const u8) !void {
-        try self.dir.deleteDir(path);
+        try self.dir.deleteDir(self.io, path);
     }
 
-    /// Close directory
+    /// Close the directory handle.
     pub fn close(self: *Self) void {
-        self.dir.close();
+        self.dir.close(self.io);
     }
 };
 
-/// High-level async filesystem API
+/// High-level async filesystem API. Carries an `std.Io` handle for all
+/// operations against the current working directory.
 pub const AsyncFs = struct {
-    runtime: *Runtime,
+    allocator: std.mem.Allocator,
+    io: Io,
 
     const Self = @This();
 
-    pub fn init(runtime: *Runtime) Self {
-        return Self{ .runtime = runtime };
+    pub fn init(allocator: std.mem.Allocator, io: Io) Self {
+        return Self{ .allocator = allocator, .io = io };
     }
 
-    /// Read file contents
+    /// Read file contents into freshly allocated memory.
     pub fn readFile(self: *Self, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-        var file = try AsyncFile.open(self.runtime, path, .{});
+        var file = try AsyncFile.open(self.allocator, self.io, path, .{});
         defer file.close();
 
         return file.readToEnd(allocator);
     }
 
-    /// Write file contents
+    /// Write file contents, truncating any existing file.
     pub fn writeFile(self: *Self, path: []const u8, contents: []const u8) !void {
-        var file = try AsyncFile.create(self.runtime, path, .{});
+        var file = try AsyncFile.create(self.allocator, self.io, path, .{});
         defer file.close();
 
         try file.writeAll(contents);
     }
 
-    /// Append to file
+    /// Append contents to the end of a file.
     pub fn appendFile(self: *Self, path: []const u8, contents: []const u8) !void {
-        var file = try AsyncFile.open(self.runtime, path, .{ .mode = .write_only });
+        var file = try AsyncFile.open(self.allocator, self.io, path, .{ .mode = .write_only });
         defer file.close();
 
-        try file.seekTo(try file.getSize());
+        file.seekTo(try file.getSize());
         try file.writeAll(contents);
     }
 
-    /// Copy file
+    /// Copy a file within the current working directory.
     pub fn copyFile(self: *Self, source: []const u8, dest: []const u8) !void {
-        _ = self;
-        try std.fs.cwd().copyFile(source, std.fs.cwd(), dest, .{});
+        try Dir.cwd().copyFile(source, Dir.cwd(), dest, self.io, .{});
     }
 
-    /// Remove file
+    /// Remove a file relative to the cwd.
     pub fn removeFile(self: *Self, path: []const u8) !void {
-        _ = self;
-        try std.fs.cwd().deleteFile(path);
+        try Dir.cwd().deleteFile(self.io, path);
     }
 
-    /// Create directory
+    /// Create a directory relative to the cwd.
     pub fn createDir(self: *Self, path: []const u8) !void {
-        _ = self;
-        try std.fs.cwd().makeDir(path);
+        try Dir.cwd().createDir(self.io, path, .default_dir);
     }
 
-    /// Remove directory
+    /// Remove a directory relative to the cwd.
     pub fn removeDir(self: *Self, path: []const u8) !void {
-        _ = self;
-        try std.fs.cwd().deleteDir(path);
+        try Dir.cwd().deleteDir(self.io, path);
     }
 
-    /// Check if path exists
+    /// Check if a path exists relative to the cwd.
     pub fn exists(self: *Self, path: []const u8) bool {
-        _ = self;
-        std.fs.cwd().access(path, .{}) catch return false;
+        Dir.cwd().access(self.io, path, .{}) catch return false;
         return true;
     }
 
-    /// Get file metadata
-    pub fn metadata(self: *Self, path: []const u8) !std.fs.File.Stat {
-        _ = self;
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-        return file.stat();
+    /// Get file metadata relative to the cwd.
+    pub fn metadata(self: *Self, path: []const u8) !File.Stat {
+        var file = try Dir.cwd().openFile(self.io, path, .{});
+        defer file.close(self.io);
+        return file.stat(self.io);
     }
 };
 
@@ -246,22 +233,19 @@ test "async file read/write" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const config = runtime_mod.Config{
-        .execution_model = .blocking,
-    };
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
-    const runtime = try runtime_mod.Runtime.init(allocator, config);
-    defer runtime.deinit();
-
-    // Write file
-    var file = try AsyncFile.create(runtime, "test_async.txt", .{});
+    // Write file (request read access so we can read it back on the same handle)
+    var file = try AsyncFile.create(allocator, io, "test_async.txt", .{ .read = true });
     defer file.close();
-    defer std.fs.cwd().deleteFile("test_async.txt") catch {};
+    defer Dir.cwd().deleteFile(io, "test_async.txt") catch {};
 
     try file.writeAll("Hello, Async FS!");
 
     // Read back
-    try file.seekTo(0);
+    file.seekTo(0);
     var buffer: [100]u8 = undefined;
     const bytes_read = try file.read(&buffer);
 
@@ -272,14 +256,11 @@ test "async fs high-level API" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const config = runtime_mod.Config{
-        .execution_model = .blocking,
-    };
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
-    const runtime = try runtime_mod.Runtime.init(allocator, config);
-    defer runtime.deinit();
-
-    const fs = AsyncFs.init(runtime);
+    var fs = AsyncFs.init(allocator, io);
 
     // Write file
     try fs.writeFile("test_fs.txt", "Test content");

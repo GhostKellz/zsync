@@ -4,7 +4,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const platform_detect = @import("platform_detect.zig");
-const runtime_mod = @import("runtime.zig");
+
+/// Execution model descriptor (display only; `std.Io` owns scheduling).
+pub const ExecutionModel = enum { blocking, thread_pool, green_threads, stackless, auto };
 
 /// Runtime diagnostics for debugging and monitoring
 pub const RuntimeDiagnostics = struct {
@@ -67,9 +69,8 @@ pub const RuntimeDiagnostics = struct {
         std.debug.print("\n", .{});
 
         // Optimal settings
-        const optimal_model = runtime_mod.ExecutionModel.detect();
         std.debug.print("🎯 Recommended Configuration:\n", .{});
-        std.debug.print("   Execution Model:     {s}\n", .{@tagName(optimal_model)});
+        std.debug.print("   Execution Model:     {s}\n", .{"std.Io.Threaded"});
         std.debug.print("   Thread Pool Size:    {} threads\n", .{@min(cpu_count, 16)});
         std.debug.print("   Prefer io_uring:     {}\n", .{settings.prefer_io_uring});
         std.debug.print("   Aggressive Threading: {}\n", .{settings.aggressive_threading});
@@ -81,27 +82,8 @@ pub const RuntimeDiagnostics = struct {
         std.debug.print("\n", .{});
     }
 
-    /// Get runtime statistics
-    pub fn getStats(runtime: *runtime_mod.Runtime) RuntimeStats {
-        const metrics = runtime.getMetrics();
-        const model = runtime.getExecutionModel();
-
-        return RuntimeStats{
-            .execution_model = model,
-            .is_running = runtime.isRunning(),
-            .tasks_spawned = metrics.tasks_spawned.load(.monotonic),
-            .tasks_completed = metrics.tasks_completed.load(.monotonic),
-            .futures_created = metrics.futures_created.load(.monotonic),
-            .futures_cancelled = metrics.futures_cancelled.load(.monotonic),
-            .io_operations = metrics.total_io_operations.load(.monotonic),
-            .avg_latency_ns = metrics.average_latency_ns.load(.monotonic),
-        };
-    }
-
-    /// Print runtime statistics
-    pub fn printStats(runtime: *runtime_mod.Runtime) void {
-        const stats = getStats(runtime);
-
+    /// Print a runtime statistics snapshot supplied by the caller.
+    pub fn printStats(stats: RuntimeStats) void {
         std.debug.print("\n", .{});
         std.debug.print("📊 Runtime Statistics:\n", .{});
         std.debug.print("───────────────────────────────────────\n", .{});
@@ -144,7 +126,7 @@ pub const RuntimeDiagnostics = struct {
 
 /// Runtime statistics snapshot
 pub const RuntimeStats = struct {
-    execution_model: runtime_mod.ExecutionModel,
+    execution_model: ExecutionModel,
     is_running: bool,
     tasks_spawned: u64,
     tasks_completed: u64,

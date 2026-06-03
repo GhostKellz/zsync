@@ -3,10 +3,10 @@
 
 const std = @import("std");
 const compat = @import("../compat/thread.zig");
-const Runtime = @import("../runtime.zig").Runtime;
+const Runtime = @import("../std_runtime.zig").Runtime;
 
 /// Plugin State
-pub const PluginState = enum {
+pub const PluginState = enum(u8) {
     unloaded,
     loading,
     loaded,
@@ -52,10 +52,15 @@ pub const Plugin = struct {
         hooks: PluginHooks,
     ) !Self {
         const owned_path = try allocator.dupe(u8, path);
+        errdefer allocator.free(owned_path);
+
+        // Own the plugin name so it can outlive the caller's metadata buffer.
+        var owned_metadata = metadata;
+        owned_metadata.name = try allocator.dupe(u8, metadata.name);
 
         return Self{
             .allocator = allocator,
-            .metadata = metadata,
+            .metadata = owned_metadata,
             .state = std.atomic.Value(PluginState).init(.unloaded),
             .hooks = hooks,
             .path = owned_path,
@@ -64,6 +69,7 @@ pub const Plugin = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        self.allocator.free(self.metadata.name);
         self.allocator.free(self.path);
     }
 
@@ -162,7 +168,7 @@ pub const PluginManager = struct {
             .allocator = allocator,
             .runtime = runtime,
             .plugins = std.StringHashMap(*Plugin).init(allocator),
-            .plugin_dirs = std.ArrayList([]const u8){ .allocator = allocator },
+            .plugin_dirs = .empty,
             .mutex = .{},
         };
     }
@@ -182,7 +188,7 @@ pub const PluginManager = struct {
         for (self.plugin_dirs.items) |dir| {
             self.allocator.free(dir);
         }
-        self.plugin_dirs.deinit();
+        self.plugin_dirs.deinit(self.allocator);
     }
 
     /// Add plugin search directory
@@ -253,12 +259,41 @@ pub const PluginManager = struct {
         }
     }
 
-    /// Load all plugins in directory
-    pub fn loadDirectory(self: *Self, dir: []const u8) !void {
-        _ = self;
-        _ = dir;
-        // TODO: Scan directory for plugins
-        // TODO: Load each plugin found
+    /// Scan `dir` for plugin files (`.gza`) and register each one with this
+    /// manager in the `unloaded` state. Returns the number of plugins newly
+    /// registered. Plugins already known by name are skipped.
+    pub fn loadDirectory(self: *Self, dir: []const u8) !usize {
+        const io = self.runtime.io();
+
+        const names = try discoverPlugins(self.allocator, io, dir);
+        defer {
+            for (names) |name| self.allocator.free(name);
+            self.allocator.free(names);
+        }
+
+        var registered: usize = 0;
+        for (names) |file_name| {
+            const stem = file_name[0 .. file_name.len - ".gza".len];
+
+            if (self.getPlugin(stem) != null) continue;
+
+            const full_path = try std.fs.path.join(self.allocator, &.{ dir, file_name });
+            defer self.allocator.free(full_path);
+
+            const plugin = try self.allocator.create(Plugin);
+            errdefer self.allocator.destroy(plugin);
+
+            plugin.* = try Plugin.init(self.allocator, .{
+                .name = stem,
+                .version = "0.0.0",
+            }, full_path, .{});
+            errdefer plugin.deinit();
+
+            try self.registerPlugin(plugin);
+            registered += 1;
+        }
+
+        return registered;
     }
 
     /// Get list of loaded plugins
@@ -266,14 +301,15 @@ pub const PluginManager = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        var names = std.ArrayList([]const u8){ .allocator = self.allocator };
+        var names: std.ArrayList([]const u8) = .empty;
+        errdefer names.deinit(self.allocator);
         var it = self.plugins.iterator();
 
         while (it.next()) |entry| {
             try names.append(self.allocator, entry.key_ptr.*);
         }
 
-        return names.toOwnedSlice();
+        return names.toOwnedSlice(self.allocator);
     }
 
     /// Get plugin count
@@ -284,18 +320,25 @@ pub const PluginManager = struct {
     }
 };
 
-/// Plugin Discovery - scan directories for plugins
+/// Plugin Discovery - scan a directory for plugin files (`.gza`) through the
+/// runtime's `std.Io`. Caller owns the returned slice and each name; free each
+/// item then the slice with `allocator`.
 pub fn discoverPlugins(
     allocator: std.mem.Allocator,
+    io: std.Io,
     dir: []const u8,
 ) ![][]const u8 {
-    var plugins = std.ArrayList([]const u8){ .allocator = allocator };
+    var plugins: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (plugins.items) |name| allocator.free(name);
+        plugins.deinit(allocator);
+    }
 
-    var dir_handle = try std.fs.cwd().openDir(dir, .{ .iterate = true });
-    defer dir_handle.close();
+    var dir_handle = try std.Io.Dir.cwd().openDir(io, dir, .{ .iterate = true });
+    defer dir_handle.close(io);
 
     var it = dir_handle.iterate();
-    while (try it.next()) |entry| {
+    while (try it.next(io)) |entry| {
         if (entry.kind == .file) {
             // Check if it's a plugin file (e.g., .gza for GShell)
             if (std.mem.endsWith(u8, entry.name, ".gza")) {
@@ -305,7 +348,7 @@ pub fn discoverPlugins(
         }
     }
 
-    return plugins.toOwnedSlice();
+    return plugins.toOwnedSlice(allocator);
 }
 
 // Tests
@@ -339,12 +382,53 @@ test "plugin lifecycle" {
 test "plugin manager" {
     const testing = std.testing;
 
-    const config = @import("../runtime.zig").Config.optimal();
-    const runtime = try @import("../runtime.zig").Runtime.init(testing.allocator, config);
+    var runtime = Runtime.init(testing.allocator, .{});
     defer runtime.deinit();
 
-    var manager = PluginManager.init(testing.allocator, runtime);
+    var manager = PluginManager.init(testing.allocator, &runtime);
     defer manager.deinit();
 
     try testing.expectEqual(0, manager.pluginCount());
+}
+
+test "plugin discovery and loadDirectory" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var runtime = Runtime.init(allocator, .{});
+    defer runtime.deinit();
+    const io = runtime.io();
+
+    const dir_name = "zsync_plugin_test_dir";
+    try std.Io.Dir.cwd().createDir(io, dir_name, .default_dir);
+    defer std.Io.Dir.cwd().deleteTree(io, dir_name) catch {};
+
+    var test_dir = try std.Io.Dir.cwd().openDir(io, dir_name, .{});
+    defer test_dir.close(io);
+
+    inline for (.{ "alpha.gza", "beta.gza", "notes.txt" }) |fname| {
+        var f = try test_dir.createFile(io, fname, .{});
+        f.close(io);
+    }
+
+    // discoverPlugins finds only .gza files.
+    const discovered = try discoverPlugins(allocator, io, dir_name);
+    defer {
+        for (discovered) |n| allocator.free(n);
+        allocator.free(discovered);
+    }
+    try testing.expectEqual(@as(usize, 2), discovered.len);
+
+    // loadDirectory registers each discovered plugin once.
+    var manager = PluginManager.init(allocator, &runtime);
+    defer manager.deinit();
+
+    try testing.expectEqual(@as(usize, 2), try manager.loadDirectory(dir_name));
+    try testing.expectEqual(@as(usize, 2), manager.pluginCount());
+
+    // Idempotent: re-loading registers nothing new.
+    try testing.expectEqual(@as(usize, 0), try manager.loadDirectory(dir_name));
+
+    try testing.expect(manager.getPlugin("alpha") != null);
+    try testing.expect(manager.getPlugin("beta") != null);
 }

@@ -5,9 +5,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const compat = @import("compat/thread.zig");
 
-/// Cooperatively yield control to other tasks
+/// Cooperatively yield control to other tasks.
+///
+/// On the `std.Io.Threaded` runtime tasks are OS threads, so yielding the
+/// current thread hands the CPU to other ready tasks via the kernel scheduler.
 pub fn yieldNow() !void {
-    // For now, just yield the thread
     try std.Thread.yield();
 }
 

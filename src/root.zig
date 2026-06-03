@@ -11,11 +11,8 @@ pub const time = struct {
     pub const Instant = compat.Instant;
 };
 
-// Core APIs - Colorblind Async Interface
-pub const io_interface = @import("io_interface.zig");
-pub const runtime = @import("runtime.zig");
-pub const blocking_io = @import("blocking_io.zig");
-pub const std_io = @import("std_io.zig");
+// Core runtime foundation — Zig's std.Io
+pub const std_runtime = @import("std_runtime.zig");
 
 // Task Spawning and Concurrency
 pub const spawn_mod = @import("spawn.zig");
@@ -66,58 +63,35 @@ pub const script_runtime = @import("script/runtime.zig");
 // Compression Streaming
 pub const compression = @import("compression/stream.zig");
 
-// Platform-Specific Runtime
-pub const platform_runtime = @import("platform_runtime.zig");
-pub const runtime_factory = @import("runtime_factory.zig");
-pub const platform_imports = @import("platform_imports.zig");
-
 // Missing API modules that zquic needs
 pub const timer = @import("timer.zig");
 pub const channel = @import("channel.zig");
 
-// Conditional networking support - not available on WASM
+// Networking. On wasm32 there are no native sockets, so the implementation is
+// delegated to the JavaScript/WASI host via `wasm/net.zig`; every other target
+// uses the std.Io-backed stack in `networking.zig`.
 pub const networking = if (builtin.target.cpu.arch == .wasm32)
-    @import("networking_stub.zig")
+    @import("wasm/net.zig")
 else
     @import("networking.zig");
 
-pub const threadpool_io = @import("threadpool_io.zig");
-pub const scheduler = @import("scheduler.zig");
-pub const reactor = @import("reactor.zig");
-
-// Re-export core types for convenience
-pub const Io = io_interface.Io;
-pub const IoMode = io_interface.IoMode;
-pub const IoError = io_interface.IoError;
-pub const IoBuffer = io_interface.IoBuffer;
-pub const Future = io_interface.Future;
-pub const CancelToken = io_interface.CancelToken;
-pub const Combinators = io_interface.Combinators;
+// Re-export core types for convenience — backed by Zig's std.Io
+pub const Io = std.Io;
+pub const Future = std.Io.Future;
+pub const Group = std.Io.Group;
 
 // Runtime types
-pub const Runtime = runtime.Runtime;
-pub const Config = runtime.Config;
-pub const ExecutionModel = runtime.ExecutionModel;
-pub const RuntimeError = runtime.RuntimeError;
-pub const RuntimeMetrics = runtime.RuntimeMetrics;
-
-// I/O Implementations
-pub const BlockingIo = blocking_io.BlockingIo;
+pub const Runtime = std_runtime.Runtime;
+pub const RuntimeOptions = std_runtime.RuntimeOptions;
+pub const RuntimeError = std_runtime.RuntimeError;
 
 // Convenience runtime functions
-pub const run = runtime.run;
-pub const runBlocking = runtime.runBlocking;
-pub const runHighPerf = runtime.runHighPerf;
-pub const runSimple = runtime.runSimple;
-pub const getGlobalIo = runtime.getGlobalIo;
-pub const initGlobalRuntime = runtime.initGlobalRuntime;
-pub const deinitGlobalRuntime = runtime.deinitGlobalRuntime;
-pub const getGlobalRuntime = runtime.getGlobalRuntime;
-pub const formatError = runtime.formatError;
-pub const printError = runtime.printError;
+pub const run = std_runtime.run;
+pub const getGlobalIo = std_runtime.getGlobalIo;
+pub const setGlobalIo = std_runtime.setGlobalIo;
+pub const clearGlobalIo = std_runtime.clearGlobalIo;
 
 // Convenience functions
-pub const TaskHandle = spawn_mod.TaskHandle;
 pub const GenericFuture = future_mod.Future;
 pub const Executor = executor_mod.Executor;
 pub const Semaphore = sync_mod.Semaphore;
@@ -245,132 +219,9 @@ pub const CompressionAlgorithm = compression.Algorithm;
 pub const compressFileAsync = compression.compressFileAsync;
 pub const decompressFileAsync = compression.decompressFileAsync;
 
-// Set global execution mode for colorblind async
-pub const setIoMode = setGlobalIoMode;
-pub fn setGlobalIoMode(mode: IoMode) void {
-    io_interface.io_mode = mode;
-}
-
-/// Convenience function to create a simple blocking I/O instance
-pub fn createBlockingIo(allocator: std.mem.Allocator) BlockingIo {
-    return BlockingIo.init(allocator, 4096);
-}
-
-/// Example colorblind async function that works with ANY Io implementation
-pub fn saveData(_: std.mem.Allocator, io: Io, data: []const u8) !void {
-    // This function is truly colorblind - works in sync or async context
-    var io_mut = io;
-    var future = try io_mut.write(data);
-    defer future.destroy();
-
-    // Colorblind await - adapts to execution context
-    try future.await();
-}
-
-/// Advanced example with timeout and error handling
-pub fn saveDataWithTimeout(allocator: std.mem.Allocator, io: Io, data: []const u8, timeout_ms: u64) !void {
-    var io_mut = io;
-    const write_future = try io_mut.write(data);
-    var timeout_future = try Combinators.timeout(allocator, write_future, timeout_ms);
-    defer timeout_future.destroy();
-
-    try timeout_future.await();
-}
-
-/// Example of concurrent operations using Future combinators
-pub fn concurrentSave(allocator: std.mem.Allocator, io: Io, data1: []const u8, data2: []const u8) !void {
-    var io_mut = io;
-    var future1 = try io_mut.write(data1);
-    var future2 = try io_mut.write(data2);
-
-    var futures = [_]Future{ future1, future2 };
-    var all_future = try Combinators.all(allocator, &futures);
-    defer all_future.destroy();
-
-    try all_future.await();
-
-    // Clean up individual futures
-    future1.destroy();
-    future2.destroy();
-}
-
-/// Example of racing operations
-pub fn raceOperations(allocator: std.mem.Allocator, io: Io, data1: []const u8, data2: []const u8) !void {
-    var io_mut = io;
-    var future1 = try io_mut.write(data1);
-    var future2 = try io_mut.write(data2);
-
-    var futures = [_]Future{ future1, future2 };
-    var race_future = try Combinators.race(allocator, &futures);
-    defer race_future.destroy();
-
-    try race_future.await();
-
-    // Clean up
-    future1.destroy();
-    future2.destroy();
-}
-
-/// Utility function to detect optimal execution model
-pub fn detectOptimalModel() ExecutionModel {
-    return ExecutionModel.detect();
-}
-
-/// Create runtime with optimal configuration for current platform
-pub fn createOptimalRuntime(allocator: std.mem.Allocator) !*Runtime {
-    const model = detectOptimalModel();
-
-    const config = switch (model) {
-        .blocking => Config{
-            .execution_model = .blocking,
-            .buffer_size = 4096,
-            .enable_debugging = false,
-        },
-        .thread_pool => Config{
-            .execution_model = .thread_pool,
-            .thread_pool_threads = @intCast(@max(1, std.Thread.getCpuCount() catch 4)),
-            .enable_zero_copy = true,
-            .enable_vectorized_io = true,
-        },
-        .green_threads => Config{
-            .execution_model = .green_threads,
-            .green_thread_stack_size = 64 * 1024,
-            .max_green_threads = 1024,
-            .enable_zero_copy = true,
-        },
-        .stackless => Config{
-            .execution_model = .stackless,
-            .buffer_size = 2048, // Smaller for WASM
-        },
-        .auto => Config{}, // Default configuration
-    };
-
-    return Runtime.init(allocator, config);
-}
-
-/// High-level async task spawning - requires initialized runtime
-pub fn spawn(comptime task_fn: anytype, args: anytype) !Future {
-    const runtime_instance = Runtime.global() orelse return RuntimeError.RuntimeNotInitialized;
-    return runtime_instance.spawn(task_fn, args);
-}
-
-/// High-level timeout wrapper
-pub fn timeout(future: Future, timeout_ms: u64) !Future {
-    const runtime_instance = Runtime.global() orelse return RuntimeError.RuntimeShutdown;
-    return runtime_instance.timeout(future, timeout_ms);
-}
-
-/// High-level race wrapper
-pub fn race(futures: []Future) !Future {
-    const runtime_instance = Runtime.global() orelse return RuntimeError.RuntimeShutdown;
-    return runtime_instance.race(futures);
-}
-
-/// High-level all wrapper
-pub fn all(futures: []Future) !Future {
-    const runtime_instance = Runtime.global() orelse return RuntimeError.RuntimeShutdown;
-    return runtime_instance.all(futures);
-}
+/// High-level async task spawning on the process-global runtime.
+/// Returns a `std.Io.Future`; await it with `future.await(io)`.
+pub const spawn = spawn_mod.spawn;
 
 // =============================================================================
 // Additional exports kept for downstream compatibility
@@ -378,7 +229,7 @@ pub fn all(futures: []Future) !Future {
 
 /// Yield execution to other tasks (cooperative scheduling)
 pub fn yieldNow() void {
-    scheduler.yield();
+    sleep_mod.yieldNow() catch {};
 }
 
 /// Sleep for the specified duration in milliseconds
@@ -394,111 +245,40 @@ pub const bounded = channels.bounded;
 /// Returns an UnboundedChannel(T) that grows dynamically
 pub const unbounded = channels.unbounded;
 
-/// Thread pool I/O implementation for CPU-intensive operations
-pub const ThreadPoolIo = threadpool_io.ThreadPoolIo;
-
-/// Create a ThreadPoolIo instance with default configuration
-pub fn createThreadPoolIo(allocator: std.mem.Allocator) !*ThreadPoolIo {
-    const config = threadpool_io.ThreadPoolConfig{};
-    const pool = try allocator.create(ThreadPoolIo);
-    pool.* = try ThreadPoolIo.init(allocator, config);
-    return pool;
-}
-
-/// UDP socket implementation (conditional for WASM)
-pub const UdpSocket = if (builtin.target.cpu.arch == .wasm32) struct {
-    allocator: std.mem.Allocator,
+/// UDP socket. On wasm32 this is the host-bridged datagram socket from
+/// `wasm/net.zig`; elsewhere it is backed directly by `std.Io.net`.
+pub const UdpSocket = if (builtin.target.cpu.arch == .wasm32) networking.UdpSocket else struct {
+    io: std.Io,
+    socket: std.Io.net.Socket,
 
     const Self = @This();
 
-    /// Create a new UDP socket (stub for WASM)
-    pub fn bind(allocator: std.mem.Allocator, address: []const u8) !Self {
-        _ = allocator;
-        _ = address;
-        return error.NetworkingNotAvailable;
+    /// Bind a datagram socket to `address`.
+    pub fn bind(io: std.Io, address: std.Io.net.IpAddress) !Self {
+        const socket = try address.bind(io, .{ .mode = .dgram });
+        return Self{ .io = io, .socket = socket };
     }
 
-    /// Send data to a specific address (stub for WASM)
-    pub fn sendTo(self: *Self, data: []const u8, address: []const u8) !usize {
-        _ = self;
-        _ = data;
-        _ = address;
-        return error.NetworkingNotAvailable;
+    /// Send a datagram to a specific address.
+    pub fn sendTo(self: *Self, data: []const u8, address: std.Io.net.IpAddress) !void {
+        try self.socket.send(self.io, &address, data);
     }
 
-    /// Receive data from any address (stub for WASM)
-    pub fn recvFrom(self: *Self, buffer: []u8) !struct { bytes_received: usize, address: []const u8 } {
-        _ = self;
-        _ = buffer;
-        return error.NetworkingNotAvailable;
+    /// Receive a datagram, reporting the source address.
+    pub fn recvFrom(self: *Self, buffer: []u8) !struct { bytes_received: usize, address: std.Io.net.IpAddress } {
+        const msg = try self.socket.receive(self.io, buffer);
+        return .{ .bytes_received = msg.data.len, .address = msg.from };
     }
 
-    /// Close the UDP socket (stub for WASM)
+    /// Close the UDP socket.
     pub fn close(self: *Self) void {
-        _ = self;
-    }
-} else struct {
-    socket_fd: std.posix.fd_t,
-    allocator: std.mem.Allocator,
-
-    const Self = @This();
-
-    /// Create a new UDP socket
-    pub fn bind(allocator: std.mem.Allocator, address: std.net.Address) !Self {
-        const socket_fd = try std.posix.socket(address.any.family, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
-        try std.posix.bind(socket_fd, &address.any, address.getOsSockLen());
-
-        return Self{
-            .socket_fd = socket_fd,
-            .allocator = allocator,
-        };
-    }
-
-    /// Send data to a specific address
-    pub fn sendTo(self: *Self, data: []const u8, address: std.net.Address) !usize {
-        return std.posix.sendto(self.socket_fd, data, 0, &address.any, address.getOsSockLen());
-    }
-
-    /// Receive data from any address
-    pub fn recvFrom(self: *Self, buffer: []u8) !struct { bytes_received: usize, address: std.net.Address } {
-        var addr: std.posix.sockaddr = undefined;
-        var addr_len: std.posix.socklen_t = @sizeOf(@TypeOf(addr));
-
-        const bytes_received = try std.posix.recvfrom(self.socket_fd, buffer, 0, @ptrCast(&addr), &addr_len);
-        const address = std.net.Address.initPosix(@ptrCast(@alignCast(&addr)));
-
-        return .{ .bytes_received = bytes_received, .address = address };
-    }
-
-    /// Close the UDP socket
-    pub fn close(self: *Self) void {
-        std.Io.Threaded.closeFd(self.socket_fd);
+        self.socket.close(self.io);
     }
 };
 
 // =============================================================================
 // Additional Async APIs
 // =============================================================================
-
-/// Task scheduler for advanced async operations
-pub const AsyncScheduler = scheduler.AsyncScheduler;
-
-/// Create an async scheduler with default settings
-pub fn createScheduler(allocator: std.mem.Allocator) !*AsyncScheduler {
-    const sched = try allocator.create(AsyncScheduler);
-    sched.* = try AsyncScheduler.init(allocator);
-    return sched;
-}
-
-/// Reactor for I/O event management
-pub const Reactor = reactor.Reactor;
-
-/// Create a reactor for non-blocking I/O
-pub fn createReactor(allocator: std.mem.Allocator) !*Reactor {
-    const r = try allocator.create(Reactor);
-    r.* = try Reactor.init(allocator);
-    return r;
-}
 
 /// Timer wheel for scheduling timeouts and delays
 pub const TimerWheel = timer.TimerWheel;
@@ -528,11 +308,14 @@ pub const DnsResolver = networking.DnsResolver;
 /// TLS stream wrapper for secure connections
 pub const TlsStream = networking.TlsStream;
 
-/// Create an HTTP client with TLS support
+/// Create an HTTP client with TLS support. Requires a runtime to be installed
+/// (see `run`) so the client can be bound to the active `std.Io`.
 pub fn createHttpClient(allocator: std.mem.Allocator) !*HttpClient {
+    const io = getGlobalIo() orelse return error.NoRuntimeInstalled;
     const client = try allocator.create(HttpClient);
+    errdefer allocator.destroy(client);
     const tls_config = networking.TlsConfig{};
-    client.* = HttpClient.init(allocator, tls_config);
+    client.* = HttpClient.init(allocator, io, tls_config);
     return client;
 }
 
@@ -574,19 +357,15 @@ pub fn spawnUrgent(comptime task_fn: anytype, args: anytype) !Future {
     return spawn(task_fn, args);
 }
 
-/// Create async task with custom priority (if scheduler is available)
-pub fn spawnWithPriority(comptime task_fn: anytype, args: anytype, priority: scheduler.TaskPriority) !u32 {
-    if (createScheduler(std.heap.page_allocator)) |sched| {
-        defer {
-            sched.deinit();
-            std.heap.page_allocator.destroy(sched);
-        }
-        return sched.spawn(task_fn, args, priority);
-    } else |_| {
-        // Fallback to regular spawn
-        _ = try spawn(task_fn, args);
-        return 0;
-    }
+/// Task priority hint. Scheduling is delegated to `std.Io`, which does not
+/// expose priorities; retained for API compatibility.
+pub const TaskPriority = enum { low, normal, high };
+
+/// Spawn a task with a priority hint. The hint is currently advisory only —
+/// `std.Io` owns scheduling — so this behaves like `spawn`.
+pub fn spawnWithPriority(comptime task_fn: anytype, args: anytype, priority: TaskPriority) !Future {
+    _ = priority;
+    return spawn(task_fn, args);
 }
 
 /// Advanced channel types and utilities
@@ -1218,7 +997,7 @@ pub const CancellationToken = struct {
 
 /// RuntimeBuilder - Fluent builder for runtime configuration (like tokio::runtime::Builder)
 pub const RuntimeBuilder = struct {
-    config: Config = .{},
+    options: RuntimeOptions = .{},
     allocator: std.mem.Allocator,
 
     const Self = @This();
@@ -1227,53 +1006,47 @@ pub const RuntimeBuilder = struct {
         return Self{ .allocator = allocator };
     }
 
-    /// Configure as multi-threaded runtime
+    /// Configure as multi-threaded runtime. `std.Io.Threaded` already manages a
+    /// worker pool; retained for Tokio API compatibility.
     pub fn multiThread(self: *Self) *Self {
-        self.config.execution_model = .thread_pool;
         return self;
     }
 
-    /// Configure as single-threaded runtime
+    /// Configure as single-threaded runtime (advisory; for API compatibility).
     pub fn currentThread(self: *Self) *Self {
-        self.config.execution_model = .blocking;
         return self;
     }
 
-    /// Set worker thread count
+    /// Set worker thread count (advisory; `std.Io.Threaded` sizes its own pool).
     pub fn workerThreads(self: *Self, count: u32) *Self {
-        self.config.thread_pool_threads = count;
+        _ = count;
         return self;
     }
 
-    /// Enable all features
+    /// Enable all features (advisory; for API compatibility).
     pub fn enableAll(self: *Self) *Self {
-        self.config.enable_zero_copy = true;
-        self.config.enable_vectorized_io = true;
         return self;
     }
 
-    /// Enable time (timers) - always enabled by default
+    /// Enable time (timers) - always enabled by default.
     pub fn enableTime(self: *Self) *Self {
-        // Time is always enabled - this is for API compatibility with Tokio
         return self;
     }
 
-    /// Enable I/O
+    /// Enable I/O (advisory; for API compatibility).
     pub fn enableIo(self: *Self) *Self {
-        self.config.enable_zero_copy = true;
-        self.config.enable_vectorized_io = true;
         return self;
     }
 
-    /// Set thread stack size
+    /// Set per-task stack size.
     pub fn threadStackSize(self: *Self, size: usize) *Self {
-        self.config.green_thread_stack_size = size;
+        self.options.stack_size = size;
         return self;
     }
 
-    /// Build the runtime
-    pub fn build(self: *Self) !*Runtime {
-        return Runtime.init(self.allocator, self.config);
+    /// Build the runtime.
+    pub fn build(self: *Self) Runtime {
+        return Runtime.init(self.allocator, self.options);
     }
 };
 
@@ -1380,104 +1153,43 @@ pub fn printVersion() void {
     std.debug.print("  ✅ CancellationToken - Graceful shutdown\n", .{});
     std.debug.print("  ✅ RuntimeBuilder - Fluent configuration\n", .{});
     std.debug.print("  ✅ Interval - Repeating timers\n", .{});
-
-    const optimal_model = detectOptimalModel();
-    std.debug.print("\nOptimal execution model for this platform: {}\n", .{optimal_model});
+    std.debug.print("\nBacked by std.Io (std.Io.Threaded)\n", .{});
 }
 
-/// Simple hello world example showcasing colorblind async
-pub fn helloWorld(_: std.mem.Allocator) !void {
+/// Simple hello world example showcasing task spawning on `std.Io`.
+pub fn helloWorld(allocator: std.mem.Allocator) !void {
     const HelloTask = struct {
-        fn task() !void {
-            var io = getGlobalIo() orelse return error.NoRuntime;
-
-            const messages = [_][]const u8{
-                "zsync - async runtime for Zig\n",
-                "colorblind async in action\n",
-                "blocking, thread_pool, and green_threads execution models\n",
-            };
-
-            // Demonstrate vectorized write
-            var future = try io.writev(&messages);
-            defer future.destroy();
-            try future.await();
-
-            std.debug.print("Execution mode: {}\n", .{io.getMode()});
-            std.debug.print("Supports vectorized I/O: {}\n", .{io.supportsVectorized()});
-            std.debug.print("Supports zero-copy: {}\n", .{io.supportsZeroCopy()});
+        fn task() void {
+            std.debug.print("zsync - async runtime for Zig\n", .{});
+            std.debug.print("powered by std.Io\n", .{});
         }
     };
 
-    try runBlocking(HelloTask.task, .{});
+    std_runtime.run(allocator, HelloTask.task, .{});
 }
 
-// Backward compatibility exports (deprecated but functional)
+// Backward compatibility exports
 pub const examples = struct {
-    pub const saveData = @This().saveData;
     pub const helloWorld = @This().helloWorld;
 };
 
 // Tests
 test "zsync basic functionality" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
-    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
-        // Test execution model detection only if /dev/null not available
-        const model = detectOptimalModel();
-        try testing.expect(model != .auto);
-        return;
+    const Shared = struct {
+        var ran: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
+        fn task() void {
+            _ = ran.fetchAdd(1, .release);
+        }
     };
-    defer std.Io.Threaded.closeFd(null_fd);
-
-    // Test runtime creation with /dev/null as write target
-    var blocking_io_impl = BlockingIo.initWithFds(allocator, 4096, std.posix.STDIN_FILENO, null_fd);
-    defer blocking_io_impl.deinit();
-
-    var io = blocking_io_impl.io();
-
-    // Test colorblind async write (to /dev/null, not stdout)
-    var future = try io.write("Hello, zsync!");
-    defer future.destroy();
-    try future.await();
-
-    // Test execution model detection
-    const model = detectOptimalModel();
-    try testing.expect(model != .auto);
+    Shared.ran.store(0, .release);
+    std_runtime.run(std.testing.allocator, Shared.task, .{});
+    try std.testing.expectEqual(@as(u32, 1), Shared.ran.load(.acquire));
 }
 
 test "Future combinators" {
     const testing = std.testing;
-    const allocator = testing.allocator;
 
-    // Use /dev/null to avoid writing to stdout (which breaks test server protocol)
-    const null_fd = std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0) catch {
-        // Skip IO tests if /dev/null not available, just test timeout
-        const timeout_result = try timeoutFn(struct {
-            fn op() u8 {
-                return 1;
-            }
-        }.op, .{}, 1000);
-        try testing.expectEqual(@as(u8, 1), timeout_result);
-        return;
-    };
-    defer std.Io.Threaded.closeFd(null_fd);
-
-    var blocking_io_impl = BlockingIo.initWithFds(allocator, 4096, std.posix.STDIN_FILENO, null_fd);
-    defer blocking_io_impl.deinit();
-
-    var io = blocking_io_impl.io();
-
-    // Test concurrent operations (to /dev/null, not stdout)
-    var f1 = try io.write("Data 1");
-    defer f1.destroy();
-    var f2 = try io.write("Data 2");
-    defer f2.destroy();
-    try f1.await();
-    try f2.await();
-
-    // Test timeout helper
+    // Timeout helper (wall-clock based) still applies under std.Io.
     const timeout_result = try timeoutFn(struct {
         fn op() u8 {
             return 1;
@@ -1486,25 +1198,18 @@ test "Future combinators" {
     try testing.expectEqual(@as(u8, 1), timeout_result);
 }
 
-test "Runtime with optimal configuration" {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    // Thread pool shutdown is now fixed with proper condition-based waiting
-    // Use 2 workers for reasonable test speed
-    const config = Config{
-        .execution_model = .thread_pool,
-        .enable_debugging = false,
-        .thread_pool_threads = 2,
+test "Runtime spawns and awaits a future" {
+    const Work = struct {
+        fn addValues(a: u32, b: u32) u32 {
+            return a + b;
+        }
+        fn mainTask() void {
+            const io = std_runtime.getGlobalIo().?;
+            var fut = io.async(addValues, .{ @as(u32, 20), @as(u32, 22) });
+            std.testing.expectEqual(@as(u32, 42), fut.await(io)) catch unreachable;
+        }
     };
-
-    const runtime_instance = try Runtime.init(allocator, config);
-    defer runtime_instance.deinit();
-
-    try testing.expect(runtime_instance.getExecutionModel() != .auto);
-
-    const io = runtime_instance.getIo();
-    try testing.expect(io.getMode() != .auto);
+    std_runtime.run(std.testing.allocator, Work.mainTask, .{});
 }
 
 test "Version information" {
@@ -1669,12 +1374,14 @@ test "Tokio-style RuntimeBuilder" {
     const allocator = testing.allocator;
 
     var builder = runtimeBuilder(allocator);
-    _ = builder.currentThread().enableAll();
+    _ = builder.currentThread().enableAll().threadStackSize(64 * 1024);
 
-    const rt = try builder.build();
+    var rt = builder.build();
     defer rt.deinit();
 
-    try testing.expect(rt.getExecutionModel() == .blocking);
+    // Runtime exposes a usable std.Io interface.
+    _ = rt.io();
+    try testing.expect(true);
 }
 
 test "Tokio-style Interval" {
@@ -1724,8 +1431,50 @@ test "Channel trySend/tryRecv fast paths" {
     try testing.expect(ch.tryRecv() == null);
 }
 
-// Include tests from imported modules
+// Include tests from imported modules. Every public re-export is force-referenced
+// here so the entire public surface is continuously compiled and its tests run —
+// this is what prevents a module from silently rotting against std.Io changes.
 test {
-    _ = @import("sync.zig");
     _ = @import("compat/thread.zig");
+    _ = @import("std_runtime.zig");
+    _ = @import("spawn.zig");
+    _ = @import("channels.zig");
+    _ = @import("channel.zig");
+    _ = @import("future.zig");
+    _ = @import("executor.zig");
+    _ = @import("sync.zig");
+    _ = @import("sleep.zig");
+    _ = @import("select.zig");
+    _ = @import("nursery.zig");
+    _ = @import("buffer_pool.zig");
+    _ = @import("streams.zig");
+    _ = @import("timer.zig");
+    _ = @import("diagnostics.zig");
+
+    // Root-level networking helpers are lazily analyzed; reference them so their
+    // signatures stay in sync with the active networking backend.
+    _ = &createHttpClient;
+    _ = &createTimerWheel;
+
+    // WASM async helpers are written against portable compat primitives, so their
+    // tests run on the host too. The JS host bindings they wrap are excluded at
+    // comptime on non-wasm targets.
+    _ = @import("wasm/microtask.zig");
+    _ = @import("wasm/async.zig");
+
+    if (builtin.target.cpu.arch != .wasm32) {
+        _ = @import("networking.zig");
+        _ = @import("net/websocket.zig");
+        _ = @import("net/pool.zig");
+        _ = @import("net/rate_limit.zig");
+        _ = @import("async_fs.zig");
+        _ = @import("dev/watch.zig");
+        _ = @import("lsp/server.zig");
+        _ = @import("terminal/pty.zig");
+        _ = @import("plugin/system.zig");
+        _ = @import("script/runtime.zig");
+        _ = @import("compression/stream.zig");
+    } else {
+        _ = @import("wasm/net.zig");
+    }
 }

@@ -10,53 +10,51 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Zig-0.17.0--dev-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="Zig 0.17.0-dev">
+  <img src="https://img.shields.io/badge/std.Io-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="std.Io">
   <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
-  <img src="https://img.shields.io/badge/io__uring-0A66C2?style=for-the-badge&logo=linux&logoColor=white" alt="io_uring">
-  <img src="https://img.shields.io/badge/Green_Threads-2E8B57?style=for-the-badge&logo=threads&logoColor=white" alt="Green Threads">
   <img src="https://img.shields.io/badge/WASM-654FF0?style=for-the-badge&logo=webassembly&logoColor=white" alt="WASM">
   <img src="https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
   <img src="https://img.shields.io/badge/macOS-111111?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/Zero_Cost-8A2BE2?style=for-the-badge&logo=lightning&logoColor=white" alt="Zero Cost">
 </p>
 
 ## Overview
 
-Zsync is an async runtime for Zig with blocking, thread-pool, and Linux-focused high-concurrency execution models.
+Zsync is an async runtime for Zig built on top of `std.Io`. It layers
+Tokio-style structured-concurrency primitives — nurseries, channels, timers, and
+synchronization types — over `std.Io.Threaded`, which owns task scheduling and
+platform I/O backend selection. Zsync no longer ships its own per-platform
+reactor; it delegates that to the standard library.
 
 ### Key Features
 
-- **Multiple Execution Models**: Blocking, thread pool, and auto-detection
-- **Zero-Cost Abstractions**: Pay only for what you use
-- **Platform Optimizations**: io_uring support on Linux with automatic capability detection
-- **Advanced I/O**: Vectorized operations, backend capability detection, and efficient buffer management
-- **Cancellation Support**: Cooperative cancellation with proper cleanup
-
-### Supported vs Experimental
-
-**Supported (v0.8.1):** `Runtime`, `Io`, `Future`, `BlockingIo`, `ThreadPoolIo`, channels, timers, nursery.
-
-**Experimental:** Future combinators (`race`, `all`, `timeout`), green threads, stackless I/O, network integration, and other warning-labeled prototype modules. See [CHANGELOG.md](CHANGELOG.md) for details.
+- **Built on `std.Io`**: scheduling and I/O backend selection are owned by the standard library
+- **Colorblind async**: the same code runs whether the backend is sync or async (`io.async` / `future.await`)
+- **Structured concurrency**: nurseries and `JoinSet` for scoped task lifetimes
+- **Primitives**: bounded/unbounded channels, timers, mutex/condition primitives, broadcast/watch channels
+- **Cross-platform**: Linux, macOS, Windows, BSD, and WASM via `std.Io.Threaded`
 
 ```zig
+const std = @import("std");
 const zsync = @import("zsync");
 
+fn double(x: u32) u32 {
+    return x * 2;
+}
+
+fn task() void {
+    // Acquire the Io installed by zsync.run - no magic injection.
+    const io = zsync.getGlobalIo() orelse return;
+
+    var f = io.async(double, .{@as(u32, 21)});
+    const result = f.await(io);
+    std.debug.print("result = {d}\n", .{result});
+}
+
 pub fn main() !void {
-    // Spawn concurrent tasks
-    _ = try zsync.spawn(handleClient, .{client1});
-    _ = try zsync.spawn(handleClient, .{client2});
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    // Use channels for communication
-    var ch = try zsync.channels.bounded([]const u8, allocator, 100);
-    defer ch.deinit();
-    try ch.send("Hello from Zsync!");
-    const msg = try ch.recv();
-    _ = msg;
-
-    // Sleep without blocking
-    zsync.sleep(1000); // 1 second
-
-    // Cooperative yielding
-    zsync.yieldNow();
+    zsync.run(gpa.allocator(), task, .{});
 }
 ```
 
@@ -86,50 +84,56 @@ exe.root_module.addImport("zsync", zsync.module("zsync"));
 
 ## Quick Start
 
+Concurrency is expressed with structured tasks. `zsync.run` installs a
+process-global `std.Io.Threaded`-backed `Io`, runs your entry task, and tears
+the runtime down on return. Inside a task, acquire the `Io` with
+`zsync.getGlobalIo()`.
+
 ```zig
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn fileProcessor() !void {
-    // Acquire Io explicitly - no magic injection
-    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
+fn greet(id: u32) u32 {
+    std.debug.print("task {d} running\n", .{id});
+    return id * id;
+}
 
-    // Vectorized I/O operations
-    var buffers = [_]zsync.IoBuffer{
-        zsync.IoBuffer.init(&buffer1),
-        zsync.IoBuffer.init(&buffer2),
-    };
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
 
-    var read_future = try io.readv(&buffers);
-    defer read_future.destroy();
-    try read_future.await();
+    // Same code path whether the backend runs sync or async.
+    var f0 = io.async(greet, .{@as(u32, 1)});
+    var f1 = io.async(greet, .{@as(u32, 2)});
 
-    // Zero-copy operations (Linux)
-    if (io.supportsZeroCopy()) {
-        var copy_future = try io.copyFileRange(src_fd, dst_fd, size);
-        defer copy_future.destroy();
-        try copy_future.await();
-    }
+    const r0 = f0.await(io);
+    const r1 = f1.await(io);
+    std.debug.print("results: {d}, {d}\n", .{ r0, r1 });
 }
 
 pub fn main() !void {
-    try zsync.run(fileProcessor, .{}); // Auto-detects best execution model
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    zsync.run(gpa.allocator(), task, .{});
 }
 ```
 
-## Execution Models
+## Runtime & Scheduling
 
-### Blocking Mode
-Direct system calls with minimal overhead. Best for simple applications.
+Zsync delegates scheduling and platform I/O backend selection to
+`std.Io.Threaded`. There are no zsync-owned execution models to choose between -
+the standard library picks the appropriate mechanism per target.
 
-### Thread Pool Mode
-True parallelism with work-stealing threads. Ideal for CPU-bound tasks.
+For finer control, create a `Runtime` directly instead of using `zsync.run`:
 
-### Green Thread Mode (Linux)
-Present in the repository, but not part of the supported `v0.8.1` release surface.
+```zig
+var runtime = zsync.Runtime.init(allocator, .{});
+defer runtime.deinit();
+const io = runtime.io();
 
-### Auto Mode
-Selects the best execution model based on platform capabilities.
+var future = io.async(work, .{args});
+const result = future.await(io);
+```
 
 ## API Examples
 
@@ -156,10 +160,14 @@ Future combinators are currently experimental for `v0.8.1`. Prefer the supported
 
 ## Platform Support
 
-- **Linux**: Full support with io_uring optimizations
-- **macOS**: Thread pool execution
-- **Windows**: Experimental IOCP with native I/O (ReadFile/WriteFile, recv/send)
-- **FreeBSD/OpenBSD**: Thread pool execution
+Scheduling and platform I/O backend selection are owned by `std.Io.Threaded`,
+so zsync runs anywhere the standard library does:
+
+- **Linux**: `std.Io.Threaded`
+- **macOS**: `std.Io.Threaded`
+- **Windows**: `std.Io.Threaded`
+- **FreeBSD/OpenBSD**: `std.Io.Threaded`
+- **WASM**: `std.Io.Threaded`
 
 ## Testing
 

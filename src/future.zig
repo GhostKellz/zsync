@@ -10,8 +10,11 @@ pub fn Future(comptime T: type) type {
         state: std.atomic.Value(State),
         result: ?Result,
         mutex: compat.Mutex,
-        condition: std.Thread.Condition,
+        condition: compat.Condition,
         allocator: std.mem.Allocator,
+        /// Background worker that resolves this future, when created via `compute`.
+        /// Joined on `deinit` so the worker can never outlive the future.
+        worker: ?std.Thread = null,
 
         const Self = @This();
 
@@ -35,6 +38,7 @@ pub fn Future(comptime T: type) type {
                 .mutex = .{},
                 .condition = .{},
                 .allocator = allocator,
+                .worker = null,
             };
             return self;
         }
@@ -130,8 +134,14 @@ pub fn Future(comptime T: type) type {
             self.condition.broadcast();
         }
 
-        /// Clean up the future
+        /// Clean up the future. If a background `compute` worker is still
+        /// running, wait for it to finish first so it can never write into
+        /// freed memory.
         pub fn deinit(self: *Self) void {
+            if (self.worker) |thread| {
+                thread.join();
+                self.worker = null;
+            }
             self.allocator.destroy(self);
         }
 
@@ -143,18 +153,52 @@ pub fn Future(comptime T: type) type {
     };
 }
 
-/// Helper to create a future from a function that computes a value
+/// Helper to create a future whose value is produced by `func` running on a
+/// background worker thread. The future is returned immediately in the pending
+/// state; the caller observes completion via `await`/`poll`. `func` must return
+/// an error union (`!T`); a returned error rejects the future.
+///
+/// The worker is owned by the future and joined in `deinit`, so the spawned
+/// thread can never outlive the future it writes into. If the OS cannot spawn a
+/// thread, the computation falls back to running synchronously.
 pub fn compute(comptime T: type, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) !*Future(T) {
     const future = try Future(T).init(allocator);
+    errdefer future.deinit();
 
-    // For now, execute synchronously
-    // TODO: Execute on thread pool in background
-    const result = @call(.auto, func, args) catch |err| {
-        future.reject(err);
+    const Args = @TypeOf(args);
+    const Context = struct {
+        future: *Future(T),
+        args: Args,
+        allocator: std.mem.Allocator,
+
+        fn run(ctx: *@This()) void {
+            const fut = ctx.future;
+            const call_args = ctx.args;
+            const a = ctx.allocator;
+            a.destroy(ctx);
+
+            const result = @call(.auto, func, call_args) catch |err| {
+                fut.reject(err);
+                return;
+            };
+            fut.resolve(result);
+        }
+    };
+
+    const ctx = try allocator.create(Context);
+    ctx.* = .{ .future = future, .args = args, .allocator = allocator };
+
+    future.worker = std.Thread.spawn(.{}, Context.run, .{ctx}) catch {
+        // No threads available: run synchronously and clean up the context.
+        allocator.destroy(ctx);
+        const result = @call(.auto, func, args) catch |err| {
+            future.reject(err);
+            return future;
+        };
+        future.resolve(result);
         return future;
     };
 
-    future.resolve(result);
     return future;
 }
 
@@ -212,4 +256,36 @@ test "future already resolved" {
 
     const result = try future.await();
     try testing.expectEqual(100, result);
+}
+
+test "future compute runs in background and resolves" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const Work = struct {
+        fn square(n: i32) !i32 {
+            return n * n;
+        }
+    };
+
+    const future = try compute(i32, allocator, Work.square, .{@as(i32, 9)});
+    defer future.deinit();
+
+    try testing.expectEqual(@as(i32, 81), try future.await());
+}
+
+test "future compute propagates errors" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const Work = struct {
+        fn boom(_: i32) !i32 {
+            return error.Boom;
+        }
+    };
+
+    const future = try compute(i32, allocator, Work.boom, .{@as(i32, 1)});
+    defer future.deinit();
+
+    try testing.expectError(error.Boom, future.await());
 }

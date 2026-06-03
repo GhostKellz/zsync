@@ -1,22 +1,20 @@
 # Performance Guide
 
-## Execution Model Selection
+## Scheduling
 
-- `blocking`: lowest overhead, simplest behavior, best for tests and simple tools
-- `thread_pool`: main cross-platform concurrent backend
-- `auto`: good default when you want platform-aware selection
+Scheduling and platform I/O backend selection are owned by `std.Io.Threaded`.
+There are no execution models to select — the standard library picks the
+appropriate mechanism per target.
 
 ## Practical Advice
 
 - Batch small units of work instead of spawning extremely fine-grained tasks.
-- Match `thread_pool_threads` to workload type rather than setting it arbitrarily high.
-- Prefer supported backends for release workloads.
+- Use a nursery to scope concurrent work and bound task lifetimes.
+- Prefer the supported core surface for release workloads.
 
 ## Current Caveats
 
-- Some advanced backends and prototype modules remain experimental.
-- `Io.readSync()` and `Io.writeSync()` still expose documented byte-count limitations.
-- `io_uring.poll(timeout_ms)` still has a documented timeout limitation.
+- Some prototype modules (future combinators, WASM helpers) remain experimental.
 
 ## See Also
 

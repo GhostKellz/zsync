@@ -1,19 +1,18 @@
 # zsync Documentation
 
-Reference documentation for `zsync` `v0.8.1`.
+Reference documentation for `zsync`, an async runtime built on `std.Io`.
 
 ## Supported Surface
 
-The supported `v0.8.1` surface is:
+The supported public surface is:
 
+- `run` / `getGlobalIo`
 - `Runtime`
-- `Io`
-- `Future`
-- `BlockingIo`
-- `ThreadPoolIo`
+- `Io` (re-exported `std.Io`)
+- `Nursery`
+- `spawn` / `spawnOn`
 - channels
 - timers
-- nursery
 
 Experimental modules and helpers remain in the repository, but they are outside the stability guarantees for this release.
 
@@ -34,6 +33,6 @@ Experimental modules and helpers remain in the repository, but they are outside 
 
 ## Notes
 
-- `Future.destroy()` is zero-argument.
-- `race()`, `all()`, and `timeout()` are present in the public API, but they are still treated as experimental for `v0.8.1`.
+- Scheduling and platform I/O backend selection are owned by `std.Io.Threaded`.
+- Future combinators (`select.zig`) remain experimental.
 - The root `README.md` is the main project landing page. This directory is for focused technical docs.

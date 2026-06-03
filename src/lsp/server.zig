@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const compat = @import("../compat/thread.zig");
-const Runtime = @import("../runtime.zig").Runtime;
+const Runtime = @import("../std_runtime.zig").Runtime;
 const channels = @import("../channels.zig");
 
 /// LSP Protocol Version

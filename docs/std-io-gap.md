@@ -1,12 +1,15 @@
 # zsync vs std.Io
 
-This document summarizes the current gap between `zsync` and Zig's evolving `std.Io` surface.
+This document summarizes how `zsync` relates to Zig's evolving `std.Io` surface.
+Since the rebase, zsync no longer defines its own `Io` abstraction — it
+re-exports `std.Io` as `zsync.Io` and builds structured-concurrency primitives on
+top of it.
 
-## Shared Concepts
+## Shared Foundation
 
-- vtable-based I/O abstraction
-- async operation handles
-- backend-specific capability reporting
+- the `Io` interface itself (`zsync.Io == std.Io`)
+- async operation handles (`std.Io.Future`)
+- scheduling via `std.Io.Threaded`
 - cancellation and timeout coordination
 
 ## Where `std.Io` Is Broader
@@ -25,19 +28,25 @@ This document summarizes the current gap between `zsync` and Zig's evolving `std
 ## Current Interop Pattern
 
 ```zig
-fn task() !void {
-    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
-    var future = try io.write("data");
-    defer future.destroy();
-    try future.await();
+fn work(x: u32) u32 {
+    return x * 2;
+}
+
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
+    var future = io.async(work, .{@as(u32, 21)});
+    const result = future.await(io);
+    _ = result;
 }
 ```
 
-## v0.8.1 Position
+## Position
 
-`v0.8.1` aligns zsync's async API with Zig 0.17.0-dev `std.Io` patterns:
+zsync's async API follows Zig's `std.Io` patterns:
+- The `Io` interface is the standard library's `std.Io`, re-exported as `zsync.Io`
 - No automatic Io injection - tasks acquire Io explicitly via `getGlobalIo()`
 - `run()` and `spawn()` pass args directly to task functions
 - Task signatures match what callers pass (no hidden first parameter)
 
-This brings zsync closer to std.Io's explicit argument passing philosophy while maintaining zsync's structured concurrency features (channels, nursery).
+This keeps zsync aligned with std.Io's explicit argument-passing philosophy while
+adding structured-concurrency features (channels, nursery) on top.

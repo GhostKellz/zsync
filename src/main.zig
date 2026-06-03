@@ -1,5 +1,5 @@
 //! zsync Simple Demo
-//! Showcasing the core functionality without complex features
+//! Showcasing the core functionality on top of std.Io
 
 const std = @import("std");
 const Zsync = @import("zsync");
@@ -7,42 +7,42 @@ const Zsync = @import("zsync");
 pub fn main() !void {
     std.debug.print("zsync v{s} - async runtime for Zig\n\n", .{Zsync.VERSION});
 
-    // Simple demo task - acquires Io explicitly via getIo()
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
     const DemoTask = struct {
-        fn task() !void {
+        fn add(a: u32, b: u32) u32 {
+            return a + b;
+        }
+        fn task() void {
             std.debug.print("colorblind async in action\n", .{});
 
-            // Get Io explicitly - no magic injection
-            var io = Zsync.getGlobalIo() orelse return error.NoRuntime;
+            // Acquire Io explicitly - no magic injection.
+            const io = Zsync.getGlobalIo() orelse return;
 
-            // This code works in ANY execution model!
-            var future = try io.write("Hello from zsync!\n");
-            defer future.destroy();
-
-            try future.await();
-
-            std.debug.print("Execution mode: {}\n", .{io.getMode()});
-            std.debug.print("Supports vectorized I/O: {}\n", .{io.supportsVectorized()});
-            std.debug.print("Supports zero-copy: {}\n", .{io.supportsZeroCopy()});
+            // Spawn a task and await its result.
+            var future = io.async(add, .{ @as(u32, 40), @as(u32, 2) });
+            const sum = future.await(io);
+            std.debug.print("spawned task result: {d}\n", .{sum});
         }
     };
 
-    // Run with blocking I/O
-    try Zsync.runBlocking(DemoTask.task, .{});
+    Zsync.run(gpa.allocator(), DemoTask.task, .{});
 
-    std.debug.print("\n Demo completed successfully!\n", .{});
-    std.debug.print("The future of Zig async programming is here!\n", .{});
+    std.debug.print("\nDemo completed successfully!\n", .{});
 }
 
 test "simple zsync test" {
     const TestTask = struct {
-        fn task() !void {
-            var io = Zsync.getGlobalIo() orelse return error.NoRuntime;
-            var future = try io.write("Test passed!");
-            defer future.destroy();
-            try future.await();
+        fn answer() u32 {
+            return 42;
+        }
+        fn task() void {
+            const io = Zsync.getGlobalIo().?;
+            var future = io.async(answer, .{});
+            std.testing.expectEqual(@as(u32, 42), future.await(io)) catch unreachable;
         }
     };
 
-    try Zsync.runBlocking(TestTask.task, .{});
+    Zsync.run(std.testing.allocator, TestTask.task, .{});
 }

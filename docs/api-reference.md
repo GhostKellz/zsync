@@ -1,83 +1,117 @@
 # API Reference
 
-This is a concise reference for the supported `v0.8.1` surface.
+A concise reference for the supported public surface. zsync layers
+structured-concurrency primitives over `std.Io`; the `Io` interface itself is
+re-exported from the standard library (`zsync.Io == std.Io`), so consult the Zig
+docs for the full `Io` API (`async`, `await`, `net`, `random`, …).
 
-## Core Types
-
-### `Runtime`
+## Entry Points
 
 ```zig
-pub fn init(allocator: std.mem.Allocator, config: Config) !*Runtime
+pub const Io = std.Io;
+
+pub fn run(gpa: std.mem.Allocator, comptime task_fn: anytype, args: anytype)
+    @typeInfo(@TypeOf(task_fn)).@"fn".return_type.?
+pub fn getGlobalIo() ?Io
+```
+
+`run` builds a `std.Io.Threaded` backend, installs a process-global `Io`, runs
+`task_fn`, then tears everything down. It returns whatever `task_fn` returns
+(including its error set). Inside a task, acquire the `Io` with `getGlobalIo()`.
+
+## `Runtime`
+
+```zig
+pub const RuntimeOptions = struct {
+    stack_size: usize = 0, // 0 = backend default
+};
+
+pub fn init(gpa: std.mem.Allocator, options: RuntimeOptions) Runtime
+pub fn io(self: *Runtime) Io
+pub fn spawn(self: *Runtime, comptime function: anytype, args: anytype) Io.Future
 pub fn deinit(self: *Runtime) void
-pub fn run(self: *Runtime, comptime task_fn: anytype, args: anytype) !void
-pub fn spawn(self: *Runtime, comptime task_fn: anytype, args: anytype) !Future
-pub fn timeout(self: *Runtime, future: Future, timeout_ms: u64) !Future
-pub fn race(self: *Runtime, futures: []Future) !Future
-pub fn all(self: *Runtime, futures: []Future) !Future
 ```
 
-`race()`, `all()`, and `timeout()` are public, but still considered experimental for `v0.8.1`.
+`Runtime` owns a `std.Io.Threaded` backend. `init` does not return an error
+union. Hold it by stable address (it must not be copied after `init`).
 
-### `Io`
+## Futures
+
+Futures are `std.Io.Future` values returned by `io.async(...)`. Await them with
+the `Io` handle:
 
 ```zig
-pub fn read(self: *Io, buffer: []u8) IoError!Future
-pub fn write(self: *Io, data: []const u8) IoError!Future
-pub fn readv(self: *Io, buffers: []IoBuffer) IoError!Future
-pub fn writev(self: *Io, data: []const []const u8) IoError!Future
-pub fn accept(self: *Io, fd: std.posix.fd_t) IoError!Future
-pub fn connect(self: *Io, fd: std.posix.fd_t, address: std.net.Address) IoError!Future
-pub fn close(self: *Io, fd: std.posix.fd_t) IoError!Future
-pub fn getMode(self: *const Io) IoMode
-pub fn supportsVectorized(self: *const Io) bool
-pub fn supportsZeroCopy(self: *const Io) bool
-pub fn getAllocator(self: *const Io) std.mem.Allocator
+var future = io.async(work, .{args});
+const result = future.await(io);
 ```
 
-### `Future`
+## `Nursery`
+
+Scopes a group of tasks to a single lifetime.
 
 ```zig
-pub fn await(self: *Future) IoError!void
-pub fn poll(self: *Future) Future.PollResult
-pub fn cancel(self: *Future) void
-pub fn destroy(self: *Future) void
-```
-
-`Future.destroy()` is zero-argument.
-
-### `BlockingIo`
-
-```zig
-pub fn init(allocator: std.mem.Allocator, buffer_size: usize) BlockingIo
-pub fn deinit(self: *BlockingIo) void
-pub fn io(self: *BlockingIo) Io
-```
-
-### `ThreadPoolIo`
-
-```zig
-pub fn init(allocator: std.mem.Allocator, config: ThreadPoolConfig) !ThreadPoolIo
-pub fn deinit(self: *ThreadPoolIo) void
-pub fn io(self: *ThreadPoolIo) Io
-```
-
-### `Nursery`
-
-```zig
-pub fn init(allocator: std.mem.Allocator, runtime: *Runtime) !*Nursery
-pub fn deinit(self: *Nursery) void
+pub fn init(io: std.Io) Nursery
 pub fn spawn(self: *Nursery, comptime task_fn: anytype, args: anytype) !void
 pub fn wait(self: *Nursery) !void
+pub fn cancelAll(self: *Nursery) void
+pub fn deinit(self: *Nursery) void
+
+// Convenience: run `func` inside a nursery scoped to `io`.
+pub fn withNursery(io: std.Io, comptime func: anytype, args: anytype) !void
 ```
 
-### Channels
+## Task Spawning (`spawn.zig`)
 
 ```zig
-pub const bounded = channel.bounded
-pub const unbounded = channel.unbounded
+// Spawn against the process-global Io (errors if no runtime is installed).
+pub fn spawn(comptime task_fn: anytype, args: anytype)
+    error{RuntimeNotInitialized}!Io.Future
+
+// Spawn on an explicit Io (preferred — matches std.Io's explicit-argument style).
+pub fn spawnOn(io: Io, comptime task_fn: anytype, args: anytype) Io.Future
 ```
 
-### Timers
+Both return a `std.Io.Future`; await it with `future.await(io)`.
+
+```zig
+const zsync = @import("zsync");
+
+fn cpuBoundWork(data: []const u8) usize {
+    return data.len; // heavy computation here (crypto, parsing, etc.)
+}
+
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
+    var future = zsync.spawnOn(io, cpuBoundWork, .{my_data});
+    // ... do other work ...
+    const n = future.await(io);
+    _ = n;
+}
+```
+
+## Channels
+
+```zig
+pub fn bounded(comptime T: type, allocator: std.mem.Allocator, capacity: usize) !Channel(T)
+pub fn unbounded(comptime T: type, allocator: std.mem.Allocator) !UnboundedChannel(T)
+```
+
+Both channel types expose:
+
+```zig
+pub fn send(self: *Self, item: T) !void
+pub fn recv(self: *Self) !T
+pub fn deinit(self: *Self) void
+```
+
+```zig
+var ch = try zsync.channels.bounded(i32, allocator, 10);
+defer ch.deinit();
+try ch.send(42);
+const value = try ch.recv();
+```
+
+## Timers
 
 ```zig
 pub fn sleep(duration_ms: u64) void
@@ -85,58 +119,18 @@ pub fn yieldNow() void
 pub const Interval = struct { ... }
 ```
 
-### Task Spawning (`spawn.zig`)
-
-For CPU-bound work that should run on the thread pool:
+## Time
 
 ```zig
-pub fn spawn(comptime task_fn: anytype, args: anytype) !*TaskHandle
-pub fn spawnOn(runtime: *Runtime, comptime task_fn: anytype, args: anytype) !*TaskHandle
+pub fn milliTime() i64
+pub fn nanoTime() i64
 ```
 
-**TaskHandle**
+## Version
 
 ```zig
-pub fn await(self: *TaskHandle) !void     // Block until task completes
-pub fn poll(self: *TaskHandle) bool       // Check completion without blocking
-pub fn deinit(self: *TaskHandle) void     // Clean up handle
+pub const VERSION: []const u8 // sourced from build.zig.zon
 ```
-
-**Usage**
-
-```zig
-const spawn = @import("zsync").spawn;
-
-fn cpuBoundWork(io: Io, data: []const u8) !void {
-    // Heavy computation here (crypto, parsing, etc.)
-}
-
-// Spawn on thread pool (if available)
-const handle = try spawn.spawn(cpuBoundWork, .{my_data});
-defer handle.deinit();
-
-// Do other work while task runs...
-
-// Wait for completion
-try handle.await();
-```
-
-When using `thread_pool` execution model, tasks run asynchronously on pool workers. For `blocking` mode, tasks execute synchronously on the calling thread.
-
-## Convenience Functions
-
-```zig
-pub fn run(comptime task_fn: anytype, args: anytype) !void
-pub fn runBlocking(comptime task_fn: anytype, args: anytype) !void
-pub fn runHighPerf(comptime task_fn: anytype, args: anytype) !void
-pub fn createOptimalRuntime(allocator: std.mem.Allocator) !*Runtime
-pub fn runtimeBuilder(allocator: std.mem.Allocator) RuntimeBuilder
-```
-
-## Known Limitations
-
-- `Io.readSync()` and `Io.writeSync()` return actual byte count when the backend provides it; backends without result tracking fall back to requested length.
-- `io_uring.poll()` uses cooperative polling (100µs intervals) instead of kernel-level timeout.
 
 ## See Also
 

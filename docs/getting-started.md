@@ -19,76 +19,102 @@ exe.root_module.addImport("zsync", zsync.module("zsync"));
 
 ## Minimum Zig Version
 
-`zsync` `v0.8.1` requires Zig `0.17.0-dev.27+0dd99c37c` or later.
+`zsync` requires Zig `0.17.0-dev` or later (the release that introduced
+`std.Io`).
 
 ## Smallest Example
 
-```zig
-const zsync = @import("zsync");
-
-fn task() !void {
-    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
-    var future = try io.write("hello from zsync\n");
-    defer future.destroy();
-    try future.await();
-}
-
-pub fn main() !void {
-    try zsync.run(task, .{});
-}
-```
-
-## Runtime Configuration
+`zsync.run` installs a process-global `std.Io.Threaded`-backed `Io`, runs your
+entry task, and tears the runtime down on return. Acquire the `Io` inside a task
+with `zsync.getGlobalIo()`.
 
 ```zig
 const std = @import("std");
 const zsync = @import("zsync");
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-
-    var runtime = try zsync.Runtime.init(allocator, .{
-        .execution_model = .thread_pool,
-        .thread_pool_threads = 4,
-    });
-    defer runtime.deinit();
-
-    try runtime.run(task, .{});
+fn double(x: u32) u32 {
+    return x * 2;
 }
 
-fn task() !void {
-    // Io available via zsync.getGlobalIo() if needed
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
+
+    var f = io.async(double, .{@as(u32, 21)});
+    const result = f.await(io);
+    std.debug.print("result = {d}\n", .{result});
+}
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    zsync.run(gpa.allocator(), task, .{});
+}
+```
+
+`zsync.run` returns whatever your task function returns (including its error
+set); there are no execution models to choose between — scheduling and platform
+I/O backend selection are owned by `std.Io.Threaded`.
+
+## Runtime Configuration
+
+For finer control, create a `Runtime` directly. `RuntimeOptions` is intentionally
+slim — the only knob is `stack_size` (0 = backend default).
+
+```zig
+const std = @import("std");
+const zsync = @import("zsync");
+
+fn work(x: u32) u32 {
+    return x + 1;
+}
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    var runtime = zsync.Runtime.init(gpa.allocator(), .{});
+    defer runtime.deinit();
+    const io = runtime.io();
+
+    var future = io.async(work, .{@as(u32, 41)});
+    const result = future.await(io);
+    std.debug.print("result = {d}\n", .{result});
 }
 ```
 
 ## Structured Concurrency
 
+A `Nursery` scopes a group of tasks to a single lifetime — `wait()` blocks until
+all spawned tasks complete.
+
 ```zig
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn work(id: u32) !void {
+fn work(id: u32) void {
     _ = id;
     zsync.sleep(10);
 }
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
 
-    var runtime = try zsync.Runtime.init(allocator, .{
-        .execution_model = .thread_pool,
-        .thread_pool_threads = 4,
-    });
-    defer runtime.deinit();
-
-    const nursery = try zsync.Nursery.init(allocator, runtime);
+    var nursery = zsync.Nursery.init(io);
     defer nursery.deinit();
 
-    try nursery.spawn(work, .{1});
-    try nursery.spawn(work, .{2});
-    try nursery.spawn(work, .{3});
+    nursery.spawn(work, .{@as(u32, 1)}) catch return;
+    nursery.spawn(work, .{@as(u32, 2)}) catch return;
+    nursery.spawn(work, .{@as(u32, 3)}) catch return;
 
-    try nursery.wait();
+    nursery.wait() catch return;
+}
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    zsync.run(gpa.allocator(), task, .{});
 }
 ```
 

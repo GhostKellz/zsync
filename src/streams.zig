@@ -2,12 +2,6 @@
 //! Tokio-style async iteration with combinators
 
 const std = @import("std");
-const runtime_mod = @import("runtime.zig");
-const io_interface = @import("io_interface.zig");
-
-const Runtime = runtime_mod.Runtime;
-const Future = io_interface.Future;
-const Io = io_interface.Io;
 
 /// Stream trait for async iteration
 pub fn Stream(comptime T: type) type {
@@ -54,11 +48,11 @@ pub fn Stream(comptime T: type) type {
 
         /// Collect all items into a list
         pub fn collect(self: *Self) !std.ArrayList(T) {
-            var list = std.ArrayList(T).init(self.allocator);
-            errdefer list.deinit();
+            var list: std.ArrayList(T) = .empty;
+            errdefer list.deinit(self.allocator);
 
             while (self.next()) |item| {
-                try list.append(item);
+                try list.append(self.allocator, item);
             }
 
             return list;
@@ -464,8 +458,8 @@ test "stream chaining" {
     var taken = try filtered.take(5);
     defer taken.deinit();
 
-    const result = try taken.collect();
-    defer result.deinit();
+    var result = try taken.collect();
+    defer result.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 5), result.items.len);
 }

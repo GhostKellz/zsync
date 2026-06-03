@@ -4,263 +4,148 @@
 
 zsync follows several key principles:
 
-1. **Colorblind Async** - Code works identically whether running synchronously or asynchronously
-2. **Zero-Cost Abstractions** - Pay only for what you use
-3. **Platform Optimization** - Use the best backend for each platform
-4. **Composability** - Small, focused modules that compose well
+1. **Build on `std.Io`** - scheduling and platform I/O backend selection are owned
+   by the standard library, not by zsync
+2. **Colorblind Async** - the same code runs whether the backend is sync or async
+3. **Structured Concurrency** - scoped task lifetimes via nurseries and `JoinSet`
+4. **Composability** - small, focused modules that compose well
 
 ## System Overview
+
+zsync no longer ships its own per-platform reactor or `Io` vtable. It layers
+Tokio-style primitives over `std.Io.Threaded`, which owns task scheduling and
+platform I/O backend selection.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      User Application                        │
 ├─────────────────────────────────────────────────────────────┤
 │                        zsync API                             │
-│  ┌─────────┬─────────┬─────────┬─────────┬─────────────────┐│
-│  │ Runtime │ Channels│ Timers  │  Sync   │ Zero-Copy I/O   ││
-│  └─────────┴─────────┴─────────┴─────────┴─────────────────┘│
+│  ┌─────────┬─────────┬─────────┬─────────┬─────────────────┐ │
+│  │ Runtime │ Nursery │Channels │ Timers  │ Sync primitives │ │
+│  └─────────┴─────────┴─────────┴─────────┴─────────────────┘ │
 ├─────────────────────────────────────────────────────────────┤
-│                     Io Interface (VTable)                    │
-├─────────┬─────────┬─────────┬───────────────────────────────┤
-│Blocking │ThreadPool│io_uring │      Green Threads           │
-│   Io    │    Io    │   Io    │       (Linux)                │
-├─────────┴─────────┴─────────┴───────────────────────────────┤
-│                     Platform Layer                           │
-│  ┌─────────┬─────────┬─────────┬─────────┬─────────────────┐│
-│  │  Linux  │  macOS  │ Windows │  BSD    │      WASM       ││
-│  │io_uring │ (pool)  │ (pool)  │ (pool)  │   (blocking)    ││
-│  └─────────┴─────────┴─────────┴─────────┴─────────────────┘│
+│                  std.Io  (re-exported as zsync.Io)           │
+├─────────────────────────────────────────────────────────────┤
+│                     std.Io.Threaded                          │
+│        (owns scheduling + platform I/O backend select)       │
+├─────────────────────────────────────────────────────────────┤
+│         Linux · macOS · Windows · BSD · WASM                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Feature Status
-
-| Feature | Linux | macOS | Windows | BSD | WASM |
-|---------|-------|-------|---------|-----|------|
-| Blocking I/O | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Thread Pool | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Green Threads | ✅ (io_uring) | ❌ | ❌ | ❌ | ❌ |
-| Zero-Copy | ✅ | Partial | ❌ | Partial | ❌ |
-| Channels | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Timers | ✅ | ✅ | ✅ | ✅ | ✅ |
-
 ## Core Components
 
-### 1. Io Interface (`io_interface.zig`)
+### 1. `Io` Interface
 
-The heart of zsync's colorblind async design. Uses a VTable pattern to abstract different I/O backends:
+The `Io` interface is Zig's standard-library `std.Io`, re-exported as
+`zsync.Io`. zsync does not define its own vtable — `async`/`await`, networking
+(`std.Io.net`), randomness (`io.random`), and timers all come from the standard
+library. This keeps zsync aligned with the language as `std.Io` evolves.
 
-```zig
-pub const Io = struct {
-    vtable: *const IoVTable,
-    userdata: *anyopaque,
-};
+### 2. Runtime (`std_runtime.zig`)
 
-const IoVTable = struct {
-    read: *const fn (...) Future,
-    write: *const fn (...) Future,
-    close: *const fn (...) void,
-    // ...
-};
-```
-
-This allows:
-- Same code works with blocking, thread pool, or async backends
-- Runtime selection of execution model
-- Zero overhead when inlined
-
-### 2. Runtime (`runtime.zig`)
-
-Manages the execution environment:
+`Runtime` owns a `std.Io.Threaded` backend and exposes the `Io` handle:
 
 ```zig
 pub const Runtime = struct {
-    allocator: Allocator,
-    config: Config,
-    io_impl: IoImplementation,
-    metrics: RuntimeMetrics,
+    threaded: std.Io.Threaded,
+    allocator: std.mem.Allocator,
 };
 ```
 
-Key responsibilities:
-- Initialize appropriate I/O backend based on config
-- Track runtime metrics
-- Manage global runtime instance
+`zsync.run` builds a `Threaded` backend, installs a process-global `Io`, runs
+the entry task, and tears everything down on return. `RuntimeOptions` is
+intentionally slim (`stack_size` only) — there are no execution models to
+select, because std owns scheduling.
 
-### 3. Thread Pool (`thread_pool.zig`)
+### 3. Structured Concurrency (`nursery.zig`)
 
-Thread pool implementation with:
+A `Nursery` scopes a group of tasks to a single lifetime. `spawn` adds tasks and
+`wait` blocks until they all complete. `withNursery` runs a function inside a
+nursery scoped to a given `Io`.
 
-- Worker threads with futex-based signaling
-- Lock-free work queue
-- Automatic worker count based on CPU cores
-- Graceful shutdown with task draining
+### 4. Channels (`channels.zig`, `channel.zig`)
 
-### 4. Timer System (`timer.zig`)
+Message-passing primitives:
 
-Timer wheel for efficient timer management:
-
-- O(log n) insertion
-- O(1) expiry checking
-- Interval timer support
-- Global timer wheel with auto-init
-
-### 5. Channels (`channel.zig`, `channels.zig`)
-
-Message passing primitives:
-
-- **Bounded channels** - Fixed capacity with backpressure
-- **Unbounded channels** - Dynamic capacity
+- **Bounded channels** - fixed capacity with backpressure
+- **Unbounded channels** - dynamic capacity
 - MPMC (multi-producer, multi-consumer) support
+
+### 5. Timers (`timer.zig`, `sleep.zig`)
+
+- `sleep(ms)` and `yieldNow()`
+- `Interval` for periodic ticks
 
 ### 6. Synchronization (`sync.zig`)
 
-Synchronization primitives:
-
-- `AsyncMutex` - Non-blocking mutex
-- `AsyncRwLock` - Reader-writer lock
-- `Semaphore` - Counting semaphore
-- `Barrier` - Synchronization barrier
-- `WaitGroup` - Go-style wait group
+- `AsyncMutex`, `AsyncRwLock`, `Semaphore`, `Barrier`, `WaitGroup`
+- Broadcast/watch channels
 
 ### 7. Task Spawning (`spawn.zig`)
 
-For CPU-bound work that should run on thread pool workers:
+Thin wrappers over `io.async`:
 
-```zig
-// Spawn returns immediately, task runs on pool
-const handle = try spawn.spawn(heavyComputation, .{data});
-defer handle.deinit();
+- `spawn(fn, args)` — spawn against the process-global `Io`
+- `spawnOn(io, fn, args)` — spawn on an explicit `Io`
 
-// Do other work while task executes...
+Both return a `std.Io.Future` awaited with `future.await(io)`.
 
-// Block until complete
-try handle.await();
-```
+### 8. Networking (`net/`, `networking.zig`)
 
-**When to use spawn vs Io:**
+Built on `std.Io.net`:
 
-| Use Case | API |
-|----------|-----|
-| File/network I/O | `Io.read()`, `Io.write()` |
-| CPU-bound work (crypto, parsing, compression) | `spawn.spawn()` |
-| Mixed (I/O + computation) | Spawn task that uses `Io` |
+- `net/websocket.zig` — WebSocket (RFC 6455)
+- `net/pool.zig` — connection pooling
+- `net/rate_limit.zig` — rate limiting
 
-**Memory lifecycle:**
-- `spawn()` allocates a TaskHandle (caller owns)
-- Thread pool manages internal WorkItem
-- Task wrapper self-cleans after execution
+## Platform Support
 
-## Platform Backends
+All platforms route through `std.Io.Threaded`; the standard library picks the
+appropriate mechanism per target. zsync does not select backends itself.
 
-### Linux (Full Support)
-
-- **io_uring** - Kernel-level async I/O (kernel 5.1+)
-- **epoll** - Fallback for older kernels
-- Zero-copy: `sendfile`, `splice`, `copy_file_range`
-- Green threads with cooperative scheduling
-
-### macOS (Thread Pool)
-
-- Thread pool execution model
-- `sendfile` for zero-copy (partial)
-- kqueue backend not yet implemented
-
-### Windows (Experimental IOCP)
-
-- Thread pool with IOCP completion signaling
-- Native I/O: `ReadFile`/`WriteFile` for files, `recv`/`send` for sockets
-- True overlapped I/O (AcceptEx, ConnectEx) not yet implemented
-
-### BSD (Thread Pool)
-
-- Thread pool execution model
-- kqueue backend not yet implemented
-
-### WASM (Blocking Only)
-
-- Blocking execution model
-- No threading support
-- Microtask queue for browser integration
+| Platform | Backend |
+|----------|---------|
+| Linux | `std.Io.Threaded` |
+| macOS | `std.Io.Threaded` |
+| Windows | `std.Io.Threaded` |
+| BSD | `std.Io.Threaded` |
+| WASM | `std.Io.Threaded` |
 
 ## Memory Management
 
-zsync is careful about memory:
-
-1. **Allocator Threading** - All allocations go through user-provided allocator
-2. **Buffer Pooling** - Reusable buffers for I/O operations
-3. **Page Alignment** - Zero-copy buffers are page-aligned
-4. **Deferred cleanup** - `defer future.destroy()` pattern
-
-## Error Handling
-
-Consistent error handling across all components:
-
-```zig
-pub const IoError = error{
-    WouldBlock,
-    Cancelled,
-    TimedOut,
-    ConnectionClosed,
-    BrokenPipe,
-    // ...
-};
-```
-
-## Roadmap
-
-### Planned
-- [ ] kqueue backend for macOS/BSD
-- [ ] True overlapped I/O for Windows (AcceptEx, ConnectEx)
-- [ ] Full std.Io adapter
-
-### Completed
-- [x] Zig 0.17.0-dev compatibility
-- [x] Windows IOCP backend (experimental)
-- [x] Cross-platform POSIX I/O in BlockingIo
-- [x] Tokio-style primitives (partial)
-- [x] Structured concurrency (Nursery)
-
-### Complete
-- [x] Colorblind async interface
-- [x] Thread pool execution
-- [x] io_uring green threads (Linux)
-- [x] Channels (bounded/unbounded)
-- [x] Timer system
-- [x] Zero-copy I/O (Linux)
-- [x] Buffer pool
-- [x] WebSocket (RFC 6455)
-- [x] Rate limiting
-- [x] Connection pooling
+1. **Allocator threading** - all allocations go through a user-provided allocator
+2. **Buffer pooling** - reusable buffers for I/O operations (`buffer_pool.zig`)
+3. **Deferred cleanup** - `defer runtime.deinit()` / `defer nursery.deinit()`
 
 ## File Organization
 
 ```
 src/
-├── root.zig           # Public API exports
-├── runtime.zig        # Runtime management
-├── io_interface.zig   # Colorblind I/O interface
-├── blocking_io.zig    # Synchronous I/O backend
-├── thread_pool.zig    # Thread pool implementation
-├── greenthreads_io.zig# Green threads (Linux)
-├── spawn.zig          # CPU-bound task spawning
-├── timer.zig          # Timer wheel
-├── channel.zig        # Channel primitives
-├── sync.zig           # Synchronization primitives
-├── scheduler.zig      # Task scheduler
-├── nursery.zig        # Structured concurrency
-├── buffer_pool.zig    # Buffer management
-├── select.zig         # Future combinators (race, all, timeout)
+├── root.zig            # Public API exports
+├── std_runtime.zig     # std.Io.Threaded-backed Runtime + run/getGlobalIo
+├── spawn.zig           # spawn / spawnOn over io.async
+├── nursery.zig         # Structured concurrency
+├── channels.zig        # Bounded/unbounded channels
+├── channel.zig         # Channel primitives
+├── sync.zig            # Synchronization primitives
+├── timer.zig           # Timers / intervals
+├── sleep.zig           # sleep / yieldNow
+├── select.zig          # Future combinators (experimental)
+├── future.zig          # Future helpers
+├── buffer_pool.zig     # Buffer management
+├── streams.zig         # Stream helpers
+├── networking.zig      # std.Io.net helpers
+├── diagnostics.zig     # Runtime diagnostics
+├── platform_detect.zig # Platform detection (diagnostics only)
 ├── compat/
-│   └── thread.zig     # Compatibility shims for Zig dev toolchains
+│   └── thread.zig      # Compatibility shims for Zig dev toolchains
 ├── net/
-│   ├── websocket.zig  # WebSocket RFC 6455
-│   ├── pool.zig       # Connection pooling
-│   └── rate_limit.zig # Rate limiting
-├── platform/
-│   ├── linux.zig      # Linux-specific
-│   └── macos.zig      # macOS-specific
+│   ├── websocket.zig   # WebSocket RFC 6455 (std.Io.net)
+│   ├── pool.zig        # Connection pooling
+│   └── rate_limit.zig  # Rate limiting
 └── wasm/
-    ├── async.zig      # WASM async support
-    └── microtask.zig  # Microtask queue
+    ├── async.zig       # WASM async support
+    └── microtask.zig   # Microtask queue
 ```

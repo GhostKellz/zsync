@@ -42,9 +42,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     // Test suite - main module tests
     const tests = b.addTest(.{
@@ -116,7 +114,7 @@ pub fn build(b: *std.Build) void {
     const wasm_step = b.step("wasm", "Build for WebAssembly (stackless execution)");
     wasm_step.dependOn(&b.addInstallArtifact(wasm_exe, .{}).step);
 
-    // ARM64 Linux build with io_uring optimization
+    // ARM64 Linux build
     const arm64_exe = b.addExecutable(.{
         .name = "zsync-arm64",
         .root_module = b.createModule(.{
@@ -133,10 +131,10 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const arm64_step = b.step("arm64", "Build for ARM64 Linux (io_uring optimized)");
+    const arm64_step = b.step("arm64", "Build for ARM64 Linux");
     arm64_step.dependOn(&b.addInstallArtifact(arm64_exe, .{}).step);
 
-    // ARM64 macOS build with kqueue optimization
+    // ARM64 macOS build
     const arm64_macos_exe = b.addExecutable(.{
         .name = "zsync-arm64-macos",
         .root_module = b.createModule(.{
@@ -153,10 +151,10 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const arm64_macos_step = b.step("arm64-macos", "Build for ARM64 macOS (kqueue optimized)");
+    const arm64_macos_step = b.step("arm64-macos", "Build for ARM64 macOS");
     arm64_macos_step.dependOn(&b.addInstallArtifact(arm64_macos_exe, .{}).step);
 
-    // Windows build with IOCP optimization
+    // Windows build
     const windows_exe = b.addExecutable(.{
         .name = "zsync-windows",
         .root_module = b.createModule(.{
@@ -174,7 +172,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const windows_step = b.step("windows", "Build for Windows (IOCP optimized)");
+    const windows_step = b.step("windows", "Build for Windows");
     windows_step.dependOn(&b.addInstallArtifact(windows_exe, .{}).step);
 
     // Cross-compilation test for all platforms
@@ -200,6 +198,9 @@ pub fn build(b: *std.Build) void {
         "examples/channels.zig",
         "examples/timers.zig",
         "examples/sync.zig",
+        "examples/semaphore.zig",
+        "examples/spawn_basic.zig",
+        "examples/executor.zig",
     };
 
     for (example_files) |example_path| {

@@ -25,14 +25,14 @@ pub const MicrotaskQueue = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .tasks = std.ArrayList(Microtask){ .allocator = allocator },
+            .tasks = .empty,
             .flushing = std.atomic.Value(bool).init(false),
             .mutex = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.tasks.deinit();
+        self.tasks.deinit(self.allocator);
     }
 
     /// Queue a microtask

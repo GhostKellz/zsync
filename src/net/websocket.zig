@@ -5,6 +5,21 @@ const std = @import("std");
 const compat = @import("../compat/thread.zig");
 const crypto = std.crypto;
 const base64 = std.base64;
+const net = std.Io.net;
+
+/// Write all bytes to a stream through the std.Io writer interface.
+fn streamWriteAll(io: std.Io, stream: net.Stream, data: []const u8) !void {
+    var buf: [4096]u8 = undefined;
+    var w = stream.writer(io, &buf);
+    try w.interface.writeAll(data);
+    try w.interface.flush();
+}
+
+/// Read a chunk from a stream into a single buffer, returning the byte count.
+fn streamRead(io: std.Io, stream: net.Stream, buffer: []u8) !usize {
+    var slices: [1][]u8 = .{buffer};
+    return stream.read(io, &slices);
+}
 
 /// WebSocket OpCode (RFC 6455)
 pub const OpCode = enum(u4) {
@@ -39,10 +54,10 @@ pub const Frame = struct {
         };
     }
 
-    pub fn initMasked(opcode: OpCode, payload: []const u8) Frame {
+    pub fn initMasked(io: std.Io, opcode: OpCode, payload: []const u8) Frame {
         var frame = init(opcode, payload);
         frame.masked = true;
-        crypto.random.bytes(&frame.mask_key);
+        io.random(&frame.mask_key);
         return frame;
     }
 };
@@ -90,7 +105,7 @@ pub const CloseCode = enum(u16) {
 };
 
 /// WebSocket Connection State
-pub const State = enum {
+pub const State = enum(u8) {
     connecting,
     open,
     closing,
@@ -116,7 +131,8 @@ pub const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 /// WebSocket Connection
 pub const WebSocketConnection = struct {
     allocator: std.mem.Allocator,
-    stream: std.net.Stream,
+    io: std.Io,
+    stream: net.Stream,
     state: std.atomic.Value(State),
     recv_buffer: []u8,
     recv_pos: usize,
@@ -129,16 +145,17 @@ pub const WebSocketConnection = struct {
     const Self = @This();
     const BUFFER_SIZE = 8192;
 
-    pub fn init(allocator: std.mem.Allocator, stream: std.net.Stream, is_client: bool) !Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, stream: net.Stream, is_client: bool) !Self {
         const buffer = try allocator.alloc(u8, BUFFER_SIZE);
         return Self{
             .allocator = allocator,
+            .io = io,
             .stream = stream,
             .state = std.atomic.Value(State).init(.open),
             .recv_buffer = buffer,
             .recv_pos = 0,
             .recv_len = 0,
-            .fragment_buffer = std.ArrayList(u8).init(allocator),
+            .fragment_buffer = .empty,
             .fragment_opcode = null,
             .is_client = is_client,
             .mutex = .{},
@@ -146,15 +163,15 @@ pub const WebSocketConnection = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.fragment_buffer.deinit();
+        self.fragment_buffer.deinit(self.allocator);
         self.allocator.free(self.recv_buffer);
-        self.stream.close();
+        self.stream.close(self.io);
     }
 
     /// Send text message
     pub fn sendText(self: *Self, text_data: []const u8) !void {
         if (self.is_client) {
-            try self.sendFrame(Frame.initMasked(.text, text_data));
+            try self.sendFrame(Frame.initMasked(self.io, .text, text_data));
         } else {
             try self.sendFrame(Frame.init(.text, text_data));
         }
@@ -163,7 +180,7 @@ pub const WebSocketConnection = struct {
     /// Send binary message
     pub fn sendBinary(self: *Self, data: []const u8) !void {
         if (self.is_client) {
-            try self.sendFrame(Frame.initMasked(.binary, data));
+            try self.sendFrame(Frame.initMasked(self.io, .binary, data));
         } else {
             try self.sendFrame(Frame.init(.binary, data));
         }
@@ -172,7 +189,7 @@ pub const WebSocketConnection = struct {
     /// Send ping
     pub fn ping(self: *Self, data: []const u8) !void {
         if (self.is_client) {
-            try self.sendFrame(Frame.initMasked(.ping, data));
+            try self.sendFrame(Frame.initMasked(self.io, .ping, data));
         } else {
             try self.sendFrame(Frame.init(.ping, data));
         }
@@ -181,7 +198,7 @@ pub const WebSocketConnection = struct {
     /// Send pong
     pub fn pong(self: *Self, data: []const u8) !void {
         if (self.is_client) {
-            try self.sendFrame(Frame.initMasked(.pong, data));
+            try self.sendFrame(Frame.initMasked(self.io, .pong, data));
         } else {
             try self.sendFrame(Frame.init(.pong, data));
         }
@@ -198,7 +215,7 @@ pub const WebSocketConnection = struct {
         std.mem.writeInt(u16, &close_data, @intFromEnum(code), .big);
 
         if (self.is_client) {
-            try self.sendFrame(Frame.initMasked(.close, &close_data));
+            try self.sendFrame(Frame.initMasked(self.io, .close, &close_data));
         } else {
             try self.sendFrame(Frame.init(.close, &close_data));
         }
@@ -231,7 +248,7 @@ pub const WebSocketConnection = struct {
                             self.state.store(.closing, .release);
                             // Echo close frame
                             if (self.is_client) {
-                                try self.sendFrame(Frame.initMasked(.close, frame.payload));
+                                try self.sendFrame(Frame.initMasked(self.io, .close, frame.payload));
                             } else {
                                 try self.sendFrame(Frame.init(.close, frame.payload));
                             }
@@ -254,14 +271,14 @@ pub const WebSocketConnection = struct {
                     self.allocator.free(frame.payload);
                     return Error.UnexpectedContinuation;
                 }
-                try self.fragment_buffer.appendSlice(frame.payload);
+                try self.fragment_buffer.appendSlice(self.allocator, frame.payload);
                 self.allocator.free(frame.payload);
 
                 if (frame.fin) {
                     // Message complete
                     const opcode = self.fragment_opcode.?;
                     self.fragment_opcode = null;
-                    const data = try self.fragment_buffer.toOwnedSlice();
+                    const data = try self.fragment_buffer.toOwnedSlice(self.allocator);
 
                     return Message{
                         .type = if (opcode == .text) .text else .binary,
@@ -282,7 +299,7 @@ pub const WebSocketConnection = struct {
                     // Start of fragmented message
                     self.fragment_opcode = frame.opcode;
                     self.fragment_buffer.clearRetainingCapacity();
-                    try self.fragment_buffer.appendSlice(frame.payload);
+                    try self.fragment_buffer.appendSlice(self.allocator, frame.payload);
                     self.allocator.free(frame.payload);
                 }
             }
@@ -342,10 +359,7 @@ pub const WebSocketConnection = struct {
             } else {
                 // Need more data from socket
                 self.recv_pos = 0;
-                self.recv_len = self.stream.read(self.recv_buffer) catch |err| switch (err) {
-                    error.ConnectionResetByPeer, error.BrokenPipe => return null,
-                    else => return err,
-                };
+                self.recv_len = streamRead(self.io, self.stream, self.recv_buffer) catch return null;
                 if (self.recv_len == 0) return null; // Connection closed
             }
         }
@@ -376,10 +390,8 @@ pub const WebSocketConnection = struct {
             }
 
             // Read more data
-            const bytes_read = self.stream.read(self.recv_buffer[self.recv_len..]) catch |err| switch (err) {
-                error.ConnectionResetByPeer, error.BrokenPipe => return Error.ConnectionClosed,
-                else => return err,
-            };
+            const bytes_read = streamRead(self.io, self.stream, self.recv_buffer[self.recv_len..]) catch
+                return Error.ConnectionClosed;
             if (bytes_read == 0) return Error.ConnectionClosed;
             self.recv_len += bytes_read;
         }
@@ -419,7 +431,7 @@ pub const WebSocketConnection = struct {
         }
 
         // Send header
-        _ = try self.stream.write(header[0..header_len]);
+        try streamWriteAll(self.io, self.stream, header[0..header_len]);
 
         // Send payload (masked if needed)
         if (frame.payload.len > 0) {
@@ -432,11 +444,11 @@ pub const WebSocketConnection = struct {
                     for (0..chunk_size) |i| {
                         masked_chunk[i] = frame.payload[offset + i] ^ frame.mask_key[(offset + i) % 4];
                     }
-                    _ = try self.stream.write(masked_chunk[0..chunk_size]);
+                    try streamWriteAll(self.io, self.stream, masked_chunk[0..chunk_size]);
                     offset += chunk_size;
                 }
             } else {
-                _ = try self.stream.write(frame.payload);
+                try streamWriteAll(self.io, self.stream, frame.payload);
             }
         }
     }
@@ -468,14 +480,16 @@ fn generateAcceptKey(client_key: []const u8) [28]u8 {
 }
 
 /// Parse HTTP headers from buffer
-fn parseHttpHeaders(buffer: []const u8) !struct {
+const ParsedHeaders = struct {
     upgrade: bool,
     connection_upgrade: bool,
     ws_key: ?[]const u8,
     ws_accept: ?[]const u8,
     status_code: ?u16,
-} {
-    var result = .{
+};
+
+fn parseHttpHeaders(buffer: []const u8) !ParsedHeaders {
+    var result: ParsedHeaders = .{
         .upgrade = false,
         .connection_upgrade = false,
         .ws_key = null,
@@ -508,10 +522,7 @@ fn parseHttpHeaders(buffer: []const u8) !struct {
             if (std.ascii.eqlIgnoreCase(name, "Upgrade")) {
                 result.upgrade = std.ascii.eqlIgnoreCase(value, "websocket");
             } else if (std.ascii.eqlIgnoreCase(name, "Connection")) {
-                result.connection_upgrade = std.mem.indexOf(u8, std.ascii.lowerString(
-                    @constCast(value),
-                    value,
-                ), "upgrade") != null;
+                result.connection_upgrade = std.ascii.findIgnoreCase(value, "upgrade") != null;
             } else if (std.ascii.eqlIgnoreCase(name, "Sec-WebSocket-Key")) {
                 result.ws_key = value;
             } else if (std.ascii.eqlIgnoreCase(name, "Sec-WebSocket-Accept")) {
@@ -526,7 +537,8 @@ fn parseHttpHeaders(buffer: []const u8) !struct {
 /// WebSocket Server
 pub const WebSocketServer = struct {
     allocator: std.mem.Allocator,
-    address: std.net.Address,
+    io: std.Io,
+    address: net.IpAddress,
     on_connect: *const fn (*WebSocketConnection) anyerror!void,
     running: std.atomic.Value(bool),
 
@@ -534,11 +546,13 @@ pub const WebSocketServer = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        address: std.net.Address,
+        io: std.Io,
+        address: net.IpAddress,
         on_connect: *const fn (*WebSocketConnection) anyerror!void,
     ) Self {
         return Self{
             .allocator = allocator,
+            .io = io,
             .address = address,
             .on_connect = on_connect,
             .running = std.atomic.Value(bool).init(false),
@@ -549,11 +563,11 @@ pub const WebSocketServer = struct {
     pub fn listen(self: *Self) !void {
         self.running.store(true, .release);
 
-        const listener = try self.address.listen(.{ .reuse_address = true });
-        defer listener.deinit();
+        var listener = try self.address.listen(self.io, .{ .reuse_address = true });
+        defer listener.deinit(self.io);
 
         while (self.running.load(.acquire)) {
-            const conn = listener.accept() catch |err| switch (err) {
+            const stream = listener.accept(self.io) catch |err| switch (err) {
                 error.WouldBlock => {
                     compat.sleepNanos(10 * std.time.ns_per_ms);
                     continue;
@@ -562,8 +576,8 @@ pub const WebSocketServer = struct {
             };
 
             // Perform WebSocket handshake
-            const ws_conn = self.handleHandshake(conn.stream) catch |err| {
-                conn.stream.close();
+            const ws_conn = self.handleHandshake(stream) catch |err| {
+                stream.close(self.io);
                 std.debug.print("[WebSocket] Handshake failed: {}\n", .{err});
                 continue;
             };
@@ -575,9 +589,9 @@ pub const WebSocketServer = struct {
         }
     }
 
-    fn handleHandshake(self: *Self, stream: std.net.Stream) !*WebSocketConnection {
+    fn handleHandshake(self: *Self, stream: net.Stream) !*WebSocketConnection {
         var buffer: [4096]u8 = undefined;
-        const bytes_read = try stream.read(&buffer);
+        const bytes_read = try streamRead(self.io, stream, &buffer);
         if (bytes_read == 0) return Error.HandshakeFailed;
 
         const headers = try parseHttpHeaders(buffer[0..bytes_read]);
@@ -599,11 +613,11 @@ pub const WebSocketServer = struct {
         const response_len = std.fmt.bufPrint(&response_buf, response, .{accept_key}) catch
             return Error.HandshakeFailed;
 
-        _ = try stream.write(response_len);
+        try streamWriteAll(self.io, stream, response_len);
 
         // Create connection
         const conn = try self.allocator.create(WebSocketConnection);
-        conn.* = try WebSocketConnection.init(self.allocator, stream, false);
+        conn.* = try WebSocketConnection.init(self.allocator, self.io, stream, false);
         return conn;
     }
 
@@ -615,6 +629,7 @@ pub const WebSocketServer = struct {
 /// WebSocket Client
 pub const WebSocketClient = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     host: []const u8,
     port: u16,
     path: []const u8,
@@ -622,7 +637,7 @@ pub const WebSocketClient = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, url: []const u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, url: []const u8) !Self {
         // Parse URL: ws://host:port/path or wss://host:port/path
         var host: []const u8 = undefined;
         var port: u16 = 80;
@@ -656,6 +671,7 @@ pub const WebSocketClient = struct {
 
         return Self{
             .allocator = allocator,
+            .io = io,
             .host = try allocator.dupe(u8, host),
             .port = port,
             .path = try allocator.dupe(u8, path),
@@ -674,37 +690,33 @@ pub const WebSocketClient = struct {
 
     /// Connect to WebSocket server
     pub fn connect(self: *Self) !void {
-        // Resolve address
-        const address = try std.net.Address.resolveIp(self.host, self.port);
-
-        // Connect TCP
-        const stream = try std.net.tcpConnectToAddress(address);
-        errdefer stream.close();
+        // Resolve and connect TCP
+        const address = try net.IpAddress.resolve(self.io, self.host, self.port);
+        const stream = try address.connect(self.io, .{ .mode = .stream });
+        errdefer stream.close(self.io);
 
         // Generate random key
         var key_bytes: [16]u8 = undefined;
-        crypto.random.bytes(&key_bytes);
+        self.io.random(&key_bytes);
         var key: [24]u8 = undefined;
         _ = base64.standard.Encoder.encode(&key, &key_bytes);
 
-        // Send HTTP upgrade request
+        // Send HTTP upgrade request. HTTP requires CRLF line endings, so the
+        // request is built with explicit "\r\n" rather than a multiline string
+        // literal (which would emit bare "\n" and fail header parsing).
         var request_buf: [1024]u8 = undefined;
-        const request = std.fmt.bufPrint(&request_buf,
-            \\GET {s} HTTP/1.1
-            \\Host: {s}:{d}
-            \\Upgrade: websocket
-            \\Connection: Upgrade
-            \\Sec-WebSocket-Key: {s}
-            \\Sec-WebSocket-Version: 13
-            \\
-            \\
-        , .{ self.path, self.host, self.port, key }) catch return Error.HandshakeFailed;
+        const request = std.fmt.bufPrint(&request_buf, "GET {s} HTTP/1.1\r\n" ++
+            "Host: {s}:{d}\r\n" ++
+            "Upgrade: websocket\r\n" ++
+            "Connection: Upgrade\r\n" ++
+            "Sec-WebSocket-Key: {s}\r\n" ++
+            "Sec-WebSocket-Version: 13\r\n\r\n", .{ self.path, self.host, self.port, key }) catch return Error.HandshakeFailed;
 
-        _ = try stream.write(request);
+        try streamWriteAll(self.io, stream, request);
 
         // Read response
         var response_buf: [1024]u8 = undefined;
-        const bytes_read = try stream.read(&response_buf);
+        const bytes_read = try streamRead(self.io, stream, &response_buf);
         if (bytes_read == 0) return Error.HandshakeFailed;
 
         const headers = try parseHttpHeaders(response_buf[0..bytes_read]);
@@ -722,7 +734,7 @@ pub const WebSocketClient = struct {
 
         // Create connection
         const conn = try self.allocator.create(WebSocketConnection);
-        conn.* = try WebSocketConnection.init(self.allocator, stream, true);
+        conn.* = try WebSocketConnection.init(self.allocator, self.io, stream, true);
         self.connection = conn;
     }
 
@@ -767,7 +779,11 @@ test "websocket frame" {
 test "websocket frame masked" {
     const testing = std.testing;
 
-    const frame = Frame.initMasked(.binary, "Test");
+    var threaded = std.Io.Threaded.init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const frame = Frame.initMasked(io, .binary, "Test");
     try testing.expect(frame.fin);
     try testing.expectEqual(OpCode.binary, frame.opcode);
     try testing.expect(frame.masked);
@@ -792,7 +808,8 @@ test "websocket accept key generation" {
 test "url parsing" {
     const testing = std.testing;
 
-    var client = try WebSocketClient.init(testing.allocator, "ws://localhost:8080/chat");
+    // URL parsing does not touch Io; pass undefined since connect() is not called.
+    var client = try WebSocketClient.init(testing.allocator, undefined, "ws://localhost:8080/chat");
     defer client.deinit();
 
     try testing.expectEqualStrings("localhost", client.host);
@@ -803,10 +820,92 @@ test "url parsing" {
 test "url parsing default port" {
     const testing = std.testing;
 
-    var client = try WebSocketClient.init(testing.allocator, "ws://example.com/ws");
+    var client = try WebSocketClient.init(testing.allocator, undefined, "ws://example.com/ws");
     defer client.deinit();
 
     try testing.expectEqualStrings("example.com", client.host);
     try testing.expectEqual(@as(u16, 80), client.port);
     try testing.expectEqualStrings("/ws", client.path);
+}
+
+/// Drives the server side of a single handshake round-trip: accept one
+/// connection, complete the RFC 6455 upgrade using the real `parseHttpHeaders`
+/// and `generateAcceptKey` helpers, then echo a reply to the client's message.
+fn handshakeServerSide(io: std.Io, allocator: std.mem.Allocator, server: *net.Server) !void {
+    const stream = try server.accept(io);
+
+    var req_buf: [4096]u8 = undefined;
+    const n = try streamRead(io, stream, &req_buf);
+    if (n == 0) return Error.HandshakeFailed;
+
+    const headers = try parseHttpHeaders(req_buf[0..n]);
+    if (!headers.upgrade or !headers.connection_upgrade or headers.ws_key == null) {
+        stream.close(io);
+        return Error.HandshakeFailed;
+    }
+
+    const accept_key = generateAcceptKey(headers.ws_key.?);
+    var resp_buf: [256]u8 = undefined;
+    const resp = std.fmt.bufPrint(
+        &resp_buf,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {s}\r\n\r\n",
+        .{accept_key},
+    ) catch return Error.HandshakeFailed;
+    try streamWriteAll(io, stream, resp);
+
+    var conn = try WebSocketConnection.init(allocator, io, stream, false);
+    defer conn.deinit();
+
+    var msg = (try conn.recv()) orelse return Error.HandshakeFailed;
+    defer msg.deinit();
+    if (!std.mem.eql(u8, msg.text(), "ping from client")) return Error.ProtocolError;
+
+    try conn.sendText("pong from server");
+}
+
+/// Drives the client side: real `WebSocketClient.connect` performs the upgrade
+/// and verifies the server's `Sec-WebSocket-Accept`, which is the round-trip
+/// property under test. Then exchange one masked/unmasked text message pair.
+fn handshakeClientSide(io: std.Io, allocator: std.mem.Allocator, port: u16) !void {
+    var url_buf: [64]u8 = undefined;
+    const url = try std.fmt.bufPrint(&url_buf, "ws://127.0.0.1:{d}/", .{port});
+
+    var client = try WebSocketClient.init(allocator, io, url);
+    defer client.deinit();
+
+    try client.connect();
+    try client.sendText("ping from client");
+
+    var msg = (try client.recv()) orelse return Error.ConnectionClosed;
+    defer msg.deinit();
+    try std.testing.expectEqualStrings("pong from server", msg.text());
+}
+
+test "websocket handshake round-trip over loopback" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    // Bind the listener in this fiber before spawning so the socket is already
+    // listening when the client connects (avoids a connect/bind race).
+    const port: u16 = 39_127;
+    const addr = net.IpAddress.parse("127.0.0.1", port) catch unreachable;
+    var server = addr.listen(io, .{ .reuse_address = true }) catch |err| switch (err) {
+        // Port already in use on a busy host/CI: skip rather than flake.
+        error.AddressInUse => return error.SkipZigTest,
+        else => return err,
+    };
+    defer server.deinit(io);
+
+    // Run the server side concurrently; the client runs in this fiber.
+    var server_future = try io.concurrent(handshakeServerSide, .{ io, allocator, &server });
+
+    const client_result = handshakeClientSide(io, allocator, port);
+    const server_result = server_future.await(io);
+
+    try server_result;
+    try client_result;
 }

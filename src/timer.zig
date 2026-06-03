@@ -352,10 +352,13 @@ pub fn processGlobalTimers() u32 {
     return 0;
 }
 
-/// Delay execution by yielding to the runtime
+/// Delay execution of the current task for `duration_ms` milliseconds.
+///
+/// Under the `std.Io.Threaded` runtime each task runs on its own OS thread, so
+/// blocking that thread is the correct way to delay: the kernel scheduler keeps
+/// every other task running. A green-thread runtime would instead suspend the
+/// task and re-arm it via the timer wheel.
 pub fn delay(duration_ms: u64) void {
-    // This should suspend the current task and schedule a wakeup
-    // For now, use regular sleep
     sleep(duration_ms);
 }
 

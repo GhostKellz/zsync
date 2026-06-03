@@ -1,45 +1,54 @@
 # Examples
 
-Examples below stick to the supported `v0.8.1` surface.
+Examples below use the supported public surface built on `std.Io`.
 
-## Basic Write
-
-```zig
-const zsync = @import("zsync");
-
-fn task() !void {
-    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
-    var future = try io.write("example output\n");
-    defer future.destroy();
-    try future.await();
-}
-
-pub fn main() !void {
-    try zsync.run(task, .{});
-}
-```
-
-## Runtime With Explicit Config
+## Basic Async Task
 
 ```zig
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn task() !void {
-    // Io available via zsync.getGlobalIo() if needed
-    zsync.sleep(5);
+fn double(x: u32) u32 {
+    return x * 2;
+}
+
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
+
+    var f = io.async(double, .{@as(u32, 21)});
+    const result = f.await(io);
+    std.debug.print("result = {d}\n", .{result});
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    var runtime = try zsync.Runtime.init(allocator, .{
-        .execution_model = .thread_pool,
-        .thread_pool_threads = 4,
-    });
+    zsync.run(gpa.allocator(), task, .{});
+}
+```
+
+## Runtime Created Directly
+
+```zig
+const std = @import("std");
+const zsync = @import("zsync");
+
+fn work(x: u32) u32 {
+    return x + 1;
+}
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    var runtime = zsync.Runtime.init(gpa.allocator(), .{});
     defer runtime.deinit();
+    const io = runtime.io();
 
-    try runtime.run(task, .{});
+    var future = io.async(work, .{@as(u32, 41)});
+    const result = future.await(io);
+    std.debug.print("result = {d}\n", .{result});
 }
 ```
 
@@ -49,28 +58,29 @@ pub fn main() !void {
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn worker(id: u32) !void {
+fn worker(id: u32) void {
     _ = id;
     zsync.sleep(10);
 }
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
 
-    var runtime = try zsync.Runtime.init(allocator, .{
-        .execution_model = .thread_pool,
-        .thread_pool_threads = 4,
-    });
-    defer runtime.deinit();
-
-    const nursery = try zsync.Nursery.init(allocator, runtime);
+    var nursery = zsync.Nursery.init(io);
     defer nursery.deinit();
 
-    try nursery.spawn(worker, .{1});
-    try nursery.spawn(worker, .{2});
-    try nursery.spawn(worker, .{3});
+    nursery.spawn(worker, .{@as(u32, 1)}) catch return;
+    nursery.spawn(worker, .{@as(u32, 2)}) catch return;
+    nursery.spawn(worker, .{@as(u32, 3)}) catch return;
 
-    try nursery.wait();
+    nursery.wait() catch return;
+}
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    zsync.run(gpa.allocator(), task, .{});
 }
 ```
 
@@ -81,7 +91,9 @@ const std = @import("std");
 const zsync = @import("zsync");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
     var ch = try zsync.channels.bounded(i32, allocator, 8);
     defer ch.deinit();
@@ -94,5 +106,7 @@ pub fn main() !void {
 
 ## Notes
 
-- For public examples shipped with the release, prefer `BlockingIo`, `ThreadPoolIo`, runtime helpers, channels, timers, and nursery.
-- Experimental features such as combinators, green-thread backends, and stackless/WASM helpers should be documented separately as experimental.
+- Scheduling and platform I/O backend selection are owned by `std.Io.Threaded`;
+  there are no execution models to configure.
+- Experimental features such as future combinators (`select.zig`) and WASM
+  helpers are documented separately as experimental.

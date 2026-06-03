@@ -137,6 +137,6 @@ try nursery.wait();
 ## Future Work
 
 - Async-aware primitives (await instead of thread blocking)
-- Integration with io_uring/IOCP for kernel-level waiting
+- Integration with `std.Io` for async-aware waiting (no thread blocking)
 - Timeout variants for all blocking operations
 - Metrics and tracing integration

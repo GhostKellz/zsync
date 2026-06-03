@@ -47,7 +47,7 @@ pub fn ConnectionPool(comptime T: type) type {
             var self = Self{
                 .allocator = allocator,
                 .config = config,
-                .connections = std.ArrayList(PooledConnection){ .allocator = allocator },
+                .connections = .empty,
                 .available = sync_mod.Semaphore.init(config.max_connections),
                 .mutex = .{},
                 .factory = factory,
@@ -68,7 +68,7 @@ pub fn ConnectionPool(comptime T: type) type {
             for (self.connections.items) |conn| {
                 self.destroyer(conn.connection);
             }
-            self.connections.deinit();
+            self.connections.deinit(self.allocator);
         }
 
         /// Acquire a connection from the pool
@@ -126,7 +126,7 @@ pub fn ConnectionPool(comptime T: type) type {
             defer self.mutex.unlock();
 
             for (self.connections.items) |*conn| {
-                if (conn.connection == connection) {
+                if (std.meta.eql(conn.connection, connection)) {
                     conn.in_use = false;
                     const ts = compat.clock_gettime(std.os.linux.CLOCK.MONOTONIC) catch unreachable;
                     const millis: i64 = @intCast(@divTrunc((@as(i128, ts.sec) * std.time.ns_per_s + ts.nsec), std.time.ns_per_ms));

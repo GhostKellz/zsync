@@ -54,7 +54,7 @@ pub fn main() !void {
         std.debug.print("Build with: zig build wasm-demo\n");
         return;
     }
-    
+
     // For WASM, the entry point is controlled by JavaScript
     // The export functions above are called directly from JS
 }

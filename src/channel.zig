@@ -122,7 +122,7 @@ pub fn Channel(comptime T: type) type {
 
             const bytes = std.mem.asBytes(&message);
             self.buffer.appendSlice(self.allocator, bytes) catch return ChannelError.ChannelFull;
-            
+
             // Signal while still holding the lock to prevent race conditions
             self.not_empty.signal();
         }
@@ -136,26 +136,26 @@ pub fn Channel(comptime T: type) type {
                 if (self.isClosed() and self.sender_count.load(.monotonic) == 0) {
                     return ChannelError.ChannelClosed;
                 }
-                
+
                 self.not_empty.wait(&self.mutex);
             }
 
             var message: MessageType = undefined;
             const bytes = std.mem.asBytes(&message);
-            
+
             if (self.buffer.items.len < bytes.len) {
                 return ChannelError.ChannelEmpty;
             }
-            
+
             @memcpy(bytes, self.buffer.items[0..bytes.len]);
-            
+
             // Remove the consumed bytes
             var i: usize = 0;
             while (i < bytes.len) {
                 _ = self.buffer.orderedRemove(0);
                 i += 1;
             }
-            
+
             self.not_full.signal();
             return message.data;
         }
@@ -220,20 +220,20 @@ pub fn Receiver(comptime T: type) type {
 
             var message: Message(T) = undefined;
             const bytes = std.mem.asBytes(&message);
-            
+
             if (self.channel.buffer.items.len < bytes.len) {
                 return ChannelError.ChannelEmpty;
             }
-            
+
             @memcpy(bytes, self.channel.buffer.items[0..bytes.len]);
-            
+
             // Remove the consumed bytes
             var i: usize = 0;
             while (i < bytes.len) {
                 _ = self.channel.buffer.orderedRemove(0);
                 i += 1;
             }
-            
+
             self.channel.not_full.signal();
             return message.data;
         }
@@ -256,7 +256,7 @@ pub fn bounded(comptime T: type, allocator: std.mem.Allocator, capacity: u32) !s
 } {
     const channel = try allocator.create(Channel(T));
     channel.* = try Channel(T).init(allocator, .{ .bounded = capacity });
-    
+
     return .{
         .channel = channel,
         .sender = channel.sender(),
@@ -272,7 +272,7 @@ pub fn unbounded(comptime T: type, allocator: std.mem.Allocator) !struct {
 } {
     const channel = try allocator.create(Channel(T));
     channel.* = try Channel(T).init(allocator, .unbounded);
-    
+
     return .{
         .channel = channel,
         .sender = channel.sender(),
@@ -352,7 +352,7 @@ pub fn select2(
     _ = recv1;
     _ = recv2;
     _ = timeout_ms;
-    
+
     // This is a simplified implementation
     // A real select would use the reactor for async waiting
     return SelectResult.timeout;
@@ -362,26 +362,26 @@ pub fn select2(
 test "channel creation" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const ch = try bounded(i32, allocator, 10);
     defer {
         ch.channel.deinit();
         allocator.destroy(ch.channel);
     }
-    
+
     try testing.expect(!ch.channel.isClosed());
 }
 
 test "channel send and receive" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const ch = try bounded(i32, allocator, 10);
     defer {
         ch.channel.deinit();
         allocator.destroy(ch.channel);
     }
-    
+
     try ch.sender.send(42);
     const value = try ch.receiver.recv();
     try testing.expect(value == 42);
@@ -389,9 +389,9 @@ test "channel send and receive" {
 
 test "oneshot channel" {
     const testing = std.testing;
-    
+
     var oneshot = OneShot(i32).init();
-    
+
     try oneshot.send(100);
     const value = try oneshot.recv();
     try testing.expect(value == 100);
@@ -400,17 +400,17 @@ test "oneshot channel" {
 test "channel try operations" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    
+
     const ch = try bounded(i32, allocator, 1);
     defer {
         ch.channel.deinit();
         allocator.destroy(ch.channel);
     }
-    
+
     // Try receive on empty channel
     const empty_result = ch.receiver.tryRecv();
     try testing.expectError(ChannelError.ChannelEmpty, empty_result);
-    
+
     // Send and try receive
     try ch.sender.trySend(99);
     const value = try ch.receiver.tryRecv();

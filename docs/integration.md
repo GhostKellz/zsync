@@ -1,69 +1,76 @@
 # Integration Guide
 
-This guide covers the supported `v0.8.1` integration patterns for downstream projects.
+This guide covers the supported integration patterns for downstream projects.
 
 ## Canonical Runtime Pattern
+
+`zsync.run` installs a process-global `Io`, runs your entry task, and tears the
+runtime down on return. Acquire the `Io` inside a task with `getGlobalIo()`.
 
 ```zig
 const std = @import("std");
 const zsync = @import("zsync");
 
-fn task() !void {
-    var io = zsync.getGlobalIo() orelse return error.NoRuntime;
-    var future = try io.write("hello from zsync\n");
-    defer future.destroy();
-    try future.await();
+fn double(x: u32) u32 {
+    return x * 2;
+}
+
+fn task() void {
+    const io = zsync.getGlobalIo() orelse return;
+    var f = io.async(double, .{@as(u32, 21)});
+    std.debug.print("result = {d}\n", .{f.await(io)});
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    var runtime = try zsync.Runtime.init(allocator, .{});
-    defer runtime.deinit();
-
-    try runtime.run(task, .{});
+    zsync.run(gpa.allocator(), task, .{});
 }
 ```
 
 ## Testing Pattern
 
+For tests, drive a `Runtime` directly so you control setup and teardown:
+
 ```zig
 const std = @import("std");
 const zsync = @import("zsync");
 
+fn add(a: u32, b: u32) u32 {
+    return a + b;
+}
+
 test "integration task" {
-    const allocator = std.testing.allocator;
+    var runtime = zsync.Runtime.init(std.testing.allocator, .{});
+    defer runtime.deinit();
+    const io = runtime.io();
 
-    var blocking = zsync.createBlockingIo(allocator);
-    defer blocking.deinit();
-
-    var io = blocking.io();
-    var future = try io.write("test");
-    defer future.destroy();
-    try future.await();
+    var future = io.async(add, .{ @as(u32, 2), @as(u32, 3) });
+    try std.testing.expectEqual(@as(u32, 5), future.await(io));
 }
 ```
 
-## Execution Model Guidance
+## Runtime Guidance
 
-- `.blocking`: simple tools, tests, deterministic execution
-- `.thread_pool`: CPU-bound work and the main cross-platform async backend
-- `.auto`: good default when you want platform-aware selection
+Scheduling and platform I/O backend selection are owned by `std.Io.Threaded`;
+there are no execution models to choose. Use `zsync.run` for an application
+entry point, or `zsync.Runtime.init` when you need to own the runtime lifetime
+explicitly.
 
 ## Supported Surface
 
 This guide assumes use of:
 
+- `run` / `getGlobalIo`
 - `Runtime`
-- `Io`
-- `Future`
-- `BlockingIo`
-- `ThreadPoolIo`
+- `Io` (re-exported `std.Io`)
+- `Nursery`
+- `spawn` / `spawnOn`
 - channels
 - timers
-- nursery
 
-Experimental modules are intentionally excluded from the recommended integration path for `v0.8.1`.
+Experimental modules are intentionally excluded from the recommended integration path.
 
 ## See Also
 

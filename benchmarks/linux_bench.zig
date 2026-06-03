@@ -51,15 +51,15 @@ fn benchmark(
 }
 
 // Task spawning benchmark
-fn taskSpawnBench(runtime: *zsync.Runtime) !void {
+fn taskSpawnBench(io: zsync.Io) !void {
     const Task = struct {
-        fn run() !void {
+        fn run() void {
             // Minimal task
         }
     };
 
-    var future = try runtime.spawn(Task.run, .{});
-    try future.await();
+    var future = io.async(Task.run, .{});
+    future.await(io);
 }
 
 // Channel throughput benchmark
@@ -75,8 +75,8 @@ fn bufferPoolBench(pool: *zsync.BufferPool) !void {
 }
 
 // Nursery overhead benchmark
-fn nurseryBench(allocator: std.mem.Allocator, runtime: *zsync.Runtime) !void {
-    const nursery = try zsync.Nursery.init(allocator, runtime);
+fn nurseryBench(io: zsync.Io) !void {
+    var nursery = zsync.Nursery.init(io);
     defer nursery.deinit();
 
     const Task = struct {
@@ -96,37 +96,18 @@ pub fn main() !void {
     std.debug.print("Platform: Linux\n", .{});
     std.debug.print("Architecture: {s}\n\n", .{@tagName(@import("builtin").target.cpu.arch)});
 
-    // Benchmark 1: Task Spawning (Blocking)
-    {
-        const runtime = try zsync.Runtime.init(allocator, .{
-            .execution_model = .blocking,
-        });
-        defer runtime.deinit();
+    var runtime = zsync.Runtime.init(allocator, .{});
+    defer runtime.deinit();
+    const io = runtime.io();
 
+    // Benchmark 1: Task Spawning
+    {
         const result = try benchmark(
             allocator,
-            "Task Spawn (Blocking)",
+            "Task Spawn (std.Io)",
             10_000,
             taskSpawnBench,
-            .{runtime},
-        );
-        result.print();
-    }
-
-    // Benchmark 2: Task Spawning (Thread Pool)
-    {
-        const runtime = try zsync.Runtime.init(allocator, .{
-            .execution_model = .thread_pool,
-            .thread_pool_threads = 4,
-        });
-        defer runtime.deinit();
-
-        const result = try benchmark(
-            allocator,
-            "Task Spawn (Thread Pool)",
-            1_000,
-            taskSpawnBench,
-            .{runtime},
+            .{io},
         );
         result.print();
     }
@@ -167,17 +148,12 @@ pub fn main() !void {
 
     // Benchmark 5: Nursery Overhead
     {
-        const runtime = try zsync.Runtime.init(allocator, .{
-            .execution_model = .blocking,
-        });
-        defer runtime.deinit();
-
         const result = try benchmark(
             allocator,
             "Nursery Create/Spawn/Wait",
             1_000,
             nurseryBench,
-            .{ allocator, runtime },
+            .{io},
         );
         result.print();
     }

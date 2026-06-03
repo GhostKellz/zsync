@@ -1,44 +1,42 @@
 //! zsync Basic Example
-//! Demonstrates basic runtime usage and colorblind async I/O
+//! Demonstrates basic runtime usage and colorblind async on top of std.Io
 
 const std = @import("std");
 const zsync = @import("zsync");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
 
     std.debug.print("zsync v{s} - Basic Example\n", .{zsync.VERSION});
     std.debug.print("=============================\n\n", .{});
 
-    // Detect optimal execution model for this platform
-    const model = zsync.detectOptimalModel();
-    std.debug.print("Detected optimal model: {}\n\n", .{model});
+    const Demo = struct {
+        fn greet(id: u32) u32 {
+            std.debug.print("  task {d}: colorblind async in action\n", .{id});
+            return id * id;
+        }
 
-    // Create a simple blocking I/O instance
-    var blocking_io = zsync.createBlockingIo(allocator);
-    defer blocking_io.deinit();
+        fn task() void {
+            // Acquire the Io interface installed by zsync.run - no magic injection.
+            const io = zsync.getGlobalIo() orelse return;
 
-    var io = blocking_io.io();
+            std.debug.print("Spawning concurrent tasks...\n", .{});
 
-    // Demonstrate colorblind async - same code works sync and async!
-    std.debug.print("Writing with colorblind async...\n", .{});
+            // Same code path works whether the backend runs sync or async.
+            var f0 = io.async(greet, .{@as(u32, 1)});
+            var f1 = io.async(greet, .{@as(u32, 2)});
+            var f2 = io.async(greet, .{@as(u32, 3)});
 
-    const messages = [_][]const u8{
-        "Hello from zsync!\n",
-        "This is colorblind async.\n",
-        "Same code works sync and async!\n",
+            const r0 = f0.await(io);
+            const r1 = f1.await(io);
+            const r2 = f2.await(io);
+
+            std.debug.print("\nResults: {d}, {d}, {d}\n", .{ r0, r1, r2 });
+        }
     };
 
-    // Vectorized write - writes multiple buffers efficiently
-    var future = try io.writev(&messages);
-    defer future.destroy();
-
-    // Colorblind await - adapts to execution context
-    try future.await();
-
-    std.debug.print("\nI/O Mode: {}\n", .{io.getMode()});
-    std.debug.print("Supports vectorized: {}\n", .{io.supportsVectorized()});
-    std.debug.print("Supports zero-copy: {}\n", .{io.supportsZeroCopy()});
+    zsync.run(gpa.allocator(), Demo.task, .{});
 
     std.debug.print("\nDone!\n", .{});
 }

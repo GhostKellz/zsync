@@ -4,7 +4,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const compat = @import("../compat/thread.zig");
-const Runtime = @import("../runtime.zig").Runtime;
 
 /// PTY Configuration
 pub const PtyConfig = struct {

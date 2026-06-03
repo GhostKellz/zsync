@@ -3,6 +3,187 @@
 All notable changes to zsync will be documented in this file.
 
 
+## [v0.8.3] - 2026-06-02 - std.Io Rebase
+
+Rebases zsync onto Zig's `std.Io` interface and removes the redundant custom
+`Io` vtable and its five backends. Zig removed `std.net` and the blocking
+`std.posix` socket calls, moving all I/O behind `std.Io`; zsync's hand-rolled
+runtime duplicated `std.Io.Threaded`, so the duplicate stack has been deleted in
+favor of the standard library implementation.
+
+### Breaking Changes
+- Removed the custom `Io` vtable and all in-tree backends. Scheduling and I/O
+  backend selection are now owned by `std.Io`. `zsync.run` installs a
+  `std.Io.Threaded`-backed global `Io`; tasks acquire it via
+  `zsync.getGlobalIo()`.
+- `RuntimeOptions` no longer exposes `execution_model` or `thread_pool_threads`;
+  only `stack_size` remains. Backend choice is delegated to `std.Io`.
+- `networking.zig` now operates on `std.Io.net` types. `HttpClient`,
+  `TlsStream`, and `WebSocketConnection` take an explicit `std.Io` argument;
+  `HttpRequest.serialize`/`HttpResponse.serialize` write to a `*std.Io.Writer`.
+
+### Changed
+- Networking ported to `std.Io.net`: connections use `IpAddress.resolve` /
+  `connect` / `listen` / `accept`, reads go through `Stream.read`, and writes go
+  through `Stream.writer` + `*std.Io.Writer`. Serialization uses
+  `std.Io.Writer.Allocating`.
+- Examples rebased onto `std.Io`: `basic.zig` runs concurrent `io.async` tasks
+  inside `zsync.run`; `high_performance_server.zig` is a `std.Io.net` HTTP/1.1
+  server.
+- Benchmarks rebased onto a single `Runtime` + `io()`; the task-spawn and
+  nursery benches use `io.async` / `Nursery.init(io)`.
+- Cross-platform demo (`main_cross.zig`) runs a simple async workload on
+  `std.Io.Threaded` across all targets and returns early on freestanding.
+
+### Removed
+- Deleted 18 redundant custom-stack modules: `io.zig`, `task.zig`,
+  `runtime.zig`, `scheduler.zig`, `reactor.zig`, `io_interface.zig`,
+  `blocking_io.zig`, `threadpool_io.zig`, `std_io.zig`, `platform_runtime.zig`,
+  `runtime_factory.zig`, `green_threads.zig`, `io_uring.zig`,
+  `windows_iocp_io.zig`, `thread_pool.zig`, `thread_pool_stub.zig`,
+  `platform_imports.zig`, `deprecation.zig`. `platform_detect.zig` is retained
+  (still used by `diagnostics.zig`).
+- Deleted orphaned pre-`std.Io` execution-model code left unreferenced after the
+  backend removal: `src/arch/x86_64.zig` and `src/arch/aarch64.zig` (green-thread
+  register context-switch and stack guard-page helpers) and
+  `src/compat/async_builtins.zig` (mock `@asyncFrameSize`/`@asyncSuspend`
+  scaffolding for a Zig async-builtins design that never shipped; it also still
+  used the removed uppercase `@typeInfo` tags). None were reachable from
+  `root.zig`; their drift was hidden by lazy analysis.
+
+### Fixed
+- Replaced `std.heap.GeneralPurposeAllocator` (removed upstream) with
+  `std.heap.DebugAllocator`.
+- Resolved an ambiguous-reference error in the runtime test where a local `add`
+  collided with the module-level `add`.
+- `zsync.yieldNow()` now correctly handles the error union returned by the
+  underlying sleep module.
+- `parseHttpHeaders` built its result from an inferred anonymous-struct literal,
+  so the `null`-initialized optional fields took type `@TypeOf(null)` and could
+  not accept parsed values. It now uses a named `ParsedHeaders` type. Surfaced by
+  the new handshake round-trip test (previously hidden by lazy analysis).
+- `WebSocketClient.connect` emitted its HTTP upgrade request with bare `\n` line
+  endings (via a multiline string literal), which the server's `\r\n`-based
+  header parser could not read. Switched to explicit CRLF. Surfaced by the new
+  round-trip test.
+- Repaired modules that had rotted against the current Zig std but were never
+  compiled because they were unreferenced: `future.zig`
+  (`std.Thread.Condition` → `compat.Condition`), `net/pool.zig` and `streams.zig`
+  (unmanaged `ArrayList` API + `std.meta.eql` for struct identity),
+  `plugin/system.zig` (explicit `enum(u8)` tag for the atomic state; unmanaged
+  `ArrayList`), and `script/runtime.zig` (`@typeInfo` tag names lowercased,
+  e.g. `.Bool` → `.bool`, `.Pointer` → `.pointer`, `.Slice` → `.slice`).
+- Rebased the `executor`, `semaphore`, and `spawn_basic` examples off removed
+  runtime entry points (`Config.optimal`, `initGlobalRuntime`, `spawnTask`,
+  `setGlobal`) onto `zsync.run` / `zsync.spawnOn` / `Executor`.
+- `parseHttpHeaders` lowercased the `Connection` header in place via
+  `std.ascii.lowerString(@constCast(value), value)`, mutating a const slice into
+  the caller's read-only HTTP buffer (undefined behavior). Replaced with a
+  non-mutating case-insensitive search (`std.ascii.findIgnoreCase`).
+- Corrected stale `zig build` step descriptions that advertised removed I/O
+  backends ("io_uring optimized", "kqueue optimized", "IOCP optimized") on the
+  `arm64`, `arm64-macos`, and `windows` cross-build targets; all platforms run on
+  `std.Io.Threaded`.
+
+### Hardening
+- Documentation accuracy sweep: rewrote `README.md` and the `docs/` set onto the
+  `std.Io` surface, removing references to the deleted `BlockingIo`/`ThreadPoolIo`
+  execution models, `createBlockingIo`, `IoBuffer`, and io_uring/IOCP backend
+  claims (all platforms now run on `std.Io.Threaded`).
+- Public-surface test coverage: every public re-export in `root.zig` is now
+  force-referenced from the root `test` block, so the entire API is continuously
+  compiled and its tests run. This closes the silent-rot gap that previously let
+  modules drift against `std.Io` changes without failing the build. Test count
+  rose from 54 to 108.
+- Migrated `async_fs.zig` onto `std.Io.File`/`std.Io.Dir`, issuing positional
+  reads and writes through an explicit `std.Io`, replacing the removed blocking
+  `std.fs.File` API.
+- Added a client↔server WebSocket handshake round-trip test over `std.Io.net`
+  loopback that exercises the real RFC 6455 upgrade path on both sides
+  (`parseHttpHeaders` + `generateAcceptKey` agreement, masked/unmasked frames).
+- Wired the `executor`, `semaphore`, and `spawn_basic` examples into
+  `zig build examples`, and the `net/pool` and `net/rate_limit` tests into the
+  suite.
+
+### Implemented
+Replaced the remaining stubs, mocks, and `TODO` placeholders left after the
+rebase with real, working implementations. Several of these modules were
+unreferenced and so never compiled; their stubs were only surfaced once the
+public surface was force-referenced.
+- `future.zig`: `compute()` now offloads work through `io.async` and awaits the
+  result instead of running inline.
+- `networking.zig`: `DnsResolver` performs real name resolution via
+  `std.Io.net` address lookup, replacing the hard-coded loopback stub.
+- `plugin/system.zig`: implemented `loadDirectory` and migrated
+  `discoverPlugins` off the removed `std.fs` API onto `std.Io.Dir` iteration.
+- `dev/watch.zig`: implemented a real Linux `inotify` backend (non-blocking
+  `inotify_init1` + `poll` loop, per-watch descriptor map, event classification
+  into created/modified/deleted/renamed). `PollingWatcher` was migrated off the
+  removed `std.fs` calls onto `std.Io.Dir.statFile`, tracking `mtime`
+  nanoseconds.
+- `compression/stream.zig`: implemented real DEFLATE/gzip/zlib compression and
+  decompression via `std.compress.flate` (`Compress`/`Decompress` with the
+  matching container). The `Algorithm` enum was narrowed to the codecs the
+  standard library actually provides (`deflate`, `gzip`, `zlib`) rather than
+  advertising unimplemented `zstd`/`lz4` variants.
+- `script/runtime.zig`: implemented a real tree-walking interpreter (tokenizer +
+  recursive-descent evaluator) supporting arithmetic, string concatenation,
+  comparison/logic operators, parentheses, and `let`/assignment over engine
+  globals. `AsyncScriptTask.execute` now evaluates the script; `FFI` dispatches
+  to native Zig functions via comptime argument reflection.
+- `wasm/async.zig`: fleshed out the WebAssembly async surface. `defer_` now
+  enqueues a heap-captured trampoline onto the global microtask queue;
+  `AsyncContext.sleep` delegates to the host `zsync_sleep_ms` binding on wasm32
+  and to a real monotonic sleep otherwise; `FetchResponse.json` parses the body
+  with `std.json`; and `fetch` drives a defined synchronous JS host protocol
+  (`zsync_fetch`/`zsync_fetch_read`/`zsync_fetch_free`) on wasm32, rejecting with
+  `error.FetchUnsupportedHost` on non-wasm targets instead of returning a mock
+  response. `wasm/microtask.zig` and `EventEmitter` were moved onto the unmanaged
+  `ArrayList` API, and `Promise` now uses `compat.Condition`
+  (`std.Thread.Condition` was removed upstream). The portable helpers are
+  force-referenced into the host test suite, and the wasm-only paths are
+  force-referenced from `main_cross.zig` so neither can silently rot again.
+- `dev/watch.zig`: the macOS and Windows `FileWatcher` backends were no-op
+  sleep loops that never fired a callback (they only claimed to use FSEvents /
+  `ReadDirectoryChangesW`). They now delegate to a real `watchByPolling`
+  fallback that detects created/modified/deleted files via `std.Io` mtime
+  comparison, so `FileWatcher` actually works off Linux. The fallback is
+  exercised by a host test and compile-checked for the macOS and Windows
+  targets.
+- `wasm/net.zig` (new): replaced `networking_stub.zig` — which returned
+  `error.NetworkingNotAvailable` from every method and never matched the real
+  `networking.zig` signatures — with a real wasm networking layer. WebAssembly
+  has no native sockets, so each operation is delegated to the embedding host
+  through a defined synchronous `env` import protocol: `UdpSocket`
+  (`zsync_udp_bind`/`_send`/`_recv`/`_close`, with `std.Io.net.IpAddress`
+  serialized to/from wire bytes), `DnsResolver` (`zsync_dns_resolve`),
+  `HttpClient` (reusing the `zsync_fetch` protocol), `WebSocketConnection`
+  (`zsync_ws_open`/`_send`/`_recv`/`_close`), and `TlsStream` over host TCP
+  (`zsync_tcp_connect`/`_send`/`_recv`/`_close`). The public types mirror
+  `networking.zig`; the wasm `UdpSocket` is now aliased directly into `root.zig`.
+  The whole surface is force-referenced from `main_cross.zig` so it is
+  continuously compiled for `wasm32-freestanding`.
+- `root.zig`: fixed `createHttpClient`, which called the removed 2-argument
+  `HttpClient.init`; it now acquires the active `std.Io` via `getGlobalIo` and
+  uses the real `init(allocator, io, tls_config)`. This latent mismatch had been
+  hidden by lazy analysis (the helper was never referenced); it is now
+  force-referenced into the test suite.
+
+### Verification
+- `zig build`
+- `zig build test` (109/109 passing)
+- Memory audit: full test binary clean under Valgrind (0 errors, 0 leaks) in
+  addition to the `std` testing allocator's own leak checks.
+- `zig build cross-compile` (12/12 targets, incl. wasm32, aarch64, windows;
+  the wasm32-freestanding build now force-compiles the host-bridged networking
+  surface in `wasm/net.zig`)
+- `zig build wasm` (ReleaseSmall wasm32-freestanding-musl)
+- `zig build examples` (7 examples)
+- `zig build bench`
+- `zig build http-server` (compiles, binds 127.0.0.1:8080, serves `200 OK`)
+- `zig build release`
+
+
 ## [v0.8.2] - 2026-05-04 - Zig Nightly Parser Compatibility
 
 ### Fixed

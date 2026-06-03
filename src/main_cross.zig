@@ -1,106 +1,66 @@
 const std = @import("std");
-const root = @import("root.zig");
-const runtime_factory = @import("runtime_factory.zig");
-const platform_runtime = @import("platform_runtime.zig");
+const builtin = @import("builtin");
+const zsync = @import("zsync");
 
-/// Backend maturity demonstration.
+/// Cross-platform runtime demonstration.
 ///
-/// This executable showcases zsync's platform detection and backend selection.
-/// It is NOT a supported API surface - it exists to demonstrate which backends
-/// are available on each platform and their current maturity level.
+/// This executable showcases zsync running on top of `std.Io.Threaded` across
+/// every supported target. It is NOT a supported API surface - it exists to
+/// confirm the runtime cross-compiles and runs a simple async workload on each
+/// platform.
 ///
-/// Platform support status:
-/// - Linux: io_uring (native), epoll (fallback), thread pool (universal)
-/// - macOS: kqueue (native), thread pool (fallback)
-/// - Windows: IOCP (partial), thread pool (primary)
-/// - WASM: microtask queue (limited)
-/// - Other: thread pool fallback
-///
-/// Some I/O operations return NotSupported on platforms where the backend
-/// is not yet fully implemented. This is expected and documented behavior.
+/// Scheduling and I/O backend selection are owned by `std.Io`; zsync no longer
+/// ships its own per-platform reactor. On freestanding targets (e.g. WASM) there
+/// is no host runtime to drive, so `main` returns immediately.
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    if (comptime builtin.target.os.tag == .freestanding) {
+        // Force-reference the wasm async surface so its JS host bindings are
+        // continuously compiled for the freestanding/wasm target. Tests cannot
+        // run here, so this is what keeps the wasm-only code path from rotting.
+        comptime {
+            _ = &zsync.wasm_async.fetch;
+            _ = &zsync.wasm_async.defer_;
+            _ = zsync.wasm_async.AsyncContext.sleep;
+            _ = zsync.wasm_async.FetchResponse.json;
 
-    if (comptime @import("builtin").target.os.tag == .freestanding) {
+            // Force-compile the wasm host-bridged networking surface. Tests
+            // cannot run on freestanding, so this keeps the JS host bindings
+            // continuously analyzed by `zig build cross-compile`/`wasm`.
+            _ = &zsync.UdpSocket.bind;
+            _ = &zsync.UdpSocket.sendTo;
+            _ = &zsync.UdpSocket.recvFrom;
+            _ = &zsync.UdpSocket.close;
+            _ = &zsync.networking.DnsResolver.resolve;
+            _ = &zsync.networking.HttpClient.request;
+            _ = &zsync.networking.TlsStream.connect;
+            _ = &zsync.networking.WebSocketConnection.connect;
+            _ = &zsync.createHttpClient;
+        }
         return;
     }
 
-    std.debug.print("zsync - Cross-Platform Async Runtime (Backend Demo)\n", .{});
+    std.debug.print("zsync v{s} - Cross-Platform Async Runtime\n", .{zsync.VERSION});
     std.debug.print("============================================================\n", .{});
+    std.debug.print("OS:   {s}\n", .{@tagName(builtin.target.os.tag)});
+    std.debug.print("Arch: {s}\n", .{@tagName(builtin.target.cpu.arch)});
+    std.debug.print("Backend: std.Io.Threaded\n\n", .{});
 
-    // Create platform-optimized runtime factory
-    var factory = try runtime_factory.RuntimeFactory.init(allocator);
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    // Print detailed platform information
-    factory.printInfo();
-
-    // Create optimal async runtime for this platform
-    var async_runtime = try factory.createAsyncRuntime();
-    defer async_runtime.deinit();
-
-    std.debug.print("Runtime Backend: {s}\n", .{async_runtime.getBackendName()});
-    std.debug.print("High Performance: {}\n", .{factory.isHighPerformance()});
-
-    // Get I/O interface
-    var io = async_runtime.io();
-
-    std.debug.print("\nI/O Capabilities:\n", .{});
-    std.debug.print("  Mode: {}\n", .{io.getMode()});
-    std.debug.print("  Vectorized I/O: {}\n", .{io.supportsVectorized()});
-    std.debug.print("  Zero-copy I/O: {}\n", .{io.supportsZeroCopy()});
-
-    // Demonstrate async I/O (may return NotSupported on some platforms)
-    std.debug.print("\nTesting Async Operations...\n", .{});
-
-    const test_message = "Hello from zsync cross-platform runtime!";
-    var write_future = io.write(test_message) catch |err| switch (err) {
-        error.NotSupported => {
-            // Expected on platforms where async I/O backend is not yet complete
-            std.debug.print("[INFO] Async I/O not implemented for this backend\n", .{});
-            std.debug.print("       This is expected - use ThreadPoolIo as fallback\n", .{});
-            return;
-        },
-        else => return err,
-    };
-    defer write_future.destroy();
-
-    // Poll runtime for completion
-    var poll_count: u32 = 0;
-    while (poll_count < 10) {
-        try async_runtime.poll(10); // 10ms timeout
-
-        switch (write_future.poll()) {
-            .ready => {
-                std.debug.print("[OK] Async write completed\n", .{});
-                break;
-            },
-            .pending => {
-                poll_count += 1;
-                continue;
-            },
-            .cancelled => {
-                std.debug.print("[WARN] Operation cancelled\n", .{});
-                break;
-            },
-            .err => |e| {
-                std.debug.print("[ERROR] Operation failed: {}\n", .{e});
-                break;
-            },
+    const Demo = struct {
+        fn add(a: u32, b: u32) u32 {
+            return a + b;
         }
-    }
+        fn task() void {
+            const io = zsync.getGlobalIo() orelse return;
+            var future = io.async(add, .{ @as(u32, 40), @as(u32, 2) });
+            const sum = future.await(io);
+            std.debug.print("Async task result: {d}\n", .{sum});
+        }
+    };
 
-    // Show runtime metrics
-    const metrics = async_runtime.getMetrics();
-    std.debug.print("\nRuntime Metrics:\n", .{});
-    std.debug.print("  Operations Submitted: {}\n", .{metrics.operations_submitted});
-    std.debug.print("  Operations Completed: {}\n", .{metrics.operations_completed});
-    std.debug.print("  Green Threads: {}\n", .{metrics.green_threads_spawned});
-    std.debug.print("  Context Switches: {}\n", .{metrics.context_switches});
+    zsync.run(gpa.allocator(), Demo.task, .{});
 
-    // Legacy compatibility test
-    std.debug.print("\nTesting Legacy API Compatibility...\n", .{});
-    try root.helloWorld(allocator);
-
-    std.debug.print("\nBackend demo completed. Backend: {s}\n", .{async_runtime.getBackendName()});
-    std.debug.print("Note: Some platforms use fallback backends with limited features.\n", .{});
+    std.debug.print("\nCross-platform demo completed.\n", .{});
 }

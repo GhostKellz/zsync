@@ -9,19 +9,11 @@ pub fn main() !void {
     defer _ = debug_allocator.deinit();
     const allocator = debug_allocator.allocator();
 
-    std.debug.print("\n⚡ Zsync v{s} - Executor Example\n\n", .{zsync.VERSION});
+    std.debug.print("\nZsync v{s} - Executor Example\n\n", .{zsync.VERSION});
 
-    // Create executor
+    // Create executor (owns its own std.Io.Threaded-backed runtime)
     var executor = try zsync.Executor.init(allocator);
     defer executor.deinit();
-
-    // Set as global runtime
-    executor.runtime.setGlobal();
-    defer {
-        zsync.runtime.global_runtime_mutex.lock();
-        zsync.runtime.global_runtime = null;
-        zsync.runtime.global_runtime_mutex.unlock();
-    }
 
     // Define tasks
     const Task1 = struct {
@@ -57,5 +49,5 @@ pub fn main() !void {
     std.debug.print("Waiting for all tasks to complete...\n", .{});
     try executor.joinAll();
 
-    std.debug.print("\n✅ All {} tasks completed!\n\n", .{executor.taskCount()});
+    std.debug.print("\nAll {} tasks completed!\n\n", .{executor.taskCount()});
 }
