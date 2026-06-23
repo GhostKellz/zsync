@@ -10,65 +10,73 @@ pub fn main() !void {
     std.debug.print("zsync v{s} - Channels Example\n", .{zsync.VERSION});
     std.debug.print("==============================\n\n", .{});
 
-    // Create a bounded channel with capacity 5
-    var channel = try zsync.Channel(u32).init(allocator, 5);
-    defer channel.deinit();
+    // Create a bounded mpsc channel with capacity 5
+    const channel = try zsync.channel.mpsc.bounded(u32, allocator, 5);
+    defer {
+        channel.channel.deinit();
+        allocator.destroy(channel.channel);
+    }
 
     std.debug.print("Created bounded channel with capacity 5\n\n", .{});
 
     // --- Blocking Send/Recv ---
     std.debug.print("--- Blocking API (send/recv) ---\n", .{});
     for (0..3) |i| {
-        try channel.send(@intCast(i * 10));
+        try channel.sender.send(@intCast(i * 10));
         std.debug.print("  send({})\n", .{i * 10});
     }
 
     for (0..3) |_| {
-        const value = try channel.recv();
+        const value = try channel.receiver.recv();
         std.debug.print("  recv() -> {}\n", .{value});
     }
 
     // --- Non-blocking trySend/tryRecv (Fast Paths) ---
     std.debug.print("\n--- Non-blocking API (trySend/tryRecv) ---\n", .{});
 
-    // trySend returns bool indicating success
+    // trySend returns ChannelFull when the bounded queue has no space.
     var sent: u32 = 0;
     for (0..10) |i| {
-        const success = try channel.trySend(@intCast(i));
-        if (success) {
-            sent += 1;
-        } else {
-            std.debug.print("  trySend({}) -> channel full!\n", .{i});
-        }
+        channel.sender.trySend(@intCast(i)) catch |err| {
+            std.debug.print("  trySend({}) -> {s}\n", .{ i, @errorName(err) });
+            continue;
+        };
+        sent += 1;
     }
     std.debug.print("  Successfully sent {} items (capacity: 5)\n", .{sent});
 
-    // tryRecv returns ?T (null if empty)
+    // tryRecv returns ChannelEmpty when no message is available.
     std.debug.print("  Draining with tryRecv:\n", .{});
     var received: u32 = 0;
-    while (channel.tryRecv()) |value| {
+    while (true) {
+        const value = channel.receiver.tryRecv() catch break;
         std.debug.print("    tryRecv() -> {}\n", .{value});
         received += 1;
     }
     std.debug.print("  Received {} items\n", .{received});
 
     // tryRecv on empty channel
-    const empty_result = channel.tryRecv();
-    std.debug.print("  tryRecv() on empty -> {?}\n", .{empty_result});
+    _ = channel.receiver.tryRecv() catch |err| {
+        std.debug.print("  tryRecv() on empty -> {s}\n", .{@errorName(err)});
+    };
 
     // --- Unbounded Channel ---
     std.debug.print("\n--- Unbounded Channel ---\n", .{});
 
-    var unbounded = zsync.UnboundedChannel([]const u8).init(allocator);
-    defer unbounded.deinit();
+    const unbounded = try zsync.channel.mpsc.unbounded([]const u8, allocator);
+    defer {
+        unbounded.channel.deinit();
+        allocator.destroy(unbounded.channel);
+    }
 
     // Unbounded channels never block on send
-    try unbounded.send("Hello");
-    try unbounded.send("from");
-    try unbounded.send("zsync!");
+    try unbounded.sender.send("Hello");
+    try unbounded.sender.send("from");
+    try unbounded.sender.send("zsync!");
 
     std.debug.print("  Messages: ", .{});
-    while (unbounded.tryRecv()) |msg| {
+    while (true) {
+        const msg = unbounded.receiver.tryRecv() catch break;
         std.debug.print("{s} ", .{msg});
     }
     std.debug.print("\n", .{});
@@ -76,21 +84,24 @@ pub fn main() !void {
     // --- Use Case: Producer/Consumer Pattern ---
     std.debug.print("\n--- Use Case: Batch Processing ---\n", .{});
 
-    var work_queue = try zsync.Channel(u32).init(allocator, 100);
-    defer work_queue.deinit();
+    const work_queue = try zsync.channel.mpsc.bounded(u32, allocator, 100);
+    defer {
+        work_queue.channel.deinit();
+        allocator.destroy(work_queue.channel);
+    }
 
     // Producer: batch send items
     var items_queued: u32 = 0;
     for (0..50) |i| {
-        if (try work_queue.trySend(@intCast(i))) {
-            items_queued += 1;
-        }
+        work_queue.sender.trySend(@intCast(i)) catch continue;
+        items_queued += 1;
     }
     std.debug.print("  Queued {} work items\n", .{items_queued});
 
     // Consumer: process all available items
     var items_processed: u32 = 0;
-    while (work_queue.tryRecv()) |_| {
+    while (true) {
+        _ = work_queue.receiver.tryRecv() catch break;
         items_processed += 1;
     }
     std.debug.print("  Processed {} work items\n", .{items_processed});

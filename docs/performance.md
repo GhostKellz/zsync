@@ -1,23 +1,3 @@
-# Performance Guide
+# Performance Guide Moved
 
-## Scheduling
-
-Scheduling and platform I/O backend selection are owned by `std.Io.Threaded`.
-There are no execution models to select — the standard library picks the
-appropriate mechanism per target.
-
-## Practical Advice
-
-- Batch small units of work instead of spawning extremely fine-grained tasks.
-- Use a nursery to scope concurrent work and bound task lifetimes.
-- Prefer the supported core surface for release workloads.
-
-## Current Caveats
-
-- Some prototype modules (future combinators, WASM helpers) remain experimental.
-
-## See Also
-
-- [getting-started.md](getting-started.md)
-- [api-reference.md](api-reference.md)
-- [examples.md](examples.md)
+The performance guide is now [guides/performance.md](guides/performance.md).

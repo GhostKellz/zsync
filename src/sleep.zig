@@ -28,6 +28,19 @@ pub fn sleepNanos(ns: u64) void {
     compat.sleepNanos(ns);
 }
 
+/// Sleep for up to `ms`, returning false if `token.isCancelled()` becomes true.
+pub fn sleepCancellable(ms: u64, token: anytype) bool {
+    const start = compat.Instant.now() catch return false;
+    const timeout_ns = ms * std.time.ns_per_ms;
+    while (true) {
+        if (token.isCancelled()) return false;
+        const now = compat.Instant.now() catch return false;
+        if (now.since(start) >= timeout_ns) return true;
+        const remaining = timeout_ns - now.since(start);
+        compat.sleepNanos(@min(remaining, 1 * std.time.ns_per_ms));
+    }
+}
+
 // Tests
 test "yieldNow basic" {
     try yieldNow();
@@ -45,4 +58,14 @@ test "sleep milliseconds" {
 
     // Should sleep at least 10ms (allow some tolerance)
     try std.testing.expect(elapsed_ms >= 9);
+}
+
+test "sleep cancellable returns false for cancelled token" {
+    const Token = struct {
+        pub fn isCancelled(_: *const @This()) bool {
+            return true;
+        }
+    };
+    const token = Token{};
+    try std.testing.expect(!sleepCancellable(10, &token));
 }

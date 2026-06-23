@@ -4,12 +4,14 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const compat = @import("compat/thread.zig");
 
-// Compatibility layer (exported for users)
-pub const time = struct {
-    pub const Instant = compat.Instant;
-};
+// Tokio-style facade modules.
+pub const task = @import("task.zig");
+pub const time = @import("time.zig");
+pub const net = @import("net.zig");
+pub const process = @import("process.zig");
+pub const signal = @import("signal.zig");
+pub const compat = @import("compat_api.zig");
 
 // Core runtime foundation — Zig's std.Io
 pub const std_runtime = @import("std_runtime.zig");
@@ -20,8 +22,10 @@ pub const channels = @import("channels.zig");
 pub const future_mod = @import("future.zig");
 pub const executor_mod = @import("executor.zig");
 pub const sync_mod = @import("sync.zig");
+pub const tokio_sync = @import("tokio_sync.zig");
 pub const sleep_mod = @import("sleep.zig");
 pub const select_mod = @import("select.zig");
+pub const join_set_mod = @import("join_set.zig");
 
 // Structured Concurrency
 pub const nursery_mod = @import("nursery.zig");
@@ -95,6 +99,10 @@ pub const clearGlobalIo = std_runtime.clearGlobalIo;
 pub const GenericFuture = future_mod.Future;
 pub const Executor = executor_mod.Executor;
 pub const Semaphore = sync_mod.Semaphore;
+pub const IoSemaphore = sync_mod.IoSemaphore;
+pub const IoMutex = sync_mod.IoMutex;
+pub const IoRwLock = sync_mod.IoRwLock;
+pub const IoWaitGroup = sync_mod.IoWaitGroup;
 pub const Barrier = sync_mod.Barrier;
 pub const Latch = sync_mod.Latch;
 pub const Channel = channels.Channel;
@@ -133,10 +141,12 @@ pub const yieldTask = sleep_mod.yieldNow;
 pub const sleepMs = sleep_mod.sleep;
 pub const sleepMicros = sleep_mod.sleepMicros;
 pub const sleepNanos = sleep_mod.sleepNanos;
+pub const sleepCancellable = sleep_mod.sleepCancellable;
 
 // Future combinators
 pub const selectFuture = select_mod.select;
 pub const selectTimeout = select_mod.selectTimeout;
+pub const selectCancellable = select_mod.selectCancellable;
 pub const allFutures = select_mod.all;
 pub const anyFuture = select_mod.any;
 
@@ -164,13 +174,13 @@ pub const AsyncMutex = sync_mod.AsyncMutex;
 pub const AsyncRwLock = sync_mod.AsyncRwLock;
 pub const WaitGroup = sync_mod.WaitGroup;
 
-// WebSocket
-pub const WebSocketConnectionV2 = websocket.WebSocketConnection;
-pub const WebSocketServerV2 = websocket.WebSocketServer;
-pub const WebSocketClientV2 = websocket.WebSocketClient;
-pub const WebSocketMessageV2 = websocket.Message;
-pub const WebSocketOpCodeV2 = websocket.OpCode;
-pub const WebSocketCloseCodeV2 = websocket.CloseCode;
+// WebSocket - canonical RFC 6455 implementation.
+pub const WebSocketConnection = websocket.WebSocketConnection;
+pub const WebSocketServer = websocket.WebSocketServer;
+pub const WebSocketClient = websocket.WebSocketClient;
+pub const WebSocketMessage = websocket.Message;
+pub const WebSocketOpCode = websocket.OpCode;
+pub const WebSocketCloseCode = websocket.CloseCode;
 
 // WASM Async Helpers
 pub const MicrotaskQueue = wasm_microtask.MicrotaskQueue;
@@ -247,41 +257,14 @@ pub const unbounded = channels.unbounded;
 
 /// UDP socket. On wasm32 this is the host-bridged datagram socket from
 /// `wasm/net.zig`; elsewhere it is backed directly by `std.Io.net`.
-pub const UdpSocket = if (builtin.target.cpu.arch == .wasm32) networking.UdpSocket else struct {
-    io: std.Io,
-    socket: std.Io.net.Socket,
-
-    const Self = @This();
-
-    /// Bind a datagram socket to `address`.
-    pub fn bind(io: std.Io, address: std.Io.net.IpAddress) !Self {
-        const socket = try address.bind(io, .{ .mode = .dgram });
-        return Self{ .io = io, .socket = socket };
-    }
-
-    /// Send a datagram to a specific address.
-    pub fn sendTo(self: *Self, data: []const u8, address: std.Io.net.IpAddress) !void {
-        try self.socket.send(self.io, &address, data);
-    }
-
-    /// Receive a datagram, reporting the source address.
-    pub fn recvFrom(self: *Self, buffer: []u8) !struct { bytes_received: usize, address: std.Io.net.IpAddress } {
-        const msg = try self.socket.receive(self.io, buffer);
-        return .{ .bytes_received = msg.data.len, .address = msg.from };
-    }
-
-    /// Close the UDP socket.
-    pub fn close(self: *Self) void {
-        self.socket.close(self.io);
-    }
-};
+pub const UdpSocket = net.UdpSocket;
 
 // =============================================================================
 // Additional Async APIs
 // =============================================================================
 
 /// Timer wheel for scheduling timeouts and delays
-pub const TimerWheel = timer.TimerWheel;
+pub const TimerWheel = time.TimerWheel;
 
 /// Create a timer wheel for timeout management
 pub fn createTimerWheel(allocator: std.mem.Allocator) !*TimerWheel {
@@ -298,9 +281,6 @@ pub const HttpRequest = networking.HttpRequest;
 
 /// HTTP response structure
 pub const HttpResponse = networking.HttpResponse;
-
-/// WebSocket connection for real-time communication
-pub const WebSocketConnection = networking.WebSocketConnection;
 
 /// DNS resolver for hostname resolution
 pub const DnsResolver = networking.DnsResolver;
@@ -331,42 +311,30 @@ pub fn delay(duration_ms: u64) void {
 
 /// Get high-precision nanosecond timestamp
 pub fn nanoTime() u64 {
-    return timer.nanoTime();
+    return time.nanoTime();
 }
 
 /// Get microsecond timestamp
 pub fn microTime() u64 {
-    return timer.microTime();
+    return time.microTime();
 }
 
 /// Get millisecond timestamp
 pub fn milliTime() u64 {
-    return timer.milliTime();
+    return time.milliTime();
 }
 
 /// Measure execution time of a function
-pub const MeasureResult = timer.MeasureResult;
+pub const MeasureResult = time.MeasureResult;
 
 pub fn measure(comptime func: anytype, args: anytype) MeasureResult {
     return timer.measure(func, args);
 }
 
-/// Spawn a high priority task
-pub fn spawnUrgent(comptime task_fn: anytype, args: anytype) !Future {
-    // Use the improved spawn with high priority preference
-    return spawn(task_fn, args);
-}
-
-/// Task priority hint. Scheduling is delegated to `std.Io`, which does not
-/// expose priorities; retained for API compatibility.
-pub const TaskPriority = enum { low, normal, high };
-
-/// Spawn a task with a priority hint. The hint is currently advisory only —
-/// `std.Io` owns scheduling — so this behaves like `spawn`.
-pub fn spawnWithPriority(comptime task_fn: anytype, args: anytype, priority: TaskPriority) !Future {
-    _ = priority;
-    return spawn(task_fn, args);
-}
+/// Legacy/advisory spawn helpers retained for source compatibility.
+pub const spawnUrgent = compat.spawnUrgent;
+pub const TaskPriority = compat.TaskPriority;
+pub const spawnWithPriority = compat.spawnWithPriority;
 
 /// Advanced channel types and utilities
 pub const ChannelError = channel.ChannelError;
@@ -383,734 +351,23 @@ pub fn spawnBlocking(comptime func: anytype, args: anytype) !std.Thread {
     return std.Thread.spawn(.{}, func, args);
 }
 
-/// JoinSet for managing multiple concurrent tasks (like tokio::task::JoinSet)
-/// Tasks are spawned on separate threads and run concurrently.
-/// Each task entry is heap-allocated to ensure pointer stability across spawns.
-pub fn JoinSet(comptime T: type) type {
-    return struct {
-        entries: std.ArrayList(*TaskEntry),
-        allocator: std.mem.Allocator,
-        mutex: compat.Mutex = .{},
-        completed_cond: compat.Condition = .{},
-        completed_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
-
-        const Self = @This();
-
-        const TaskEntry = struct {
-            thread: ?std.Thread = null,
-            result: ?T = null,
-            err: ?anyerror = null,
-            completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-            joined: bool = false,
-        };
-
-        pub fn init(allocator: std.mem.Allocator) Self {
-            return Self{
-                .entries = .empty,
-                .allocator = allocator,
-            };
-        }
-
-        pub fn deinit(self: *Self) void {
-            // Join any remaining threads
-            self.joinAll();
-            // Free all task entries
-            for (self.entries.items) |entry| {
-                self.allocator.destroy(entry);
-            }
-            self.entries.deinit(self.allocator);
-        }
-
-        /// Spawn a task on a new thread
-        pub fn spawn(self: *Self, comptime func: anytype, args: anytype) !usize {
-            // Heap-allocate entry for pointer stability
-            const entry = try self.allocator.create(TaskEntry);
-            entry.* = TaskEntry{};
-
-            const idx = self.entries.items.len;
-            try self.entries.append(self.allocator, entry);
-
-            // Wrapper to capture result and signal completion
-            const Wrapper = struct {
-                fn run(task_entry: *TaskEntry, set: *Self, func_args: anytype) void {
-                    const result = @call(.auto, func, func_args);
-                    task_entry.result = result;
-                    task_entry.completed.store(true, .release);
-                    _ = set.completed_count.fetchAdd(1, .release);
-                    set.completed_cond.signal();
-                }
-            };
-
-            entry.thread = try std.Thread.spawn(.{}, Wrapper.run, .{ entry, self, args });
-            return idx;
-        }
-
-        /// Spawn a task that may return an error
-        pub fn spawnErrorable(self: *Self, comptime func: anytype, args: anytype) !usize {
-            const entry = try self.allocator.create(TaskEntry);
-            entry.* = TaskEntry{};
-
-            const idx = self.entries.items.len;
-            try self.entries.append(self.allocator, entry);
-
-            const Wrapper = struct {
-                fn run(task_entry: *TaskEntry, set: *Self, func_args: anytype) void {
-                    if (@call(.auto, func, func_args)) |result| {
-                        task_entry.result = result;
-                    } else |err| {
-                        task_entry.err = err;
-                    }
-                    task_entry.completed.store(true, .release);
-                    _ = set.completed_count.fetchAdd(1, .release);
-                    set.completed_cond.signal();
-                }
-            };
-
-            entry.thread = try std.Thread.spawn(.{}, Wrapper.run, .{ entry, self, args });
-            return idx;
-        }
-
-        /// Wait for all tasks to complete and join threads
-        pub fn joinAll(self: *Self) void {
-            for (self.entries.items) |entry| {
-                if (!entry.joined) {
-                    if (entry.thread) |thread| {
-                        thread.join();
-                        entry.thread = null;
-                    }
-                    entry.joined = true;
-                }
-            }
-        }
-
-        /// Wait for any task to complete and return its result
-        /// Returns null if no tasks remain
-        pub fn joinNext(self: *Self) ?JoinResult {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            // Find a completed but not-yet-joined task
-            for (self.entries.items, 0..) |entry, idx| {
-                if (entry.completed.load(.acquire) and !entry.joined) {
-                    if (entry.thread) |thread| {
-                        thread.join();
-                        entry.thread = null;
-                    }
-                    entry.joined = true;
-
-                    if (entry.err) |err| {
-                        return JoinResult{ .idx = idx, .value = .{ .err = err } };
-                    } else {
-                        return JoinResult{ .idx = idx, .value = .{ .ok = entry.result } };
-                    }
-                }
-            }
-
-            // Check if any tasks are still running
-            var has_pending = false;
-            for (self.entries.items) |entry| {
-                if (!entry.joined) {
-                    has_pending = true;
-                    break;
-                }
-            }
-            if (!has_pending) return null;
-
-            // Wait for completion signal
-            self.completed_cond.wait(&self.mutex);
-
-            // Try again after wakeup
-            for (self.entries.items, 0..) |entry, idx| {
-                if (entry.completed.load(.acquire) and !entry.joined) {
-                    if (entry.thread) |thread| {
-                        thread.join();
-                        entry.thread = null;
-                    }
-                    entry.joined = true;
-
-                    if (entry.err) |err| {
-                        return JoinResult{ .idx = idx, .value = .{ .err = err } };
-                    } else {
-                        return JoinResult{ .idx = idx, .value = .{ .ok = entry.result } };
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        /// Get number of pending (not yet joined) tasks
-        pub fn len(self: *const Self) usize {
-            var pending: usize = 0;
-            for (self.entries.items) |entry| {
-                if (!entry.joined) pending += 1;
-            }
-            return pending;
-        }
-
-        /// Check if all tasks have been joined
-        pub fn isEmpty(self: *const Self) bool {
-            return self.len() == 0;
-        }
-
-        pub const JoinResult = struct {
-            idx: usize,
-            value: union(enum) {
-                ok: ?T,
-                err: anyerror,
-            },
-        };
-    };
-}
-
-/// Broadcast channel - multiple producers, multiple consumers
-/// Each message is delivered to all consumers with configurable capacity.
-pub fn BroadcastChannel(comptime T: type) type {
-    return struct {
-        subscribers: std.ArrayList(*Subscriber),
-        allocator: std.mem.Allocator,
-        capacity: usize,
-        mutex: compat.Mutex = .{},
-        notify: compat.Condition = .{},
-
-        const Self = @This();
-        pub const default_capacity: usize = 16;
-
-        const Subscriber = struct {
-            queue: std.ArrayList(T),
-            allocator: std.mem.Allocator,
-            capacity: usize,
-            lagged: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
-            mutex: compat.Mutex = .{},
-
-            pub fn initWithCapacity(allocator: std.mem.Allocator, cap: usize) Subscriber {
-                return .{ .queue = .empty, .allocator = allocator, .capacity = cap };
-            }
-
-            pub fn deinit(self: *Subscriber) void {
-                self.queue.deinit(self.allocator);
-            }
-
-            /// Check how many messages were dropped due to lag
-            pub fn lagCount(self: *Subscriber) usize {
-                return self.lagged.swap(0, .acquire);
-            }
-
-            /// Receive from this subscriber's queue (thread-safe, non-blocking)
-            pub fn recv(self: *Subscriber) ?T {
-                self.mutex.lock();
-                defer self.mutex.unlock();
-                if (self.queue.items.len > 0) {
-                    return self.queue.orderedRemove(0);
-                }
-                return null;
-            }
-        };
-
-        pub fn init(allocator: std.mem.Allocator) Self {
-            return initWithCapacity(allocator, default_capacity);
-        }
-
-        pub fn initWithCapacity(allocator: std.mem.Allocator, capacity: usize) Self {
-            return Self{
-                .subscribers = .empty,
-                .allocator = allocator,
-                .capacity = capacity,
-            };
-        }
-
-        pub fn deinit(self: *Self) void {
-            for (self.subscribers.items) |sub| {
-                sub.deinit();
-                self.allocator.destroy(sub);
-            }
-            self.subscribers.deinit(self.allocator);
-        }
-
-        /// Subscribe to the broadcast channel
-        pub fn subscribe(self: *Self) !*Subscriber {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            const sub = try self.allocator.create(Subscriber);
-            sub.* = Subscriber.initWithCapacity(self.allocator, self.capacity);
-            try self.subscribers.append(self.allocator, sub);
-            return sub;
-        }
-
-        /// Send a message to all subscribers
-        /// Slow receivers will have oldest messages dropped (lagged)
-        pub fn send(self: *Self, value: T) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            for (self.subscribers.items) |sub| {
-                sub.mutex.lock();
-                defer sub.mutex.unlock();
-                // Drop oldest if at capacity
-                if (sub.queue.items.len >= sub.capacity) {
-                    _ = sub.queue.orderedRemove(0);
-                    _ = sub.lagged.fetchAdd(1, .monotonic);
-                }
-                try sub.queue.append(sub.allocator, value);
-            }
-            self.notify.broadcast();
-        }
-
-        /// Receive from a subscriber's queue (non-blocking, thread-safe)
-        /// Prefer using sub.recv() directly for cleaner code.
-        pub fn recv(sub: *Subscriber) ?T {
-            return sub.recv();
-        }
-
-        /// Blocking receive - waits for a message
-        pub fn recvBlocking(self: *Self, sub: *Subscriber) T {
-            self.mutex.lock();
-
-            while (true) {
-                sub.mutex.lock();
-                if (sub.queue.items.len > 0) {
-                    const item = sub.queue.orderedRemove(0);
-                    sub.mutex.unlock();
-                    self.mutex.unlock();
-                    return item;
-                }
-                sub.mutex.unlock();
-                self.notify.wait(&self.mutex);
-            }
-        }
-
-        /// Unsubscribe and deallocate a subscriber
-        pub fn unsubscribe(self: *Self, sub: *Subscriber) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            // Find and remove from list
-            for (self.subscribers.items, 0..) |s, i| {
-                if (s == sub) {
-                    _ = self.subscribers.orderedRemove(i);
-                    break;
-                }
-            }
-
-            sub.deinit();
-            self.allocator.destroy(sub);
-        }
-
-        /// Get subscriber count
-        pub fn subscriberCount(self: *Self) usize {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            return self.subscribers.items.len;
-        }
-    };
-}
-
-/// Watch channel - single value that can be watched for changes
-/// Similar to tokio::sync::watch
-pub fn WatchChannel(comptime T: type) type {
-    return struct {
-        value: T,
-        version: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-        mutex: compat.Mutex = .{},
-        changed_cond: compat.Condition = .{},
-
-        const Self = @This();
-
-        /// Watcher handle that tracks last seen version
-        pub const Watcher = struct {
-            channel: *Self,
-            last_seen: u64 = 0,
-
-            /// Get current value
-            pub fn borrow(self: *Watcher) T {
-                self.channel.mutex.lock();
-                defer self.channel.mutex.unlock();
-                self.last_seen = self.channel.version.load(.acquire);
-                return self.channel.value;
-            }
-
-            /// Check if value has changed since last borrow
-            pub fn hasChanged(self: *const Watcher) bool {
-                return self.channel.version.load(.acquire) != self.last_seen;
-            }
-
-            /// Wait for value to change (blocking)
-            pub fn changed(self: *Watcher) T {
-                self.channel.mutex.lock();
-                defer self.channel.mutex.unlock();
-
-                while (self.channel.version.load(.acquire) == self.last_seen) {
-                    self.channel.changed_cond.wait(&self.channel.mutex);
-                }
-                self.last_seen = self.channel.version.load(.acquire);
-                return self.channel.value;
-            }
-        };
-
-        pub fn init(initial: T) Self {
-            return Self{ .value = initial };
-        }
-
-        /// Create a watcher for this watch channel
-        pub fn subscribe(self: *Self) Watcher {
-            return Watcher{ .channel = self };
-        }
-
-        /// Send a new value (overwrites previous)
-        pub fn send(self: *Self, value: T) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.value = value;
-            _ = self.version.fetchAdd(1, .release);
-            self.changed_cond.broadcast();
-        }
-
-        /// Get current value (for sender)
-        pub fn borrow(self: *Self) T {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            return self.value;
-        }
-
-        /// Get current version
-        pub fn getVersion(self: *Self) u64 {
-            return self.version.load(.acquire);
-        }
-    };
-}
-
-/// Notify - Simple task notification primitive (like tokio::sync::Notify)
-/// Allows one task to notify waiting tasks.
-/// Uses generation counter to ensure notifyAll() wakes all waiters.
-pub const Notify = struct {
-    waiters: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    generation: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    one_shot_pending: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    mutex: compat.Mutex = .{},
-    cond: compat.Condition = .{},
-
-    const Self = @This();
-
-    pub fn init() Self {
-        return Self{};
-    }
-
-    /// Wait until notified
-    pub fn wait(self: *Self) void {
-        // Fast path - check for pending one-shot notification
-        if (self.one_shot_pending.swap(false, .acquire)) {
-            return;
-        }
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        _ = self.waiters.fetchAdd(1, .monotonic);
-        defer _ = self.waiters.fetchSub(1, .monotonic);
-
-        // Record current generation
-        const my_gen = self.generation.load(.acquire);
-
-        // Wait until generation changes (notifyAll) or one-shot is set (notifyOne)
-        while (self.generation.load(.acquire) == my_gen and !self.one_shot_pending.load(.acquire)) {
-            self.cond.wait(&self.mutex);
-        }
-
-        // Consume one-shot if that's what woke us
-        _ = self.one_shot_pending.swap(false, .acquire);
-    }
-
-    /// Notify one waiting task
-    pub fn notifyOne(self: *Self) void {
-        self.one_shot_pending.store(true, .release);
-        self.cond.signal();
-    }
-
-    /// Notify all waiting tasks
-    pub fn notifyAll(self: *Self) void {
-        // Increment generation to wake all waiters
-        _ = self.generation.fetchAdd(1, .release);
-        self.cond.broadcast();
-    }
-
-    /// Check if there are waiters
-    pub fn hasWaiters(self: *const Self) bool {
-        return self.waiters.load(.acquire) > 0;
-    }
-};
-
-/// OnceCell - Thread-safe lazy initialization (like tokio::sync::OnceCell)
-pub fn OnceCell(comptime T: type) type {
-    return struct {
-        value: ?T = null,
-        initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-        mutex: compat.Mutex = .{},
-
-        const Self = @This();
-
-        pub fn init() Self {
-            return Self{};
-        }
-
-        /// Get or initialize the value
-        pub fn getOrInit(self: *Self, comptime initFn: fn () T) T {
-            // Fast path
-            if (self.initialized.load(.acquire)) {
-                return self.value.?;
-            }
-
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            // Double-check after acquiring lock
-            if (!self.initialized.load(.acquire)) {
-                self.value = initFn();
-                self.initialized.store(true, .release);
-            }
-
-            return self.value.?;
-        }
-
-        /// Get or initialize with error
-        pub fn getOrTryInit(self: *Self, comptime initFn: fn () anyerror!T) !T {
-            if (self.initialized.load(.acquire)) {
-                return self.value.?;
-            }
-
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            if (!self.initialized.load(.acquire)) {
-                self.value = try initFn();
-                self.initialized.store(true, .release);
-            }
-
-            return self.value.?;
-        }
-
-        /// Get value if initialized
-        pub fn get(self: *const Self) ?T {
-            if (self.initialized.load(.acquire)) {
-                return self.value;
-            }
-            return null;
-        }
-
-        /// Check if initialized
-        pub fn isInitialized(self: *const Self) bool {
-            return self.initialized.load(.acquire);
-        }
-
-        /// Set value (only if not initialized)
-        pub fn set(self: *Self, value: T) bool {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            if (self.initialized.load(.acquire)) {
-                return false;
-            }
-
-            self.value = value;
-            self.initialized.store(true, .release);
-            return true;
-        }
-    };
-}
-
-/// CancellationToken - Coordinated graceful shutdown (like tokio_util::sync::CancellationToken)
-pub const CancellationToken = struct {
-    cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    children: std.ArrayList(*CancellationToken) = .empty,
-    allocator: std.mem.Allocator = undefined,
-    mutex: compat.Mutex = .{},
-    notify: Notify = Notify.init(),
-    initialized: bool = false,
-
-    const Self = @This();
-
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return Self{
-            .children = .empty,
-            .allocator = allocator,
-            .initialized = true,
-        };
-    }
-
-    pub fn deinit(self: *Self) void {
-        if (self.initialized) {
-            // Recursively deinit and destroy all child tokens
-            for (self.children.items) |child_token| {
-                child_token.deinit();
-                self.allocator.destroy(child_token);
-            }
-            self.children.deinit(self.allocator);
-        }
-    }
-
-    /// Check if cancellation was requested
-    pub fn isCancelled(self: *const Self) bool {
-        return self.cancelled.load(.acquire);
-    }
-
-    /// Request cancellation
-    pub fn cancel(self: *Self) void {
-        self.cancelled.store(true, .release);
-        self.notify.notifyAll();
-
-        // Cancel children
-        if (self.initialized) {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            for (self.children.items) |child_token| {
-                child_token.cancel();
-            }
-        }
-    }
-
-    /// Wait until cancelled
-    pub fn waitForCancellation(self: *Self) void {
-        while (!self.isCancelled()) {
-            self.notify.wait();
-        }
-    }
-
-    /// Create a child token
-    pub fn child(self: *Self) !*CancellationToken {
-        if (!self.initialized) return error.NotInitialized;
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        const child_token = try self.allocator.create(CancellationToken);
-        child_token.* = Self.init(self.allocator);
-
-        // Inherit cancelled state
-        if (self.isCancelled()) {
-            child_token.cancelled.store(true, .release);
-        }
-
-        try self.children.append(self.allocator, child_token);
-        return child_token;
-    }
-};
-
-/// RuntimeBuilder - Fluent builder for runtime configuration (like tokio::runtime::Builder)
-pub const RuntimeBuilder = struct {
-    options: RuntimeOptions = .{},
-    allocator: std.mem.Allocator,
-
-    const Self = @This();
-
-    pub fn new(allocator: std.mem.Allocator) Self {
-        return Self{ .allocator = allocator };
-    }
-
-    /// Configure as multi-threaded runtime. `std.Io.Threaded` already manages a
-    /// worker pool; retained for Tokio API compatibility.
-    pub fn multiThread(self: *Self) *Self {
-        return self;
-    }
-
-    /// Configure as single-threaded runtime (advisory; for API compatibility).
-    pub fn currentThread(self: *Self) *Self {
-        return self;
-    }
-
-    /// Set worker thread count (advisory; `std.Io.Threaded` sizes its own pool).
-    pub fn workerThreads(self: *Self, count: u32) *Self {
-        _ = count;
-        return self;
-    }
-
-    /// Enable all features (advisory; for API compatibility).
-    pub fn enableAll(self: *Self) *Self {
-        return self;
-    }
-
-    /// Enable time (timers) - always enabled by default.
-    pub fn enableTime(self: *Self) *Self {
-        return self;
-    }
-
-    /// Enable I/O (advisory; for API compatibility).
-    pub fn enableIo(self: *Self) *Self {
-        return self;
-    }
-
-    /// Set per-task stack size.
-    pub fn threadStackSize(self: *Self, size: usize) *Self {
-        self.options.stack_size = size;
-        return self;
-    }
-
-    /// Build the runtime.
-    pub fn build(self: *Self) Runtime {
-        return Runtime.init(self.allocator, self.options);
-    }
-};
-
-/// Convenience function to create a runtime builder
-pub fn runtimeBuilder(allocator: std.mem.Allocator) RuntimeBuilder {
-    return RuntimeBuilder.new(allocator);
-}
-
-/// Interval - Repeating timer (like tokio::time::interval)
-pub const Interval = struct {
-    period_ms: u64,
-    last_tick: u64,
-
-    const Self = @This();
-
-    pub fn init(period_ms: u64) Self {
-        return Self{
-            .period_ms = period_ms,
-            .last_tick = milliTime(),
-        };
-    }
-
-    /// Wait for the next tick
-    pub fn tick(self: *Self) void {
-        const now = milliTime();
-        const next_tick = self.last_tick + self.period_ms;
-
-        if (now < next_tick) {
-            sleep(next_tick - now);
-        }
-
-        self.last_tick = milliTime();
-    }
-
-    /// Reset the interval
-    pub fn reset(self: *Self) void {
-        self.last_tick = milliTime();
-    }
-
-    /// Get the period
-    pub fn period(self: *const Self) u64 {
-        return self.period_ms;
-    }
-};
-
-/// Create an interval timer
-pub fn interval(period_ms: u64) Interval {
-    return Interval.init(period_ms);
-}
-
-/// Timeout wrapper that returns error on timeout
-pub fn timeoutFn(comptime func: anytype, args: anytype, timeout_ms: u64) !@TypeOf(@call(.auto, func, args)) {
-    const start = milliTime();
-
-    // For simple blocking execution
-    const result = @call(.auto, func, args);
-
-    const elapsed = milliTime() - start;
-    if (elapsed > timeout_ms) {
-        return error.Timeout;
-    }
-
-    return result;
-}
+/// JoinSet for managing multiple blocking tasks on dedicated OS threads.
+pub const JoinSet = join_set_mod.JoinSet;
+
+pub const BroadcastChannel = tokio_sync.BroadcastChannel;
+pub const WatchChannel = tokio_sync.WatchChannel;
+pub const Notify = tokio_sync.Notify;
+pub const OnceCell = tokio_sync.OnceCell;
+pub const CancellationToken = tokio_sync.CancellationToken;
+
+/// Legacy/advisory runtime helpers retained for source compatibility.
+pub const RuntimeBuilder = compat.RuntimeBuilder;
+pub const runtimeBuilder = compat.runtimeBuilder;
+
+/// Time helpers are canonical under `zsync.time`; root aliases remain stable.
+pub const Interval = time.Interval;
+pub const interval = time.interval;
+pub const timeoutFn = time.timeoutFn;
 
 // Version information - pulled from build.zig.zon via build options
 const build_options = @import("build_options");
@@ -1125,7 +382,7 @@ pub fn printVersion() void {
     std.debug.print("zsync v{s} - async runtime for Zig\n", .{VERSION});
     std.debug.print("Core Features:\n", .{});
     std.debug.print("  ✅ Colorblind Async/Await\n", .{});
-    std.debug.print("  ✅ Multiple Execution Models\n", .{});
+    std.debug.print("  ✅ std.Io.Threaded Backend\n", .{});
     std.debug.print("  ✅ Future Combinators\n", .{});
     std.debug.print("  ✅ Cooperative Cancellation\n", .{});
     std.debug.print("  ✅ Zero-Cost Abstractions\n", .{});
@@ -1156,22 +413,9 @@ pub fn printVersion() void {
     std.debug.print("\nBacked by std.Io (std.Io.Threaded)\n", .{});
 }
 
-/// Simple hello world example showcasing task spawning on `std.Io`.
-pub fn helloWorld(allocator: std.mem.Allocator) !void {
-    const HelloTask = struct {
-        fn task() void {
-            std.debug.print("zsync - async runtime for Zig\n", .{});
-            std.debug.print("powered by std.Io\n", .{});
-        }
-    };
-
-    std_runtime.run(allocator, HelloTask.task, .{});
-}
-
 // Backward compatibility exports
-pub const examples = struct {
-    pub const helloWorld = @This().helloWorld;
-};
+pub const helloWorld = compat.helloWorld;
+pub const examples = compat.examples;
 
 // Tests
 test "zsync basic functionality" {
@@ -1226,10 +470,8 @@ test "Version information" {
     try testing.expect(VERSION_PARSED.patch == VERSION_PATCH);
 }
 
-/// Legacy compatibility function
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
+/// Legacy compatibility function.
+pub const add = compat.add;
 
 test "legacy compatibility" {
     const testing = std.testing;
@@ -1268,6 +510,17 @@ test "Tokio-style WatchChannel" {
     watch.send(100);
     try testing.expect(watch.borrow() == 100);
     try testing.expect(watch.getVersion() == 2);
+
+    var watcher = watch.subscribe();
+    _ = watcher.borrow();
+    try testing.expect(watcher.changedTimeout(1) == null);
+    watch.send(101);
+    try testing.expect(watcher.changedTimeout(1).? == 101);
+
+    var token = CancellationToken.init(testing.allocator);
+    defer token.deinit();
+    token.cancel();
+    try testing.expectError(error.Cancelled, watcher.changedCancellable(&token));
 }
 
 test "Tokio-style BroadcastChannel" {
@@ -1287,6 +540,15 @@ test "Tokio-style BroadcastChannel" {
 
     // Queue should be empty now
     try testing.expect(BroadcastChannel(u32).recv(sub1) == null);
+    try testing.expect(broadcast.recvBlockingTimeout(sub1, 1) == null);
+
+    try broadcast.send(99);
+    try testing.expect(broadcast.recvBlockingTimeout(sub1, 1).? == 99);
+
+    var token = CancellationToken.init(allocator);
+    defer token.deinit();
+    token.cancel();
+    try testing.expectError(error.Cancelled, broadcast.recvBlockingCancellable(sub1, &token));
 }
 
 test "Tokio-style CancellationToken" {
@@ -1435,6 +697,12 @@ test "Channel trySend/tryRecv fast paths" {
 // here so the entire public surface is continuously compiled and its tests run —
 // this is what prevents a module from silently rotting against std.Io changes.
 test {
+    _ = @import("task.zig");
+    _ = @import("time.zig");
+    _ = @import("net.zig");
+    _ = @import("process.zig");
+    _ = @import("signal.zig");
+    _ = @import("compat_api.zig");
     _ = @import("compat/thread.zig");
     _ = @import("std_runtime.zig");
     _ = @import("spawn.zig");
@@ -1443,8 +711,10 @@ test {
     _ = @import("future.zig");
     _ = @import("executor.zig");
     _ = @import("sync.zig");
+    _ = @import("tokio_sync.zig");
     _ = @import("sleep.zig");
     _ = @import("select.zig");
+    _ = @import("join_set.zig");
     _ = @import("nursery.zig");
     _ = @import("buffer_pool.zig");
     _ = @import("streams.zig");
@@ -1461,6 +731,7 @@ test {
     // comptime on non-wasm targets.
     _ = @import("wasm/microtask.zig");
     _ = @import("wasm/async.zig");
+    _ = @import("wasm/net.zig");
 
     if (builtin.target.cpu.arch != .wasm32) {
         _ = @import("networking.zig");
@@ -1474,7 +745,5 @@ test {
         _ = @import("plugin/system.zig");
         _ = @import("script/runtime.zig");
         _ = @import("compression/stream.zig");
-    } else {
-        _ = @import("wasm/net.zig");
     }
 }

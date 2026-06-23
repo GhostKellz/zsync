@@ -4,6 +4,7 @@
 //! nursery scope exits.
 
 const std = @import("std");
+const compat = @import("compat/thread.zig");
 
 /// Nursery for structured concurrency - ensures all tasks complete.
 ///
@@ -12,6 +13,8 @@ const std = @import("std");
 pub const Nursery = struct {
     io: std.Io,
     group: std.Io.Group,
+    error_mutex: compat.Mutex = .{},
+    first_error: ?anyerror = null,
 
     const Self = @This();
 
@@ -20,20 +23,45 @@ pub const Nursery = struct {
         return .{ .io = io, .group = .init };
     }
 
-    /// Spawn a task within this nursery. Task errors are isolated to the task;
-    /// use a shared result slot if you need to observe them.
+    fn recordError(self: *Self, err: anyerror) void {
+        self.error_mutex.lock();
+        defer self.error_mutex.unlock();
+        if (self.first_error == null) self.first_error = err;
+    }
+
+    fn takeError(self: *Self) ?anyerror {
+        self.error_mutex.lock();
+        defer self.error_mutex.unlock();
+        const err = self.first_error;
+        self.first_error = null;
+        return err;
+    }
+
+    /// Spawn a task within this nursery. The first task error is reported by
+    /// `wait()`, so errors only disappear if the caller intentionally skips
+    /// observation.
     pub fn spawn(self: *Self, comptime task_fn: anytype, args: anytype) !void {
+        const Return = @typeInfo(@TypeOf(task_fn)).@"fn".return_type.?;
         const Wrapper = struct {
-            fn run(call_args: @TypeOf(args)) void {
-                _ = @call(.auto, task_fn, call_args) catch {};
+            fn run(nursery: *Self, call_args: @TypeOf(args)) void {
+                switch (@typeInfo(Return)) {
+                    .error_union => {
+                        _ = @call(.auto, task_fn, call_args) catch |err| {
+                            nursery.recordError(err);
+                            return;
+                        };
+                    },
+                    else => _ = @call(.auto, task_fn, call_args),
+                }
             }
         };
-        self.group.async(self.io, Wrapper.run, .{args});
+        self.group.async(self.io, Wrapper.run, .{ self, args });
     }
 
     /// Wait for all tasks in the nursery to complete.
     pub fn wait(self: *Self) !void {
         try self.group.await(self.io);
+        if (self.takeError()) |err| return err;
     }
 
     /// Request cancellation of all tasks and wait for them to unwind.
@@ -100,4 +128,25 @@ test "nursery with RAII pattern" {
     Shared.ran.store(0, .release);
     std_runtime.run(std.testing.allocator, Shared.mainTask, .{});
     try std.testing.expectEqual(@as(u32, 3), Shared.ran.load(.acquire));
+}
+
+test "nursery wait observes task error" {
+    const std_runtime = @import("std_runtime.zig");
+    const Shared = struct {
+        var observed: bool = false;
+        fn failTask() !void {
+            return error.NurseryTaskFailed;
+        }
+        fn mainTask() void {
+            const io = std_runtime.getGlobalIo().?;
+            var nursery = Nursery.init(io);
+            defer nursery.deinit();
+            nursery.spawn(failTask, .{}) catch unreachable;
+            std.testing.expectError(error.NurseryTaskFailed, nursery.wait()) catch unreachable;
+            observed = true;
+        }
+    };
+    Shared.observed = false;
+    std_runtime.run(std.testing.allocator, Shared.mainTask, .{});
+    try std.testing.expect(Shared.observed);
 }

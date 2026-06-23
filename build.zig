@@ -201,6 +201,7 @@ pub fn build(b: *std.Build) void {
         "examples/semaphore.zig",
         "examples/spawn_basic.zig",
         "examples/executor.zig",
+        "examples/process_runner.zig",
     };
 
     for (example_files) |example_path| {

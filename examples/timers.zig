@@ -14,7 +14,7 @@ pub fn main() !void {
 
     // Simple sleep
     std.debug.print("\nSleeping for 100ms...\n", .{});
-    zsync.sleep(100);
+    zsync.time.sleep(100);
 
     const after_sleep = zsync.milliTime();
     std.debug.print("Elapsed: {}ms\n", .{after_sleep - start_ms});

@@ -341,6 +341,41 @@ pub const SelectResult = union(enum) {
     timeout: void,
 };
 
+/// Tokio-style multi-producer single-consumer facade. The underlying
+/// implementation currently supports cloneable sender/receiver handles; this
+/// namespace gives new code a stable, familiar entry point while preserving the
+/// existing `bounded`/`unbounded` return shape.
+pub const mpsc = struct {
+    pub fn Sender(comptime T: type) type {
+        return @import("channel.zig").Sender(T);
+    }
+
+    pub fn Receiver(comptime T: type) type {
+        return @import("channel.zig").Receiver(T);
+    }
+
+    pub fn bounded(
+        comptime T: type,
+        allocator: std.mem.Allocator,
+        capacity: u32,
+    ) @TypeOf(@import("channel.zig").bounded(T, allocator, capacity)) {
+        return @import("channel.zig").bounded(T, allocator, capacity);
+    }
+
+    pub fn unbounded(
+        comptime T: type,
+        allocator: std.mem.Allocator,
+    ) @TypeOf(@import("channel.zig").unbounded(T, allocator)) {
+        return @import("channel.zig").unbounded(T, allocator);
+    }
+};
+
+pub const oneshot = struct {
+    pub fn Channel(comptime T: type) type {
+        return OneShot(T);
+    }
+};
+
 /// Simple select implementation (proof of concept)
 pub fn select2(
     comptime T1: type,
@@ -387,13 +422,27 @@ test "channel send and receive" {
     try testing.expect(value == 42);
 }
 
+test "mpsc facade" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const ch = try mpsc.bounded(u32, allocator, 2);
+    defer {
+        ch.channel.deinit();
+        allocator.destroy(ch.channel);
+    }
+
+    try ch.sender.send(9);
+    try testing.expectEqual(@as(u32, 9), try ch.receiver.recv());
+}
+
 test "oneshot channel" {
     const testing = std.testing;
 
-    var oneshot = OneShot(i32).init();
+    var one_shot = OneShot(i32).init();
 
-    try oneshot.send(100);
-    const value = try oneshot.recv();
+    try one_shot.send(100);
+    const value = try one_shot.recv();
     try testing.expect(value == 100);
 }
 

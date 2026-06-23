@@ -4,6 +4,11 @@
 const std = @import("std");
 const compat = @import("compat/thread.zig");
 
+fn timeoutExpired(start: compat.Instant, timeout_ms: u64) bool {
+    const now = compat.Instant.now() catch return true;
+    return now.since(start) >= timeout_ms * std.time.ns_per_ms;
+}
+
 /// Create a bounded channel with fixed capacity
 pub fn bounded(comptime T: type, allocator: std.mem.Allocator, capacity: usize) !Channel(T) {
     return Channel(T).init(allocator, capacity);
@@ -78,6 +83,25 @@ pub fn Channel(comptime T: type) type {
             self.not_empty.signal();
         }
 
+        /// Send an item, returning false if the timeout expires before space is available.
+        pub fn sendTimeout(self: *Self, item: T, timeout_ms: u64) !bool {
+            const start = try compat.Instant.now();
+            while (true) {
+                if (try self.trySend(item)) return true;
+                if (timeoutExpired(start, timeout_ms)) return false;
+                compat.sleepNanos(1 * std.time.ns_per_ms);
+            }
+        }
+
+        /// Send an item unless cancelled first.
+        pub fn sendCancellable(self: *Self, item: T, token: anytype) !void {
+            while (true) {
+                if (token.isCancelled()) return error.Cancelled;
+                if (try self.trySend(item)) return;
+                compat.sleepNanos(1 * std.time.ns_per_ms);
+            }
+        }
+
         /// Receive an item from the channel (blocks if empty)
         pub fn recv(self: *Self) !T {
             self.mutex.lock();
@@ -100,6 +124,27 @@ pub fn Channel(comptime T: type) type {
             self.not_full.signal();
 
             return item;
+        }
+
+        /// Receive an item, returning null if the timeout expires before a value arrives.
+        pub fn recvTimeout(self: *Self, timeout_ms: u64) !?T {
+            const start = try compat.Instant.now();
+            while (true) {
+                if (self.tryRecv()) |item| return item;
+                if (self.closed.load(.acquire)) return error.ChannelClosed;
+                if (timeoutExpired(start, timeout_ms)) return null;
+                compat.sleepNanos(1 * std.time.ns_per_ms);
+            }
+        }
+
+        /// Receive an item unless cancelled first.
+        pub fn recvCancellable(self: *Self, token: anytype) !T {
+            while (true) {
+                if (token.isCancelled()) return error.Cancelled;
+                if (self.tryRecv()) |item| return item;
+                if (self.closed.load(.acquire)) return error.ChannelClosed;
+                compat.sleepNanos(1 * std.time.ns_per_ms);
+            }
         }
 
         /// Try to send without blocking
@@ -197,6 +242,13 @@ pub fn UnboundedChannel(comptime T: type) type {
             self.not_empty.signal();
         }
 
+        /// Send an item. Unbounded channels never wait for capacity.
+        pub fn sendTimeout(self: *Self, item: T, timeout_ms: u64) !bool {
+            _ = timeout_ms;
+            try self.send(item);
+            return true;
+        }
+
         /// Receive an item from the channel (blocks if empty)
         pub fn recv(self: *Self) !T {
             self.mutex.lock();
@@ -210,6 +262,27 @@ pub fn UnboundedChannel(comptime T: type) type {
             }
 
             return self.items.orderedRemove(0);
+        }
+
+        /// Receive an item, returning null if the timeout expires before a value arrives.
+        pub fn recvTimeout(self: *Self, timeout_ms: u64) !?T {
+            const start = try compat.Instant.now();
+            while (true) {
+                if (self.tryRecv()) |item| return item;
+                if (self.closed.load(.acquire)) return error.ChannelClosed;
+                if (timeoutExpired(start, timeout_ms)) return null;
+                compat.sleepNanos(1 * std.time.ns_per_ms);
+            }
+        }
+
+        /// Receive an item unless cancelled first.
+        pub fn recvCancellable(self: *Self, token: anytype) !T {
+            while (true) {
+                if (token.isCancelled()) return error.Cancelled;
+                if (self.tryRecv()) |item| return item;
+                if (self.closed.load(.acquire)) return error.ChannelClosed;
+                compat.sleepNanos(1 * std.time.ns_per_ms);
+            }
         }
 
         /// Try to receive without blocking
@@ -296,4 +369,53 @@ test "channel close behavior" {
     try testing.expect(ch.isClosed());
     try testing.expectError(error.ChannelClosed, ch.send(42));
     try testing.expectError(error.ChannelClosed, ch.recv());
+}
+
+test "bounded channel timeout variants" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var ch = try bounded(i32, allocator, 1);
+    defer ch.deinit();
+
+    try testing.expect(try ch.sendTimeout(1, 1));
+    try testing.expect(!(try ch.sendTimeout(2, 1)));
+    try testing.expectEqual(@as(?i32, 1), try ch.recvTimeout(1));
+    try testing.expectEqual(@as(?i32, null), try ch.recvTimeout(1));
+}
+
+test "bounded channel cancellable variants" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const Token = struct {
+        cancelled: bool,
+        pub fn isCancelled(self: *const @This()) bool {
+            return self.cancelled;
+        }
+    };
+
+    var ch = try bounded(i32, allocator, 1);
+    defer ch.deinit();
+
+    const open = Token{ .cancelled = false };
+    try ch.sendCancellable(1, &open);
+    try testing.expectEqual(@as(i32, 1), try ch.recvCancellable(&open));
+
+    const cancelled = Token{ .cancelled = true };
+    try testing.expectError(error.Cancelled, ch.recvCancellable(&cancelled));
+    try ch.send(2);
+    try testing.expectError(error.Cancelled, ch.sendCancellable(3, &cancelled));
+}
+
+test "unbounded channel timeout variants" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var ch = try unbounded(i32, allocator);
+    defer ch.deinit();
+
+    try testing.expect(try ch.sendTimeout(7, 1));
+    try testing.expectEqual(@as(?i32, 7), try ch.recvTimeout(1));
+    try testing.expectEqual(@as(?i32, null), try ch.recvTimeout(1));
 }

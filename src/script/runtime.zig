@@ -875,6 +875,24 @@ test "interpreter reports errors" {
     try testing.expect(task.error_msg != null);
 }
 
+test "interpreter reports syntax and type errors" {
+    const testing = std.testing;
+
+    var runtime = Runtime.init(testing.allocator, .{});
+    defer runtime.deinit();
+
+    var engine = ScriptEngine.init(testing.allocator, &runtime);
+    defer engine.deinit();
+
+    var syntax_task = AsyncScriptTask.init(&engine, "let = 1");
+    defer syntax_task.deinit();
+    try testing.expectError(error.SyntaxError, syntax_task.execute());
+
+    var type_task = AsyncScriptTask.init(&engine, "\"x\" * 2");
+    defer type_task.deinit();
+    try testing.expectError(error.TypeError, type_task.execute());
+}
+
 test "ffi calls zig function with script args" {
     const testing = std.testing;
 
@@ -890,4 +908,23 @@ test "ffi calls zig function with script args" {
     };
     const result = try FFI.callZigFunction(@TypeOf(Math.add), Math.add, &args);
     try testing.expectEqual(@as(f64, 7.0), result.toNumber().?);
+}
+
+test "ffi reports arity and type mismatches" {
+    const testing = std.testing;
+
+    const Math = struct {
+        fn add(a: f64, b: f64) f64 {
+            return a + b;
+        }
+    };
+
+    const too_few = [_]ScriptValue{ScriptValue.fromNumber(1)};
+    try testing.expectError(error.NotEnoughArguments, FFI.callZigFunction(@TypeOf(Math.add), Math.add, &too_few));
+
+    const wrong_type = [_]ScriptValue{
+        ScriptValue.fromNumber(1),
+        ScriptValue.fromBool(true),
+    };
+    try testing.expectError(error.TypeMismatch, FFI.callZigFunction(@TypeOf(Math.add), Math.add, &wrong_type));
 }

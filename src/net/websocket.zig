@@ -34,6 +34,13 @@ pub const OpCode = enum(u4) {
     pub fn isControl(self: OpCode) bool {
         return @intFromEnum(self) >= 0x8;
     }
+
+    pub fn isKnown(self: OpCode) bool {
+        return switch (self) {
+            .continuation, .text, .binary, .close, .ping, .pong => true,
+            else => false,
+        };
+    }
 };
 
 /// WebSocket Frame
@@ -279,6 +286,10 @@ pub const WebSocketConnection = struct {
                     const opcode = self.fragment_opcode.?;
                     self.fragment_opcode = null;
                     const data = try self.fragment_buffer.toOwnedSlice(self.allocator);
+                    if (opcode == .text and !std.unicode.utf8ValidateSlice(data)) {
+                        self.allocator.free(data);
+                        return Error.InvalidUtf8;
+                    }
 
                     return Message{
                         .type = if (opcode == .text) .text else .binary,
@@ -287,8 +298,21 @@ pub const WebSocketConnection = struct {
                     };
                 }
             } else {
+                if (frame.opcode != .text and frame.opcode != .binary) {
+                    self.allocator.free(frame.payload);
+                    return Error.InvalidOpCode;
+                }
+                if (self.fragment_opcode != null) {
+                    self.allocator.free(frame.payload);
+                    return Error.ProtocolError;
+                }
+
                 // New message
                 if (frame.fin) {
+                    if (frame.opcode == .text and !std.unicode.utf8ValidateSlice(frame.payload)) {
+                        self.allocator.free(frame.payload);
+                        return Error.InvalidUtf8;
+                    }
                     // Complete message in single frame
                     return Message{
                         .type = if (frame.opcode == .text) .text else .binary,
@@ -320,7 +344,9 @@ pub const WebSocketConnection = struct {
         if (rsv != 0) return Error.ProtocolError; // RSV bits must be 0
 
         const opcode: OpCode = @enumFromInt(@as(u4, @truncate(byte0 & 0x0F)));
+        if (!opcode.isKnown()) return Error.InvalidOpCode;
         const masked = (byte1 & 0x80) != 0;
+        if (masked == self.is_client) return Error.ProtocolError;
         var payload_len: u64 = byte1 & 0x7F;
 
         // Extended payload length
@@ -332,9 +358,14 @@ pub const WebSocketConnection = struct {
             try self.ensureBytes(8);
             payload_len = std.mem.readInt(u64, self.recv_buffer[self.recv_pos..][0..8], .big);
             self.recv_pos += 8;
+            if ((payload_len & (@as(u64, 1) << 63)) != 0) return Error.ProtocolError;
         }
 
         if (payload_len > MAX_PAYLOAD_SIZE) return Error.PayloadTooLarge;
+        if (opcode.isControl()) {
+            if (!fin) return Error.ProtocolError;
+            if (payload_len > 125) return Error.ProtocolError;
+        }
 
         // Read mask key if present
         var mask_key: [4]u8 = undefined;
@@ -908,4 +939,105 @@ test "websocket handshake round-trip over loopback" {
 
     try server_result;
     try client_result;
+}
+
+fn appendMaskedFrame(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    fin: bool,
+    opcode: u8,
+    payload: []const u8,
+) !void {
+    const mask_key: [4]u8 = .{ 0x11, 0x22, 0x33, 0x44 };
+    try out.append(allocator, (if (fin) @as(u8, 0x80) else 0x00) | opcode);
+    if (payload.len < 126) {
+        try out.append(allocator, 0x80 | @as(u8, @intCast(payload.len)));
+    } else {
+        try out.append(allocator, 0x80 | 126);
+        try out.append(allocator, @intCast(payload.len >> 8));
+        try out.append(allocator, @intCast(payload.len & 0xff));
+    }
+    try out.appendSlice(allocator, &mask_key);
+    for (payload, 0..) |byte, i| {
+        try out.append(allocator, byte ^ mask_key[i % 4]);
+    }
+}
+
+fn websocketExpectRecvErrorServer(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    server: *net.Server,
+    expected: anyerror,
+) !void {
+    const stream = try server.accept(io);
+
+    var conn = try WebSocketConnection.init(allocator, io, stream, false);
+    defer conn.deinit();
+
+    try std.testing.expectError(expected, conn.recv());
+}
+
+fn websocketRawFrameClient(io: std.Io, port: u16, frame: []const u8) !void {
+    const addr = net.IpAddress.parse("127.0.0.1", port) catch unreachable;
+    const stream = try addr.connect(io, .{ .mode = .stream });
+    defer stream.close(io);
+    try streamWriteAll(io, stream, frame);
+}
+
+fn expectServerRecvErrorFromRawFrame(allocator: std.mem.Allocator, port: u16, frame: []const u8, expected: anyerror) !void {
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const addr = net.IpAddress.parse("127.0.0.1", port) catch unreachable;
+    var server = addr.listen(io, .{ .reuse_address = true }) catch |err| switch (err) {
+        error.AddressInUse => return error.SkipZigTest,
+        else => return err,
+    };
+    defer server.deinit(io);
+
+    var server_future = try io.concurrent(websocketExpectRecvErrorServer, .{ io, allocator, &server, expected });
+    const client_result = websocketRawFrameClient(io, port, frame);
+    const server_result = server_future.await(io);
+
+    try server_result;
+    try client_result;
+}
+
+test "websocket rejects unmasked client frame" {
+    const frame = [_]u8{ 0x81, 0x02, 'h', 'i' };
+    try expectServerRecvErrorFromRawFrame(std.testing.allocator, 39_130, &frame, Error.ProtocolError);
+}
+
+test "websocket rejects oversized control frame" {
+    const allocator = std.testing.allocator;
+    var frame: std.ArrayList(u8) = .empty;
+    defer frame.deinit(allocator);
+
+    const payload = try allocator.alloc(u8, 126);
+    defer allocator.free(payload);
+    @memset(payload, 'x');
+
+    try appendMaskedFrame(allocator, &frame, true, 0x9, payload);
+    try expectServerRecvErrorFromRawFrame(allocator, 39_131, frame.items, Error.ProtocolError);
+}
+
+test "websocket rejects invalid utf8 text" {
+    const allocator = std.testing.allocator;
+    var frame: std.ArrayList(u8) = .empty;
+    defer frame.deinit(allocator);
+
+    const payload = [_]u8{ 0xff, 0xff };
+    try appendMaskedFrame(allocator, &frame, true, 0x1, &payload);
+    try expectServerRecvErrorFromRawFrame(allocator, 39_132, frame.items, Error.InvalidUtf8);
+}
+
+test "websocket rejects new data frame during fragmentation" {
+    const allocator = std.testing.allocator;
+    var frames: std.ArrayList(u8) = .empty;
+    defer frames.deinit(allocator);
+
+    try appendMaskedFrame(allocator, &frames, false, 0x1, "part");
+    try appendMaskedFrame(allocator, &frames, true, 0x1, "new");
+    try expectServerRecvErrorFromRawFrame(allocator, 39_133, frames.items, Error.ProtocolError);
 }

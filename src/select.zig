@@ -5,6 +5,24 @@ const std = @import("std");
 const compat = @import("compat/thread.zig");
 const future_mod = @import("future.zig");
 
+fn cancelAllExcept(comptime T: type, futures: []*future_mod.Future(T), winner: ?*future_mod.Future(T)) void {
+    for (futures) |fut| {
+        if (winner == null or fut != winner.?) fut.cancel();
+    }
+}
+
+fn pollReady(comptime T: type, futures: []*future_mod.Future(T)) !?T {
+    for (futures) |fut| {
+        const poll_result = fut.poll();
+        if (poll_result == .ready) {
+            const result = try fut.await();
+            cancelAllExcept(T, futures, fut);
+            return result;
+        }
+    }
+    return null;
+}
+
 /// Race multiple futures of the same type and return the first to complete
 pub fn select(comptime T: type, allocator: std.mem.Allocator, futures: []*future_mod.Future(T)) !T {
     _ = allocator; // Reserved for future use
@@ -13,30 +31,33 @@ pub fn select(comptime T: type, allocator: std.mem.Allocator, futures: []*future
         return error.NoFutures;
     }
 
-    // Poll all futures in a loop until one completes
     while (true) {
-        for (futures) |fut| {
-            const poll_result = fut.poll();
-            if (poll_result == .ready) {
-                // This future is ready, await it to get the result
-                const result = try fut.await();
+        if (try pollReady(T, futures)) |result| return result;
+        compat.sleepNanos(1 * std.time.ns_per_ms);
+    }
+}
 
-                // Cancel remaining futures
-                for (futures) |other_fut| {
-                    if (other_fut != fut) {
-                        other_fut.cancel();
-                    }
-                }
+/// Race multiple futures until one completes or a cancellation token is cancelled.
+/// `token` may be any pointer-like value with an `isCancelled() bool` method.
+pub fn selectCancellable(
+    comptime T: type,
+    allocator: std.mem.Allocator,
+    futures: []*future_mod.Future(T),
+    token: anytype,
+) !?T {
+    _ = allocator;
 
-                return result;
-            } else if (poll_result == .cancelled) {
-                // Skip cancelled futures
-                continue;
-            }
+    if (futures.len == 0) {
+        return error.NoFutures;
+    }
+
+    while (true) {
+        if (token.isCancelled()) {
+            cancelAllExcept(T, futures, null);
+            return error.Cancelled;
         }
-
-        // None ready yet, yield and try again
-        std.Thread.yield() catch {};
+        if (try pollReady(T, futures)) |result| return result;
+        compat.sleepNanos(1 * std.time.ns_per_ms);
     }
 }
 
@@ -61,30 +82,12 @@ pub fn selectTimeout(
         const now = compat.Instant.now() catch return error.ClockUnavailable;
         if (now.since(start) >= timeout_ns) break;
 
-        for (futures) |fut| {
-            const poll_result = fut.poll();
-            if (poll_result == .ready) {
-                const result = try fut.await();
+        if (try pollReady(T, futures)) |result| return result;
 
-                // Cancel remaining futures
-                for (futures) |other_fut| {
-                    if (other_fut != fut) {
-                        other_fut.cancel();
-                    }
-                }
-
-                return result;
-            }
-        }
-
-        // Small sleep to avoid busy-waiting
         compat.sleepNanos(1 * std.time.ns_per_ms);
     }
 
-    // Timeout - cancel all futures
-    for (futures) |fut| {
-        fut.cancel();
-    }
+    cancelAllExcept(T, futures, null);
 
     return null;
 }
@@ -167,4 +170,28 @@ test "all futures" {
     try testing.expectEqual(10, results[0]);
     try testing.expectEqual(20, results[1]);
     try testing.expectEqual(30, results[2]);
+}
+
+test "select cancellable cancels pending futures" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var f1 = try future_mod.Future(i32).init(allocator);
+    defer f1.deinit();
+
+    var f2 = try future_mod.Future(i32).init(allocator);
+    defer f2.deinit();
+
+    const Token = struct {
+        cancelled: bool = true,
+        pub fn isCancelled(self: *const @This()) bool {
+            return self.cancelled;
+        }
+    };
+    const token = Token{};
+
+    var futures = [_]*future_mod.Future(i32){ f1, f2 };
+    try testing.expectError(error.Cancelled, selectCancellable(i32, allocator, &futures, &token));
+    try testing.expect(f1.poll() == .cancelled);
+    try testing.expect(f2.poll() == .cancelled);
 }

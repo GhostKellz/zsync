@@ -4,6 +4,169 @@
 const std = @import("std");
 const compat = @import("compat/thread.zig");
 
+fn timeoutExpired(start: compat.Instant, timeout_ms: u64) bool {
+    const now = compat.Instant.now() catch return true;
+    return now.since(start) >= timeout_ms * std.time.ns_per_ms;
+}
+
+/// Runtime-integrated semaphore backed by `std.Io.Semaphore`.
+pub const IoSemaphore = struct {
+    inner: std.Io.Semaphore,
+    max_permits: usize,
+
+    const Self = @This();
+
+    pub fn init(permits: usize) Self {
+        return .{ .inner = .{ .permits = permits }, .max_permits = permits };
+    }
+
+    pub fn acquire(self: *Self, io: std.Io) std.Io.Cancelable!void {
+        try self.inner.wait(io);
+    }
+
+    pub fn acquireTimeout(self: *Self, io: std.Io, timeout: std.Io.Timeout) std.Io.Semaphore.WaitTimeoutError!void {
+        try self.inner.waitTimeout(io, timeout);
+    }
+
+    pub fn tryAcquire(self: *Self, io: std.Io) bool {
+        self.inner.mutex.lockUncancelable(io);
+        defer self.inner.mutex.unlock(io);
+        if (self.inner.permits == 0) return false;
+        self.inner.permits -= 1;
+        return true;
+    }
+
+    pub fn release(self: *Self, io: std.Io) void {
+        self.inner.mutex.lockUncancelable(io);
+        defer self.inner.mutex.unlock(io);
+        if (self.inner.permits >= self.max_permits) return;
+        self.inner.permits += 1;
+        self.inner.cond.signal(io);
+    }
+
+    pub fn availablePermits(self: *Self, io: std.Io) usize {
+        self.inner.mutex.lockUncancelable(io);
+        defer self.inner.mutex.unlock(io);
+        return self.inner.permits;
+    }
+};
+
+/// Runtime-integrated mutex backed by `std.Io.Mutex`.
+pub const IoMutex = struct {
+    inner: std.Io.Mutex = .init,
+
+    const Self = @This();
+
+    pub fn init() Self {
+        return .{};
+    }
+
+    pub fn lock(self: *Self, io: std.Io) std.Io.Cancelable!void {
+        try self.inner.lock(io);
+    }
+
+    pub fn lockUncancelable(self: *Self, io: std.Io) void {
+        self.inner.lockUncancelable(io);
+    }
+
+    pub fn tryLock(self: *Self) bool {
+        return self.inner.tryLock();
+    }
+
+    pub fn unlock(self: *Self, io: std.Io) void {
+        self.inner.unlock(io);
+    }
+};
+
+/// Runtime-integrated read-write lock backed by `std.Io.RwLock`.
+pub const IoRwLock = struct {
+    inner: std.Io.RwLock = .init,
+
+    const Self = @This();
+
+    pub fn init() Self {
+        return .{};
+    }
+
+    pub fn lockWrite(self: *Self, io: std.Io) std.Io.Cancelable!void {
+        try self.inner.lock(io);
+    }
+
+    pub fn lockWriteUncancelable(self: *Self, io: std.Io) void {
+        self.inner.lockUncancelable(io);
+    }
+
+    pub fn tryLockWrite(self: *Self, io: std.Io) bool {
+        return self.inner.tryLock(io);
+    }
+
+    pub fn unlockWrite(self: *Self, io: std.Io) void {
+        self.inner.unlock(io);
+    }
+
+    pub fn lockRead(self: *Self, io: std.Io) std.Io.Cancelable!void {
+        try self.inner.lockShared(io);
+    }
+
+    pub fn lockReadUncancelable(self: *Self, io: std.Io) void {
+        self.inner.lockSharedUncancelable(io);
+    }
+
+    pub fn tryLockRead(self: *Self, io: std.Io) bool {
+        return self.inner.tryLockShared(io);
+    }
+
+    pub fn unlockRead(self: *Self, io: std.Io) void {
+        self.inner.unlockShared(io);
+    }
+};
+
+/// Runtime-integrated wait group backed by `std.Io.Mutex` and `std.Io.Condition`.
+pub const IoWaitGroup = struct {
+    counter: u32 = 0,
+    mutex: std.Io.Mutex = .init,
+    condition: std.Io.Condition = .init,
+
+    const Self = @This();
+
+    pub fn init() Self {
+        return .{};
+    }
+
+    pub fn add(self: *Self, io: std.Io, delta: u32) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        self.counter += delta;
+    }
+
+    pub fn done(self: *Self, io: std.Io) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        if (self.counter == 0) return;
+        self.counter -= 1;
+        if (self.counter == 0) self.condition.broadcast(io);
+    }
+
+    pub fn wait(self: *Self, io: std.Io) std.Io.Cancelable!void {
+        try self.mutex.lock(io);
+        defer self.mutex.unlock(io);
+        while (self.counter > 0) try self.condition.wait(io, &self.mutex);
+    }
+
+    pub fn waitTimeout(self: *Self, io: std.Io, timeout: std.Io.Timeout) (std.Io.Condition.WaitTimeoutError)!void {
+        const deadline = timeout.toDeadline(io);
+        try self.mutex.lock(io);
+        defer self.mutex.unlock(io);
+        while (self.counter > 0) try self.condition.waitTimeout(io, &self.mutex, deadline);
+    }
+
+    pub fn getCount(self: *Self, io: std.Io) u32 {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        return self.counter;
+    }
+};
+
 /// Semaphore for limiting concurrency
 pub const Semaphore = struct {
     permits: std.atomic.Value(isize),
@@ -47,6 +210,16 @@ pub const Semaphore = struct {
 
         _ = self.permits.fetchSub(1, .release);
         return true;
+    }
+
+    /// Acquire a permit, returning false if the timeout expires first.
+    pub fn acquireTimeout(self: *Self, timeout_ms: u64) bool {
+        const start = compat.Instant.now() catch return false;
+        while (true) {
+            if (self.tryAcquire()) return true;
+            if (timeoutExpired(start, timeout_ms)) return false;
+            compat.sleepNanos(1 * std.time.ns_per_ms);
+        }
     }
 
     /// Release a permit. Does nothing if already at max permits.
@@ -308,6 +481,16 @@ pub const WaitGroup = struct {
         }
     }
 
+    /// Wait for counter to reach zero, returning false on timeout.
+    pub fn waitTimeout(self: *Self, timeout_ms: u64) bool {
+        const start = compat.Instant.now() catch return false;
+        while (true) {
+            if (self.counter.load(.acquire) == 0) return true;
+            if (timeoutExpired(start, timeout_ms)) return false;
+            compat.sleepNanos(1 * std.time.ns_per_ms);
+        }
+    }
+
     /// Get current counter value
     pub fn getCount(self: *Self) u32 {
         return self.counter.load(.monotonic);
@@ -345,6 +528,16 @@ test "semaphore tryAcquire" {
 
     sem.release();
     try testing.expect(sem.tryAcquire());
+}
+
+test "semaphore acquireTimeout" {
+    const testing = std.testing;
+
+    var sem = Semaphore.init(1);
+    try testing.expect(sem.acquireTimeout(1));
+    try testing.expect(!sem.acquireTimeout(1));
+    sem.release();
+    try testing.expect(sem.acquireTimeout(1));
 }
 
 test "semaphore over-release is bounded" {
@@ -473,4 +666,59 @@ test "WaitGroup add and done" {
 
     wg.wait();
     try testing.expectEqual(@as(u32, 4), completed.load(.acquire));
+}
+
+test "WaitGroup waitTimeout" {
+    const testing = std.testing;
+
+    var wg = WaitGroup.init();
+    try testing.expect(wg.waitTimeout(1));
+    wg.add(1);
+    try testing.expect(!wg.waitTimeout(1));
+    wg.done();
+    try testing.expect(wg.waitTimeout(1));
+}
+
+test "runtime-integrated sync primitives" {
+    const RuntimeTask = struct {
+        fn run() void {
+            const io = @import("std_runtime.zig").getGlobalIo().?;
+
+            var sem = IoSemaphore.init(1);
+            std.testing.expect(sem.tryAcquire(io)) catch unreachable;
+            std.testing.expectError(error.Timeout, sem.acquireTimeout(io, .{ .duration = .{
+                .raw = .fromMilliseconds(1),
+                .clock = .awake,
+            } })) catch unreachable;
+            sem.release(io);
+            sem.acquire(io) catch unreachable;
+            sem.release(io);
+
+            var mutex = IoMutex.init();
+            mutex.lock(io) catch unreachable;
+            std.testing.expect(!mutex.tryLock()) catch unreachable;
+            mutex.unlock(io);
+
+            var rw = IoRwLock.init();
+            rw.lockRead(io) catch unreachable;
+            std.testing.expect(rw.tryLockRead(io)) catch unreachable;
+            rw.unlockRead(io);
+            rw.unlockRead(io);
+            rw.lockWrite(io) catch unreachable;
+            std.testing.expect(!rw.tryLockRead(io)) catch unreachable;
+            rw.unlockWrite(io);
+
+            var wg = IoWaitGroup.init();
+            wg.add(io, 1);
+            std.testing.expectError(error.Timeout, wg.waitTimeout(io, .{ .duration = .{
+                .raw = .fromMilliseconds(1),
+                .clock = .awake,
+            } })) catch unreachable;
+            wg.done(io);
+            wg.wait(io) catch unreachable;
+            std.testing.expectEqual(@as(u32, 0), wg.getCount(io)) catch unreachable;
+        }
+    };
+
+    @import("std_runtime.zig").run(std.testing.allocator, RuntimeTask.run, .{});
 }

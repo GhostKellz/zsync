@@ -24,3 +24,10 @@ Use GitHub security reporting for this repository when available. Include:
 The project will try to acknowledge reports promptly, validate the issue, prepare a fix, and coordinate disclosure once a patch is available.
 
 If the report is not security-sensitive, a normal GitHub issue is fine.
+
+## Runtime Security Notes
+
+The docs security page tracks runtime-specific security posture and production
+hardening guidance:
+
+- [docs/security/policy.md](docs/security/policy.md)

@@ -214,7 +214,15 @@ pub const DnsResolver = struct {
 };
 
 /// TLS configuration (mirrors `networking.TlsConfig`).
+pub const TlsBackend = enum {
+    /// WASM guests delegate TLS to the embedding host through `zsync_tcp_connect`.
+    host_bridge,
+};
+
+pub const default_tls_backend: TlsBackend = .host_bridge;
+
 pub const TlsConfig = struct {
+    backend: TlsBackend = default_tls_backend,
     verify_certificates: bool = true,
     ca_bundle_path: ?[]const u8 = null,
     client_cert_path: ?[]const u8 = null,
@@ -465,3 +473,20 @@ pub const WebSocketConnection = struct {
         js.zsync_ws_close(self.handle);
     }
 };
+
+test "wasm net wire address round trip ipv4" {
+    const addr = net.IpAddress.parse("127.0.0.1", 8080) catch unreachable;
+    var wire: [16]u8 = undefined;
+    const info = addrToWire(addr, &wire);
+
+    try std.testing.expectEqual(@as(usize, 4), info.len);
+    try std.testing.expectEqual(@as(u16, 8080), info.port);
+
+    const decoded = try wireToAddr(wire[0..info.len], info.port);
+    try std.testing.expectEqualDeep(addr, decoded);
+}
+
+test "wasm net wire address rejects invalid length" {
+    const bad = [_]u8{ 1, 2, 3 };
+    try std.testing.expectError(error.InvalidAddress, wireToAddr(&bad, 0));
+}

@@ -29,6 +29,7 @@ reactor; it delegates that to the standard library.
 
 - **Built on `std.Io`**: scheduling and I/O backend selection are owned by the standard library
 - **Colorblind async**: the same code runs whether the backend is sync or async (`io.async` / `future.await`)
+- **Tokio-style modules**: `zsync.task`, `zsync.time`, `zsync.net`, `zsync.channel.mpsc`, `zsync.process`, and `zsync.signal` provide stable scan-friendly namespaces
 - **Structured concurrency**: nurseries and `JoinSet` for scoped task lifetimes
 - **Primitives**: bounded/unbounded channels, timers, mutex/condition primitives, broadcast/watch channels
 - **Cross-platform**: Linux, macOS, Windows, BSD, and WASM via `std.Io.Threaded`
@@ -137,26 +138,47 @@ const result = future.await(io);
 
 ## API Examples
 
+Prefer the Tokio-style namespaces for new code:
+
+```zig
+const io = zsync.getGlobalIo() orelse return;
+var stream = try zsync.net.TcpStream.connect(io, "127.0.0.1", 8080);
+defer stream.close();
+
+var timer = zsync.time.interval(1000);
+timer.tick();
+
+const ch = try zsync.channel.mpsc.bounded(u32, allocator, 16);
+try ch.sender.send(42);
+const value = try ch.receiver.recv();
+_ = value;
+```
+
 ### Channel Communication
 
 ```zig
-var ch = try zsync.channels.bounded(i32, allocator, 10);
-defer ch.deinit();
-try ch.send(42);
-const value = try ch.recv();
+const ch = try zsync.channel.mpsc.bounded(i32, allocator, 10);
+defer {
+    ch.channel.deinit();
+    allocator.destroy(ch.channel);
+}
+try ch.sender.send(42);
+const value = try ch.receiver.recv();
 _ = value;
 ```
 
 ### Timer Operations
 
 ```zig
-zsync.sleep(1000); // Sleep for 1 second
-zsync.yieldNow();  // Cooperative yield
+zsync.time.sleep(1000); // Sleep for 1 second
+zsync.time.yieldNow();  // Cooperative yield
 ```
 
 ### Future Combinators
 
-Future combinators are currently experimental for `v0.8.1`. Prefer the supported core runtime surface for stable downstream code.
+`selectFuture`, `selectTimeout`, `selectCancellable`, `allFutures`, and
+`anyFuture` operate on zsync's generic `Future(T)` helper. `std.Io.Future`
+values should still be awaited with the active `Io` handle.
 
 ## Platform Support
 
@@ -187,16 +209,19 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Documentation
 
-- [Docs Index](docs/readme.md)
-- [Getting Started](docs/getting-started.md)
-- [API Reference](docs/api-reference.md)
-- [Examples](docs/examples.md)
-- [Architecture](docs/architecture.md)
-- [Experimental Features](docs/experimental-features.md)
-- [Future Roadmap](docs/future-roadmap.md)
-- [Performance](docs/performance.md)
-- [Integration](docs/integration.md)
-- [WASM Features](docs/wasm/wasm-features.md)
+- [Docs Index](docs/README.md)
+- [Getting Started](docs/getting-started/quickstart.md)
+- [API Reference](docs/reference/api.md)
+- [Examples](docs/guides/examples.md)
+- [Architecture](docs/internals/architecture.md)
+- [Architecture Diagrams](docs/internals/diagrams.md)
+- [Experimental Features](docs/roadmap/experimental-features.md)
+- [Future Roadmap](docs/roadmap/future-roadmap.md)
+- [Performance](docs/guides/performance.md)
+- [Integration](docs/guides/integration.md)
+- [Security](docs/security/policy.md)
+- [WASM Features](docs/platforms/wasm.md)
+- [WASM Host ABI](docs/platforms/wasm-host-abi.md)
 
 ## Links
 

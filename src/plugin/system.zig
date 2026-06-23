@@ -379,6 +379,25 @@ test "plugin lifecycle" {
     try testing.expectEqual(PluginState.unloaded, plugin.getState());
 }
 
+test "plugin load hook failure marks failed" {
+    const testing = std.testing;
+
+    const Hooks = struct {
+        fn failLoad(_: *Plugin) anyerror!void {
+            return error.BadMetadata;
+        }
+    };
+
+    var plugin = try Plugin.init(testing.allocator, .{
+        .name = "bad-plugin",
+        .version = "1.0.0",
+    }, "/path/to/bad-plugin", .{ .on_load = Hooks.failLoad });
+    defer plugin.deinit();
+
+    try testing.expectError(error.BadMetadata, plugin.load());
+    try testing.expectEqual(PluginState.failed, plugin.getState());
+}
+
 test "plugin manager" {
     const testing = std.testing;
 
@@ -431,4 +450,14 @@ test "plugin discovery and loadDirectory" {
 
     try testing.expect(manager.getPlugin("alpha") != null);
     try testing.expect(manager.getPlugin("beta") != null);
+}
+
+test "plugin discovery reports missing directory" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var runtime = Runtime.init(allocator, .{});
+    defer runtime.deinit();
+
+    try testing.expectError(error.FileNotFound, discoverPlugins(allocator, runtime.io(), "missing-zsync-plugin-dir"));
 }

@@ -23,7 +23,9 @@ zig build http-server
 | [spawn_basic.zig](spawn_basic.zig) | Task spawning with `spawn` / `spawnOn` |
 | [semaphore.zig](semaphore.zig) | Semaphore usage |
 | [executor.zig](executor.zig) | Executor patterns |
+| [process_runner.zig](process_runner.zig) | `std.Io`-backed process output capture |
 | [high_performance_server.zig](high_performance_server.zig) | HTTP server on `std.Io.net` |
+| [wasm_host_adapter.js](wasm_host_adapter.js) | Concrete WASM host ABI adapter skeleton |
 
 ## Quick Start
 

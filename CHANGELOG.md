@@ -2,6 +2,96 @@
 
 All notable changes to zsync will be documented in this file.
 
+## [Unreleased] - Production Hardening
+
+### Added
+- `zsync.process.Command.output(io)` and `spawn(io)` now wrap Zig's
+  `std.process.run/spawn` with explicit `std.Io`, output limits, timeouts,
+  wait/kill, and owned output cleanup.
+- `zsync.signal` now installs POSIX signal counters for `interrupt`,
+  `terminate`, and `hangup`, with nonblocking, timeout, and cancellation wait
+  helpers. Unsupported targets keep explicit `error.Unsupported` boundaries.
+- `zsync.tokio_sync.Notify` gained timeout and cancellation wait helpers.
+- Runtime-integrated sync wrappers: `IoSemaphore`, `IoMutex`, `IoRwLock`, and
+  `IoWaitGroup` use Zig's `std.Io` wait/futex/condition primitives instead of
+  the legacy blocking compatibility layer.
+- `zsync.net.TcpStream.connectTimeout`, `readTimeout`, `shutdown`, and
+  `UdpSocket.recvFromTimeout` expose timeout-capable operations already present
+  in Zig's `std.Io.net`.
+- `examples/process_runner.zig` demonstrates `std.Io`-backed output capture.
+- `examples/wasm_host_adapter.js` provides a concrete host-import adapter
+  skeleton for browser/native WASM embedders.
+- Native `TlsStream` now wraps Zig std's `std.crypto.tls.Client`, and
+  `HttpClient.request` can use it for `https://` URIs with certificate and host
+  verification enabled by default.
+- TLS configuration now supports explicit verification modes, custom PEM CA
+  bundle paths, self-signed verification, and captured TLS alert details on
+  failed handshakes.
+
+### Documentation
+- WASM positioning is now host-ABI first: zsync defines the guest ABI and
+  expects browser, WASI, or native adapters to provide the host imports.
+- Native TLS backend choice and unsupported advanced options are documented;
+  WASM TLS remains host-terminated through the ABI.
+
+## [v0.8.4] - 2026-06-23 - Runtime-Facing Hardening
+
+Hardens the user-facing runtime primitives added during the `std.Io` rebase:
+HTTP/TLS boundaries, canonical WebSockets, timeout/cancellation behavior, and
+WASM host ABI documentation.
+
+### Fixed
+- `TlsStream` no longer pretends plaintext reads/writes are encrypted. Native
+  TLS is backed by Zig std TLS for the default client path and returns hard
+  errors for unsupported client certificates, client keys, and cipher-suite
+  overrides.
+- `HttpClient.request` now sends origin-form request paths, emits `Host`, uses
+  default headers, and adds `Connection: close` / `Content-Length` defaults
+  where appropriate.
+- HTTP responses are read to completion using `Content-Length` or connection
+  close with header/body limits instead of a single 8 KiB read.
+- `HttpResponse.parseResponse` now duplicates status text, headers, and body
+  into response-owned storage released by `deinit`.
+- Root WebSocket exports now point at the RFC 6455 implementation in
+  `src/net/websocket.zig`; stale `V2` aliases were removed.
+- WebSocket frame parsing now rejects invalid opcodes, wrong masking direction,
+  oversized or fragmented control frames, invalid text UTF-8, and invalid
+  fragmented message ordering.
+- `Nursery.wait()` now reports the first task error observed from nursery tasks
+  instead of silently discarding it.
+
+### Added
+- Tokio-style facade modules: `zsync.task`, `zsync.time`, and `zsync.net`.
+  These provide scan-friendly namespaces over `std.Io` and existing zsync
+  primitives without replacing the explicit-Io model.
+- `zsync.net.TcpStream`, `zsync.net.TcpListener`, and `zsync.net.UdpSocket`
+  wrappers for explicit-`std.Io` networking entry points.
+- `src/tokio_sync.zig`, moving root-only Tokio sync helpers
+  (`BroadcastChannel`, `WatchChannel`, `Notify`, `OnceCell`,
+  `CancellationToken`) behind a module while keeping root compatibility exports.
+- `zsync.channel.mpsc` and `zsync.channel.oneshot` facades for split
+  sender/receiver and single-value channel usage.
+- `zsync.process` and `zsync.signal` namespaces with explicit
+  `error.Unsupported` boundaries for future async process/signal integration.
+- `zsync.compat`, a public home for legacy/advisory APIs such as
+  `RuntimeBuilder`, priority spawn hints, and older example helpers. Root
+  aliases remain for existing consumers.
+- HTTP loopback tests for origin-form requests, default headers, response bodies
+  larger than 8 KiB, malformed status lines, and invalid URI handling.
+- WebSocket loopback protocol-error tests for masking, control-frame length,
+  invalid UTF-8 text, and fragmented ordering.
+- Timeout variants for bounded/unbounded channels, broadcast/watch waits,
+  `Semaphore.acquire`, and `WaitGroup.wait`.
+- Token-aware cancellation helpers for select, sleep, channels, broadcast, and
+  watch waits.
+- `src/join_set.zig`, extracting `JoinSet` out of `root.zig` while preserving
+  the existing thread-backed blocking-work behavior.
+- `docs/platforms/wasm-host-abi.md`, documenting the required WASM host imports and
+  ownership rules.
+
+### Verification
+- `zig build release --summary all` (33/33 steps, 143/143 tests passing)
+
 
 ## [v0.8.3] - 2026-06-02 - std.Io Rebase
 

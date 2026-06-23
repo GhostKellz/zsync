@@ -126,7 +126,7 @@ const ServerTask = struct {
         while (true) {
             const stream = server.accept(io) catch |err| switch (err) {
                 error.WouldBlock => {
-                    zsync.yieldNow();
+                    zsync.time.yieldNow();
                     continue;
                 },
                 else => return err,
